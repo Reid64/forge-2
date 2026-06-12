@@ -546,6 +546,22 @@ async function runCommandCheck(
 
 /** Default git file-change source: the current branch's diff against main (Contract 10). */
 async function defaultGetFileChanges(cwd: string, log: (m: string) => void): Promise<GitFileChange[] | null> {
+  // The File-Integrity diff is `main...HEAD`. When no `main` branch exists yet (a fresh repo, or one
+  // that simply never created one) that diff would error and falsely FAIL the gate. Detect the absence
+  // FIRST and SKIP the check (return null → evaluateFileIntegrity skips), warning rather than failing
+  // (Iron Law 3 — never fabricate a failure from an absent precondition).
+  try {
+    const { stdout } = await execAsync('git branch --list main', { cwd, windowsHide: true });
+    if (String(stdout ?? '').trim() === '') {
+      log('WARNING: no `main` branch exists — skipping File Integrity check (git diff main...HEAD not runnable)');
+      return null;
+    }
+  } catch (error) {
+    // git unavailable / not a repo — also un-evaluable; skip rather than fail.
+    log(`WARNING: could not check for a \`main\` branch (${describe(error)}) — skipping File Integrity check`);
+    return null;
+  }
+
   const git = new GitManager({ cwd, log: (m) => log(`git: ${m}`) });
   const diff = git.getBranchDiff();
   if (!diff.success) return null;
