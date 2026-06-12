@@ -1,0 +1,25 @@
+{
+  "name": "test-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A task management app with user authentication, task CRUD, and a dashboard. (FORGE 2.0 integration-test fixture.)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@supabase/supabase-js": "^2.47.10",
+    "@supabase/ssr": "^0.5.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12"
+  }
+}

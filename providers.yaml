@@ -1,0 +1,56 @@
+# FORGE 2.0 — Provider free-tier & rate-limit configuration.
+#
+# Loaded by src/engine/free-tier-manager.ts (FreeTierManager.create). Every field is
+# optional; anything omitted falls back to DEFAULT_PROVIDER_SETTINGS. Override the file
+# location with FORGE_PROVIDERS_FILE, or place a providers.yaml in the working directory.
+#
+# Per provider:
+#   paid       — does this provider have a PAID tier to fall back to once free is gone?
+#   priority   — ordering among FREE-tier providers (lower = tried first)
+#   freeTier   — daily quota: { dailyCalls, dailyTokens } (null on a field = no cap); or
+#                the literal `null` for a paid-only provider
+#   rateLimit  — short-term ceiling: { requestsPerMinute, tokensPerMinute } (null = none)
+#   pricing    — list rate (USD / 1M tokens) used to ESTIMATE dollars saved (Iron Law 3)
+
+providers:
+  gemini:
+    paid: true
+    priority: 10
+    freeTier:
+      dailyCalls: 1500
+      dailyTokens: null
+    rateLimit:
+      requestsPerMinute: 15
+      tokensPerMinute: 1000000
+    pricing:
+      inputPerMTok: 0.075
+      outputPerMTok: 0.3
+
+  openai:
+    paid: true
+    priority: 30
+    freeTier: null
+    rateLimit:
+      requestsPerMinute: 500
+      tokensPerMinute: 200000
+    pricing:
+      inputPerMTok: 0.15
+      outputPerMTok: 0.6
+
+  deepseek:
+    paid: true
+    priority: 40
+    freeTier: null
+    rateLimit: null
+    pricing:
+      inputPerMTok: 0.14
+      outputPerMTok: 0.28
+
+  anthropic:
+    paid: true
+    priority: 50
+    freeTier: null
+    rateLimit: null
+    pricing:
+      inputPerMTok: 3
+      outputPerMTok: 15

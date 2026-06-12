@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# FORGE runtime state (machine-specific)
+state/
+reports/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Docker local DB data (named volumes live in Docker, but ignore any bind data)
+# NOTE: docker/volumes/api/kong.yml and docker/volumes/db/*.sql ARE committed config.
+docker/volumes/db/data/
+docker/volumes/storage/
+docker/data/
+docker/.env

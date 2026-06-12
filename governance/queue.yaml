@@ -1,0 +1,649 @@
+# FORGE 2.0 Build Queue
+# Executed by FORGE 1.0 via Claude Code CLI
+# Each prompt uses: claude -p --dangerously-skip-permissions
+# Working directory: C:\Users\manag\Documents\forge-2
+
+# ============================================================
+# SPRINT 1: Build Memory Layer (Est. 3-5 hours)
+# ============================================================
+
+- id: s1-p01
+  name: "Project Initialization"
+  description: |
+    Initialize the FORGE 2.0 project. Create the project directory, initialize pnpm,
+    install core dependencies (typescript, @supabase/supabase-js, js-yaml, commander, 
+    chalk, ora, glob, playwright), configure tsconfig.json with strict mode (NO baseUrl),
+    create the complete directory structure from BLUEPRINT.md, create .env.example,
+    create .gitignore, initialize git repo. Do NOT use baseUrl in tsconfig.
+    Create src/types/index.ts with all TypeScript interfaces for: BuildRun, PromptExecution,
+    ErrorPattern, Resolution, GovernanceVersion, SelfCreatedAgent, CrossProjectInsight,
+    ProductionTelemetry, StackProfile, DesignPattern, BrandIdentity.
+    Every interface must match the SCHEMA_REGISTRY.md exactly.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s1-p02
+  name: "Docker Compose for Self-Hosted Supabase"
+  description: |
+    Create docker/docker-compose.yml for self-hosted Supabase. Include services:
+    postgres (v15), postgrest, gotrue, storage, realtime, kong, supabase-studio.
+    Use the official Supabase self-hosting docker-compose as reference.
+    Generate secure default passwords and JWT secrets.
+    Create a PowerShell script docker/start-forge-db.ps1 that:
+    1. Checks if Docker Desktop is running, starts it if not
+    2. Runs docker compose up -d from the docker/ directory
+    3. Waits for health check on localhost:54321
+    4. Prints connection info
+    Create docker/stop-forge-db.ps1 to stop the services.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s1-p03
+  name: "Database Migrations"
+  description: |
+    Create all SQL migration files in migrations/ directory. Each file creates one table
+    from SCHEMA_REGISTRY.md with ALL columns, types, constraints, indexes, and foreign keys.
+    Files: 001_build_runs.sql, 002_error_patterns.sql, 003_resolutions.sql,
+    004_prompt_executions.sql, 005_governance_versions.sql, 006_self_created_agents.sql,
+    007_cross_project_insights.sql, 008_production_telemetry.sql, 009_stack_profiles.sql,
+    010_design_patterns.sql, 011_brand_identities.sql.
+    Create 012_seed_error_patterns.sql that inserts all 10 pre-loaded error patterns
+    from SCHEMA_REGISTRY.md seed data section with realistic error signatures.
+    Create a PowerShell script migrations/apply-migrations.ps1 that connects to
+    local Supabase and runs all migration files in order.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s1-p04
+  name: "Build Memory Client"
+  description: |
+    Create src/memory/client.ts — Supabase client initialization using env vars
+    FORGE_SUPABASE_URL and FORGE_SUPABASE_SERVICE_KEY.
+    Create CRUD modules for every table:
+    - src/memory/builds.ts: createBuild, updateBuild, getBuild, listBuilds, getBuildsByProject
+    - src/memory/prompts.ts: createPromptExecution, updatePromptExecution, getPromptsByBuild
+    - src/memory/errors.ts: createErrorPattern, findMatchingPattern, updateOccurrenceCount, getAutoResolvable
+    - src/memory/resolutions.ts: createResolution, getResolutionForPattern, incrementApplied
+    - src/memory/governance.ts: createVersion, getLatestVersion, getVersionHistory
+    - src/memory/agents.ts: createAgent, approveAgent, listAgents, getActiveAgents
+    - src/memory/insights.ts: createInsight, findApplicableInsights, incrementApplied
+    - src/memory/telemetry.ts: createEvent, getEventsByProject, getCriticalEvents
+    - src/memory/profiles.ts: createProfile, getProfile, listProfiles
+    - src/memory/patterns.ts: createPattern, findPatterns, incrementUsage
+    - src/memory/brands.ts: createBrand, getBrandByProject, updateBrand
+    Every function must have proper TypeScript types from src/types/index.ts.
+    Every function must handle errors gracefully (log warning, return null — never crash FORGE).
+    Create src/memory/index.ts that exports all modules as a unified BuildMemory object.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s1-p05
+  name: "Build Memory Integration Test"
+  description: |
+    Create tests/memory.test.ts using Node.js built-in test runner (node:test).
+    Test every CRUD function in Build Memory against the live local Supabase.
+    Tests must: create a build_run, create prompt_executions linked to it,
+    create an error_pattern, create a resolution linked to it,
+    query matching patterns, verify seed data exists (10 pre-loaded patterns).
+    Create a PowerShell script tests/run-tests.ps1 that:
+    1. Verifies Docker Supabase is running
+    2. Runs pnpm tsc --noEmit
+    3. Runs node --test tests/memory.test.ts
+    4. Reports pass/fail
+    Run the test and ensure it passes.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 2: Phase 0 — Toolchain Scout (Est. 2-3 hours)
+# ============================================================
+
+- id: s2-p01
+  name: "Stack Detector"
+  description: |
+    Create src/tools/stack-detector.ts.
+    Given a project path, detect the technology stack by reading:
+    - package.json (framework, dependencies)
+    - tsconfig.json (TypeScript config)
+    - next.config.* (Next.js)
+    - vercel.json (Vercel deployment)
+    - .env* files (service integrations: Supabase, Stripe, Claude, etc.)
+    - docker-compose.yml (Docker services)
+    - Any existing BLUEPRINT.md or PRD.md
+    Output a StackFingerprint object: { framework, language, database, deployment,
+    packageManager, services[], cliTools[] }.
+    Handle missing files gracefully — partial detection is valid.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s2-p02
+  name: "Environment Auditor"
+  description: |
+    Create src/tools/env-auditor.ts.
+    Given a StackFingerprint, determine required environment variables and CLI tools.
+    Check which are present and which are missing.
+    For CLI tools: check pnpm, node, git, vercel, claude, playwright, supabase, docker
+    using `where.exe` or `Get-Command` in PowerShell.
+    For env vars: check .env files and process.env for required keys (masked values in output).
+    For Docker: check if Docker Desktop is running, if FORGE Supabase is up.
+    Output an EnvironmentAudit: { present[], missing[], warnings[], dockerStatus }.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s2-p03
+  name: "Phase 0 Scout Orchestrator"
+  description: |
+    Create src/phases/phase0-scout.ts.
+    Orchestrates the full Phase 0 sequence:
+    1. Run stack-detector on target project path
+    2. Run env-auditor with detected stack
+    3. Query Build Memory for cached configs on this machine
+    4. Attempt auto-install for missing tools (pnpm install -g for npm tools)
+    5. Attempt auto-fix for known issues (PATH fix, execution policy)
+    6. Generate TOOLCHAIN.md content with locked versions, skill manifest, env checklist
+    7. Register machine_id in Build Memory if not already registered
+    8. Return Phase0Result: { stackFingerprint, environmentAudit, toolchainManifest, 
+       passed: boolean, blockers[] }
+    If blockers exist (critical missing tools), passed = false and FORGE halts.
+    Write TOOLCHAIN.md to target project governance directory.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 3: Phase 1 — Intelligence Engine (Est. 4-6 hours)
+# ============================================================
+
+- id: s3-p01
+  name: "Codebase Reader"
+  description: |
+    Create src/tools/codebase-reader.ts.
+    Given a project path, read and catalog the entire codebase:
+    - File tree (excluding node_modules, .git, .next)
+    - For each .ts/.tsx/.js/.jsx file: extract exports, component names, function signatures
+    - For each migration file: extract table names and columns
+    - package.json dependencies
+    - Route structure (pages/ or app/ directory for Next.js)
+    - Existing governance documents (if any)
+    Output a CodebaseSnapshot: { fileTree, components[], routes[], schema[], 
+    dependencies[], governanceDocs[], stats: { totalFiles, totalLines } }.
+    This is used by Phase 1C for partial build ingestion.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s3-p02
+  name: "Schema Extractor"
+  description: |
+    Create src/tools/schema-extractor.ts.
+    Given a project path or Supabase connection, extract the current database schema:
+    - From migration SQL files: parse CREATE TABLE, ALTER TABLE, CREATE INDEX
+    - From live Supabase (if connected): query information_schema.tables, columns, 
+      constraints, pg_indexes
+    - Extract RLS policies from pg_policies
+    Output a SchemaSnapshot: { tables[], relationships[], indexes[], rlsPolicies[] }.
+    Each table includes: name, columns (name, type, nullable, default, constraints),
+    primary key, foreign keys.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s3-p03
+  name: "Phase 1C: Current State Ingestion"
+  description: |
+    Create src/phases/phase1c-ingest.ts.
+    For partial builds, produces a ConstraintManifest:
+    1. Run codebase-reader on the project
+    2. Run schema-extractor on the project
+    3. Classify each component: immutable (keep), extensible (can add to), flagged (anti-pattern)
+    4. Generate constraint manifest with:
+       - Existing schema tables (immutable)
+       - Existing routes (immutable)
+       - Existing components (immutable)
+       - Existing design tokens (immutable)
+       - Available extension points (where new code can be added)
+       - Flagged patterns (potential issues for human review)
+    Output ConstraintManifest type with all classifications.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s3-p04
+  name: "PRD Generator (Phase 1A)"
+  description: |
+    Create src/phases/phase1a-prd.ts.
+    Takes raw idea input (string) and produces a complete PRD.
+    Uses Claude API (claude-sonnet-4-6-20250514) with a structured system prompt that:
+    1. Parses the idea for core concept, target users, key features, business model
+    2. Queries Build Memory for similar projects (by stack fingerprint similarity)
+    3. Decomposes features into granular capabilities with user actions, system actions,
+       data changes, and feedback
+    4. Generates edge cases for every feature
+    5. Assembles structured PRD with: executive summary, user personas, feature specs
+       (with interaction-level detail), data model overview, integration requirements,
+       success metrics, scope boundaries
+    Uses Build Memory patterns to fill gaps with proven defaults.
+    Output: { prd: string (markdown), metadata: { featureCount, tableEstimate, agentEstimate } }.
+    PRD is written to target project as PRD.md.
+    Build halts after this for Gate 1 human approval.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s3-p05
+  name: "Architecture Engine (Phase 1B)"
+  description: |
+    Create src/phases/phase1b-architect.ts.
+    Takes approved PRD + optional ConstraintManifest and produces complete design artifacts.
+    Uses Claude API with specialized system prompts for each artifact type.
+    Must handle context window limits by chunking: generate each artifact in a separate
+    Claude call with a state summary from previous calls.
+    Generates ALL of the following (each as a structured object + markdown):
+    1. DatabaseArchitecture: tables, columns, types, constraints, RLS, indexes, seeds, migrations
+    2. APIArchitecture: routes, methods, request/response schemas, auth requirements, errors
+    3. FrontendArchitecture: pages, components, layouts, design tokens, responsive strategy
+    4. InteractionMaps: per-feature maps with user action, frontend reaction, API call,
+       backend processing, DB write, side effects, success/error responses, tracking events
+    5. AuthArchitecture: flows, roles, permissions, middleware, multi-tenancy
+    6. AgentArchitecture: agents, triggers, I/O contracts, orchestration, prompts, budgets
+    7. InfraArchitecture: environments, deploy config, monitoring, performance budgets
+    8. TestingStrategy: Playwright specs, API tests, Six Laws verification plan
+    Cross-validates all artifacts: schema matches API, API matches frontend, frontend
+    matches interaction maps. Flags any inconsistencies.
+    If ConstraintManifest provided, treats immutable items as fixed and designs only extensions.
+    Output: ArchitectureDesign object with all artifacts.
+    Build halts after this for Gate 2 human approval.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 4: Phase 2 — Governance Generator (Est. 2-3 hours)
+# ============================================================
+
+- id: s4-p01
+  name: "Governance Document Generators"
+  description: |
+    Create src/phases/phase2-governance.ts.
+    Takes approved ArchitectureDesign and produces the complete governance package:
+    1. BLUEPRINT.md from system overview + stack + project structure
+    2. SCHEMA_REGISTRY.md from DatabaseArchitecture (every table, column, constraint)
+    3. AGENTS.md from AgentArchitecture (every agent definition)
+    4. BEHAVIORAL_CONTRACTS.md from APIArchitecture + AuthArchitecture + InteractionMaps
+    5. INTERACTION_MAPS.md from InteractionMaps (per-feature interaction specs)
+    6. TESTING.md from TestingStrategy (test plan + generated Playwright code)
+    7. STATE_OF_THE_BUILD.md initialized with Phase 0-2 status
+    8. SESSION_STATE.md initialized empty
+    Each document uses the corresponding template from templates/governance/.
+    Create those templates with standard structure and placeholder markers.
+    All documents written to target project governance directory.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s4-p02
+  name: "Queue Generator"
+  description: |
+    Create src/engine/queue-generator.ts.
+    Takes ArchitectureDesign and produces queue.yaml with:
+    1. Dependency analysis: determine which prompts depend on which
+    2. Parallel marking: independent prompts tagged with `parallel_group` ID
+    3. Standard build order from BEHAVIORAL_CONTRACTS (schema → auth → API → UI → features → agents → dashboards → settings → tests → deploy → verify)
+    4. Each queue entry includes: id, name, description (detailed task), dependencies[], parallel_group (optional), governance_refs[] (which docs this prompt needs), estimated_tokens, prompt_type (schema, auth, api, ui, feature, agent, test, deploy)
+    5. Context injection markers: which SCHEMA_REGISTRY sections, which BEHAVIORAL_CONTRACTS sections, which INTERACTION_MAPS entries to include in the assembled prompt
+    Write queue.yaml to target project directory.
+    Build halts after governance + queue for Gate 3 human approval.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 5: Phase 3+4 — Executor + Sentinel (Est. 3-4 hours)
+# ============================================================
+
+- id: s5-p01
+  name: "Claude Runner and Prompt Assembler"
+  description: |
+    Create src/engine/claude-runner.ts:
+    Wraps Claude Code CLI execution. Spawns child process with:
+    `claude -p --dangerously-skip-permissions`
+    Pipes assembled prompt via stdin. Captures stdout, stderr, exit code.
+    Timeout: 15 minutes. On timeout: kill process, return failure.
+    Returns: { stdout, stderr, exitCode, durationMs, tokensEstimated }.
+    
+    Create src/engine/prompt-assembler.ts:
+    Takes a queue entry + governance docs + Build Memory warnings + Sentinel status.
+    Assembles the complete prompt by:
+    1. Loading the queue entry description
+    2. Appending relevant governance excerpts (based on governance_refs)
+    3. Querying Build Memory for warnings matching this prompt_type and stack
+    4. Appending Sentinel status from previous prompt (if any)
+    5. Appending mandatory footer: "Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit before session ends."
+    Returns assembled prompt string and its SHA-256 hash.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s5-p02
+  name: "Failure Predictor and Prompt Rewriter"
+  description: |
+    Create src/engine/failure-predictor.ts:
+    Given a prompt_type, stack_fingerprint, and prompt_index, query Build Memory
+    error_patterns for matching trigger conditions. Calculate failure probability
+    as: matching_pattern_occurrences / total_builds_with_this_stack_and_type.
+    Return: { probability: number, matchingPatterns: ErrorPattern[], recommendation: string }.
+    
+    Create src/engine/prompt-rewriter.ts:
+    When failure probability > 0.4, rewrite the prompt:
+    1. Query Build Memory for highest success-rate prompt structures for this task type
+    2. Preserve the task objective and governance references
+    3. Restructure the instruction approach based on successful precedents
+    4. Inject prevention rules from matching error patterns
+    5. Log original hash, rewritten hash, and rewrite reason
+    Return: { rewrittenPrompt: string, reason: string, originalHash: string }.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s5-p03
+  name: "Git Manager"
+  description: |
+    Create src/engine/git-manager.ts:
+    Handles all git operations for FORGE builds:
+    - createBranch(buildId, promptIndex, promptName): creates forge/{buildId}/prompt-{index}-{name}
+    - checkout(branchName): switches to branch
+    - commitAll(message): stages all changes and commits
+    - mergeTomain(): merges current branch to main with --no-ff
+    - tagCheckpoint(buildId, promptIndex): creates forge-checkpoint-{buildId}-{index}
+    - rollbackToCheckpoint(tag): resets main to checkpoint tag
+    - getBranchDiff(): returns file changes on current branch vs main
+    - getCurrentBranch(): returns current branch name
+    All operations use child_process.execSync with PowerShell commands.
+    All operations include error handling — git failures are captured, not thrown.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s5-p04
+  name: "Sentinel Health Checker"
+  description: |
+    Create src/phases/phase4-sentinel.ts:
+    Runs after every prompt execution. Performs health checks in order:
+    1. TypeScript: `pnpm tsc --noEmit` — capture output, check exit code
+    2. Build: `pnpm run build` — capture output, check exit code
+    3. File Integrity: compare current file tree to expected (governance docs unchanged,
+       no unexpected deletions). Use git diff --name-status.
+    4. Schema Drift: if schema prompts have run, compare DB state (via schema-extractor)
+       against SCHEMA_REGISTRY.md. Flag additions (ok) and modifications/deletions (fail).
+    5. Dependency Check: compare current package.json dependencies against TOOLCHAIN.md
+       manifest. Flag any new dependencies not in manifest.
+    Returns SentinelResult: { passed: boolean, checks: CheckResult[], failedCheck: string | null,
+    diagnosticReport: string }.
+    If ANY check fails: generate diagnostic report with full error context.
+    
+    Create Autonomous Recovery logic:
+    If autonomousRecoveryMode enabled AND matching error pattern with success_rate > 0.90:
+    - Apply resolution automatically
+    - Re-run the prompt
+    - Re-run Sentinel
+    - Max 2 auto-recovery attempts per prompt
+    - Log everything to Build Memory
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s5-p05
+  name: "Phase 3 Build Executor Orchestrator"
+  description: |
+    Create src/phases/phase3-executor.ts:
+    The main build execution loop:
+    1. Parse queue.yaml into ordered prompt list
+    2. Create build_run in Build Memory (status: running)
+    3. For each prompt (respecting dependency order):
+       a. Check dependencies completed
+       b. Run failure-predictor
+       c. If probability > 0.4: run prompt-rewriter
+       d. Assemble prompt via prompt-assembler
+       e. Create feature branch via git-manager
+       f. Execute via claude-runner
+       g. Log prompt_execution to Build Memory
+       h. Run Sentinel (phase4-sentinel)
+       i. If Sentinel passes: merge to main, tag checkpoint
+       j. If Sentinel fails: halt or auto-recover
+       k. Update STATE_OF_THE_BUILD.md
+    4. On completion: update build_run status
+    
+    Create src/engine/parallel-scheduler.ts:
+    Analyzes queue.yaml dependencies to identify parallel groups.
+    Prompts with no mutual dependencies can run simultaneously.
+    For parallel execution: spawn multiple claude-runner instances,
+    each on its own branch. Merge all to main after all pass Sentinel.
+    Note: parallel execution is Phase 2 of FORGE 2.0 usage, not Sprint 1.
+    For now, implement the dependency analysis and parallel group identification.
+    Sequential execution is the default.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 6: Phase 5 — Recursive Learner (Est. 3-4 hours)
+# ============================================================
+
+- id: s6-p01
+  name: "Pattern Extractor"
+  description: |
+    Create src/analysis/pattern-extractor.ts:
+    After a build completes, analyze all prompt_executions for patterns:
+    
+    Error Patterns:
+    - Group errors by normalized signature (strip paths, lines, timestamps)
+    - Calculate occurrence rate per stack fingerprint
+    - Identify trigger conditions (prompt type, prompt index range)
+    
+    Timing Patterns:
+    - Average execution time per prompt_type
+    - Variance and outliers
+    - Correlation between prompt complexity and time
+    
+    Success Patterns:
+    - Prompt structures with highest success rates
+    - Governance sections that correlated with fewer errors
+    - Rewrite patterns that improved outcomes
+    
+    Cost Patterns:
+    - Average token cost per prompt_type
+    - Total build cost by project complexity (table count, feature count)
+    
+    Output: ExtractedPatterns with error_patterns[], timing_patterns[],
+    success_patterns[], cost_patterns[].
+    Store all patterns in Build Memory.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s6-p02
+  name: "Template Evolver"
+  description: |
+    Create src/analysis/template-evolver.ts:
+    Analyzes Build Memory across all completed builds to propose governance improvements:
+    1. Load all governance_versions with effectiveness_scores
+    2. Identify templates/sections with declining effectiveness
+    3. Identify templates/sections never referenced by build agents
+    4. Correlate template versions with build success rates
+    5. Generate proposed changes with:
+       - Exact text diff (old → new)
+       - Evidence (which builds, what metrics)
+       - Expected improvement
+    6. Store proposals as governance_versions with change_source = 'recursive_learner'
+    
+    Create src/analysis/cost-estimator.ts:
+    Given a stack fingerprint and feature list, predict:
+    - Total prompts needed
+    - Total tokens (based on Build Memory averages per prompt_type)
+    - Total dollar cost
+    - Total execution time
+    - Predicted failure count (based on error pattern frequency)
+    Output: BuildEstimate with all predictions and confidence intervals.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s6-p03
+  name: "Agent Creator"
+  description: |
+    Create src/analysis/agent-creator.ts:
+    Identifies recurring task patterns and creates new agents:
+    1. Analyze prompt_executions across builds for repeated multi-step sequences
+    2. If a 2+ step sequence appears in 3+ builds with no dedicated handler:
+       a. Design agent spec: name, purpose, triggers, I/O contracts
+       b. Generate TypeScript implementation using Claude API
+       c. Test against historical data (replay the pattern with the new agent)
+       d. Store as self_created_agent with status 'proposed'
+    3. Generate human-readable proposal document with:
+       - Agent name and purpose
+       - Implementation code
+       - Test results
+       - Projected impact on future builds
+    
+    Create src/phases/phase5-learner.ts:
+    Orchestrates the full Phase 5 sequence:
+    1. Run pattern-extractor on the completed build
+    2. Run template-evolver to check for governance improvements
+    3. Run agent-creator to check for new agent opportunities
+    4. Generate cross_project_insights for applicable stack fingerprints
+    5. Produce Phase 5 summary report
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 7: Advanced Capabilities (Est. 2-3 hours)
+# ============================================================
+
+- id: s7-p01
+  name: "Six Laws Automated Verifier"
+  description: |
+    Create src/analysis/six-laws-verifier.ts:
+    Automated verification of 5 of 6 Laws after build completion:
+    
+    Law 1 - SCHEMA: Connect to Supabase, query information_schema.
+    Verify every table in SCHEMA_REGISTRY.md exists with correct columns and types.
+    Verify RLS policies exist on every table.
+    
+    Law 2 - API: For every route in BEHAVIORAL_CONTRACTS.md, send an HTTP request
+    and verify response status code and shape matches contract.
+    
+    Law 3 - UI: Use Playwright to visit every page route. Check for:
+    - No "coming soon", "placeholder", "TODO", "lorem ipsum" text
+    - All specified interactive elements exist (buttons, forms, dropdowns)
+    - Pages render without console errors
+    
+    Law 4 - DATA: During Playwright page visits, intercept network requests.
+    Verify real API calls are made (not hardcoded data, no mock responses).
+    
+    Law 5 - WIRING: Playwright tests:
+    - Every nav link navigates correctly
+    - Form submissions trigger correct API calls
+    - Role-based access restricts unauthorized routes
+    
+    Output: SixLawsResult with per-law pass/fail + details.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s7-p02
+  name: "Build Replay and Dry Run"
+  description: |
+    Create replay logic in src/phases/phase3-executor.ts:
+    Add `replay` mode that:
+    1. Takes a build_run_id and a starting checkpoint tag
+    2. Rolls back to that checkpoint
+    3. Reloads governance (may have been modified)
+    4. Re-executes queue from that prompt index forward
+    5. Treats it as a new build_run linked to the original
+    
+    Create dry-run logic:
+    Add `dryRun` mode that:
+    1. Runs Phase 0 (real environment check)
+    2. Runs Phase 1 (real design generation)
+    3. Runs Phase 2 (real governance generation)
+    4. For Phase 3: assembles every prompt but does NOT execute
+    5. Runs failure-predictor on every prompt
+    6. Runs cost-estimator for the full build
+    7. Produces simulation report: predicted prompts, predicted errors,
+       predicted cost, predicted time
+    8. No tokens consumed for build execution
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s7-p03
+  name: "Project Autopsy + Resurrection"
+  description: |
+    Create src/tools/project-autopsy.ts:
+    Given a failed/abandoned project path:
+    1. Run codebase-reader to catalog everything
+    2. Run schema-extractor to get DB state
+    3. Analyze code quality: count TODO/FIXME/placeholder text, empty functions,
+       mock data, commented-out code, unused imports
+    4. Classify files: keep (quality code), refactor (concept ok, impl bad), discard (broken)
+    5. Extract architectural intent from file structure, naming, existing docs
+    6. Diagnose failure: missing features, broken integrations, incomplete implementations
+    7. Produce AutopsyReport: { intent, diagnosis, salvageAssessment, reconstructionInputs }
+    
+    Integration with Phase 1A: when Phase 1A receives an AutopsyReport as input
+    instead of raw idea text, it generates a PRD that preserves salvageable elements
+    and redesigns the rest. This feeds normally into Phase 1B → 2 → 3.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+# ============================================================
+# SPRINT 8: CLI + Post-Deploy + Integration (Est. 2-3 hours)
+# ============================================================
+
+- id: s8-p01
+  name: "FORGE CLI"
+  description: |
+    Create src/cli/index.ts as the main entry point using commander:
+    
+    Commands:
+    - `forge build <path> [--idea "text"] [--prd path] [--autonomous-recovery] [--dry-run]`
+      Full build pipeline: Phase 0 → 1 → 2 → 3 → 4 → 5
+    - `forge scout <path>` — Run Phase 0 only
+    - `forge design <path> --idea "text"` — Run Phase 0 + 1 only (PRD + Architecture)
+    - `forge resume <build-id>` — Resume a halted build from last checkpoint
+    - `forge replay <build-id> --from <prompt-index>` — Replay from checkpoint
+    - `forge status [build-id]` — Show build status from Build Memory
+    - `forge history [--project name]` — List past builds
+    - `forge patterns` — Show known error patterns and success rates
+    - `forge agents` — List self-created agents and their status
+    - `forge resurrect <path>` — Run Project Autopsy on failed project
+    - `forge estimate <path> --idea "text"` — Cost/time estimate without building
+    
+    Use chalk for colored output, ora for spinners during long operations.
+    Create src/cli/config.ts for loading .env and configuration.
+    Add `"bin": { "forge": "./dist/cli/index.js" }` to package.json.
+    Add build script: `"build": "tsc"` and `"forge": "node dist/cli/index.js"`.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s8-p02
+  name: "Post-Deploy Monitoring Agent"
+  description: |
+    Create src/monitoring/deploy-agent.ts:
+    Generates a lightweight monitoring snippet that gets injected into built applications.
+    The snippet:
+    1. Catches unhandled errors and reports: error message, stack trace, URL, timestamp
+    2. Measures page load time and reports if > 3s
+    3. Reports API call failures (non-2xx responses)
+    4. Sends telemetry to a configurable endpoint (FORGE telemetry receiver)
+    
+    Create src/monitoring/telemetry-receiver.ts:
+    An Express-compatible route handler that:
+    1. Receives telemetry POST requests from deployed apps
+    2. Validates payload structure
+    3. Writes to production_telemetry table in Build Memory
+    4. For critical errors: logs to console with project name
+    
+    The receiver can run as a simple Node.js server alongside FORGE,
+    or be deployed as a Vercel serverless function.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s8-p03
+  name: "Documentation Generator"
+  description: |
+    Create src/tools/doc-generator.ts:
+    After a build completes, auto-generate:
+    1. README.md: project name, description, tech stack, setup instructions,
+       environment variables, build commands, deployment steps
+    2. API.md: every endpoint with method, path, auth requirements,
+       request body example, response example, error codes
+    3. SCHEMA.md: every table with columns, types, relationships,
+       RLS policies described in plain language
+    4. DEPLOY.md: step-by-step deployment guide with deploy.ps1 usage
+    
+    All generated from the governance documents + actual codebase state.
+    Written to the target project's docs/ directory.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+
+- id: s8-p04
+  name: "Integration Test — Full Pipeline"
+  description: |
+    Create a test project: tests/test-project/ with a simple idea:
+    "A task management app with user authentication, task CRUD, and a dashboard."
+    
+    Run the FULL FORGE 2.0 pipeline against this test project:
+    1. forge scout tests/test-project/ — verify Phase 0 passes
+    2. forge design tests/test-project/ --idea "task management app" — verify PRD + Architecture generated
+    3. Manually approve Gates 1-3 (auto-approve for test)
+    4. forge build tests/test-project/ --dry-run — verify dry run produces simulation
+    5. Verify Build Memory has records for all operations
+    6. Verify error patterns are queryable
+    7. Verify cost estimation produces reasonable numbers
+    
+    Run `pnpm tsc --noEmit` on the entire FORGE 2.0 codebase.
+    Run `pnpm run build` to verify compilation.
+    Create deploy.ps1 for FORGE 2.0 itself (git add, commit, push to Reid64/forge-2).
+    Push all code to GitHub.
+    
+    Produce final STATE_OF_THE_BUILD.md with:
+    - All sprints completed
+    - All phases implemented
+    - Known limitations
+    - Next steps (first live build target: TARRITRIX)
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
