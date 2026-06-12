@@ -1694,6 +1694,16 @@ export async function runPhase1bArchitect(
   tokensOutput += testGen.tokensOutput;
   const testing = testGen.artifact;
 
+  // Hard gate: a completely empty architecture (no tables, no routes, no pages) means
+  // every core artifact degraded to a fallback skeleton — almost always a missing/invalid
+  // API key or an unavailable model. Fail loudly here so an empty design never silently
+  // passes to the queue generator.
+  if (database.tables.length === 0 && api.routes.length === 0 && frontend.pages.length === 0) {
+    throw new Error(
+      'Architecture produced no tables, routes, or pages. Check API keys and model availability.'
+    );
+  }
+
   // 4. Cross-validate the artifacts against one another.
   log('cross-validating artifacts (schema ↔ API ↔ frontend ↔ interaction maps)');
   const crossValidation = crossValidate(database, api, frontend, interactionMaps, manifest);
