@@ -598,25 +598,76 @@ function asStringRecord(value: unknown): Record<string, string> {
   return out;
 }
 
+/** Narrow an arbitrary parsed value to a plain JSON object (not an array), else `null`. */
+function asJsonObject(parsed: unknown): Record<string, unknown> | null {
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
 /**
- * Extract and parse the outermost `{ … }` JSON object from a model response. Tolerates
- * a leading/trailing prose or a ```json fence. Returns `null` if no object parses.
+ * Robustly extract and parse a single JSON object from a model response. The model is
+ * asked for a bare JSON object, but Claude sometimes wraps it in prose or a ```json
+ * fence. Three strategies are tried, in order of fidelity:
+ *
+ *   1. `JSON.parse` on the RAW response — the contracted happy path (no recovery needed).
+ *   2. The first `{` … last `}` substring — recovers an object surrounded by prose.
+ *   3. The JSON inside a ```json … ``` (or bare ```) markdown code fence — recovers a
+ *      fenced object when prose on both sides also contained stray braces.
+ *
+ * Strategy 1 is tried FIRST (before any fence handling) on purpose: a valid response's
+ * `markdown`/`systemPrompt` fields routinely contain ``` fences, so fence-matching a
+ * well-formed object would corrupt it. `warn` is invoked when a recovery strategy (2 or
+ * 3) is used so the operator sees that the model drifted from the bare-JSON contract.
+ * Returns `null` only when no strategy yields a JSON object.
  */
-function extractJson(text: string): Record<string, unknown> | null {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  const haystack = fenced && fenced[1] !== undefined ? fenced[1] : text;
-  const start = haystack.indexOf('{');
-  const end = haystack.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
+function extractJson(
+  text: string,
+  warn?: (message: string) => void
+): Record<string, unknown> | null {
+  // Strategy 1 — the response IS a JSON object (no fallback extraction needed).
   try {
-    const parsed = JSON.parse(haystack.slice(start, end + 1)) as unknown;
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
+    const obj = asJsonObject(JSON.parse(text.trim()) as unknown);
+    if (obj) return obj;
   } catch {
-    return null;
+    // Not bare JSON — fall through to the tolerant recovery strategies.
   }
+
+  // Strategy 2 — first '{' … last '}' substring (object wrapped in leading/trailing prose).
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    try {
+      const obj = asJsonObject(JSON.parse(text.slice(start, end + 1)) as unknown);
+      if (obj) {
+        warn?.('model returned prose around the JSON; recovered the { … } substring (fallback extraction)');
+        return obj;
+      }
+    } catch {
+      // Substring did not parse — fall through to fenced-code extraction.
+    }
+  }
+
+  // Strategy 3 — JSON inside a ```json … ``` (or bare ```) markdown code fence.
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  if (fenced && fenced[1] !== undefined) {
+    const inner = fenced[1];
+    const fStart = inner.indexOf('{');
+    const fEnd = inner.lastIndexOf('}');
+    const candidate =
+      fStart !== -1 && fEnd !== -1 && fEnd > fStart ? inner.slice(fStart, fEnd + 1) : inner.trim();
+    try {
+      const obj = asJsonObject(JSON.parse(candidate) as unknown);
+      if (obj) {
+        warn?.('model wrapped the JSON in a markdown code fence; extracted it via regex (fallback extraction)');
+        return obj;
+      }
+    } catch {
+      // Fenced content did not parse either — give up below.
+    }
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,7 +1330,10 @@ async function generateArtifact<T>(
       user,
       apiKey: ctx.apiKey,
     });
-    const raw = extractJson(response.text);
+    const raw = extractJson(response.text, (m) => {
+      ctx.warnings.push(`${label}: ${m}`);
+      ctx.log(`WARNING: ${label} — ${m}`);
+    });
     if (raw === null) {
       ctx.warnings.push(`${label}: model output was not a JSON object; used a fallback skeleton.`);
       ctx.fallbackArtifacts.push(kind);
