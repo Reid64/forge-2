@@ -1125,6 +1125,15 @@ function summarizeInfra(inf: InfraArchitecture): string {
 // Prompt assembly
 // ---------------------------------------------------------------------------
 
+/**
+ * Final, unmissable output contract appended to the end of EVERY prompt (system and
+ * user). The model has been observed returning prose/Markdown instead of JSON, so this
+ * is repeated verbatim at the tail of each message — the last thing the model reads.
+ */
+const JSON_ONLY_DIRECTIVE =
+  'RESPOND WITH ONLY A VALID JSON OBJECT. NO PROSE. NO EXPLANATION. NO MARKDOWN FENCES. ' +
+  'JUST THE RAW JSON OBJECT STARTING WITH { AND ENDING WITH }.';
+
 /** The shared system-prompt preamble + the per-artifact schema + rules. */
 function buildSystemPrompt(projectName: string, constrained: boolean, artifactSchema: string): string {
   const lines: string[] = [
@@ -1155,6 +1164,8 @@ function buildSystemPrompt(projectName: string, constrained: boolean, artifactSc
   lines.push(artifactSchema);
   lines.push('The "markdown" field MUST be a complete, well-structured Markdown section documenting this');
   lines.push('artifact in full (it becomes part of ARCHITECTURE.md). All other fields must agree with it.');
+  lines.push('');
+  lines.push(JSON_ONLY_DIRECTIVE);
   return lines.join('\n');
 }
 
@@ -1179,6 +1190,8 @@ function buildUserPrompt(
     parts.push(extraContext.trim(), '');
   }
   parts.push(instruction);
+  parts.push('');
+  parts.push(JSON_ONLY_DIRECTIVE);
   return parts.join('\n');
 }
 
@@ -1330,6 +1343,7 @@ async function generateArtifact<T>(
       user,
       apiKey: ctx.apiKey,
     });
+    ctx.log(`${label} raw response (first 200 chars): ${JSON.stringify((response.text ?? '').slice(0, 200))}`);
     const raw = extractJson(response.text, (m) => {
       ctx.warnings.push(`${label}: ${m}`);
       ctx.log(`WARNING: ${label} — ${m}`);
