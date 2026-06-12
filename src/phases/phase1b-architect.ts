@@ -57,7 +57,7 @@
  * logged or returned. No secrets from the target project are read here.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import type { StackFingerprint } from '../tools/stack-detector.js';
@@ -515,7 +515,7 @@ export interface Phase1bOptions {
 export const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 /** Per-artifact generation budget — each artifact is a long structured document. */
-export const DEFAULT_MAX_TOKENS = 8192;
+export const DEFAULT_MAX_TOKENS = 16384;
 
 /**
  * Generation order (for reference): the eight artifacts are produced in dependency
@@ -1322,6 +1322,32 @@ interface GenResult<T> {
 }
 
 /**
+ * When `FORGE_DEBUG` is set, persist the FULL raw model response for one artifact to
+ * `<cwd>/logs/phase1b-<kind>-raw.txt` (option 1 from the truncation/JSON-drift analysis —
+ * full raw-response capture for post-mortem, since `ctx.log` only records the first 200
+ * chars). Guarded: a write failure never affects generation — it degrades to a warning.
+ */
+async function captureRawResponse(
+  kind: ArtifactKind,
+  label: string,
+  text: string,
+  ctx: GenContext
+): Promise<void> {
+  if (!process.env['FORGE_DEBUG']) return;
+  try {
+    const dir = join(process.cwd(), 'logs');
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, `phase1b-${kind}-raw.txt`);
+    await writeFile(file, text, 'utf8');
+    ctx.log(`FORGE_DEBUG: wrote ${label} raw response (${text.length} chars) to ${file}`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    ctx.warnings.push(`${label}: FORGE_DEBUG raw-response capture failed (${reason}).`);
+    ctx.log(`WARNING: ${label} — FORGE_DEBUG raw-response capture failed (${reason})`);
+  }
+}
+
+/**
  * Generate one artifact via the model, guarded so a failure (or non-JSON output)
  * degrades to a fallback skeleton instead of throwing.
  */
@@ -1344,6 +1370,7 @@ async function generateArtifact<T>(
       apiKey: ctx.apiKey,
     });
     ctx.log(`${label} raw response (first 200 chars): ${JSON.stringify((response.text ?? '').slice(0, 200))}`);
+    await captureRawResponse(kind, label, response.text ?? '', ctx);
     const raw = extractJson(response.text, (m) => {
       ctx.warnings.push(`${label}: ${m}`);
       ctx.log(`WARNING: ${label} — ${m}`);
