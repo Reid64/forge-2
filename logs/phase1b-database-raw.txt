@@ -1,0 +1,661 @@
+{
+  "tables": [
+    {
+      "name": "organizations",
+      "schema": "public",
+      "purpose": "Root tenant entity. Every multi-tenant table references this via organization_id.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "name", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "slug", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL", "UNIQUE"] },
+        { "name": "ein", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "ntee_code", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "website_url", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "staff_size", "type": "integer", "nullable": true, "default": null, "constraints": [] },
+        { "name": "annual_budget_cents", "type": "bigint", "nullable": true, "default": null, "constraints": [] },
+        { "name": "years_in_operation", "type": "integer", "nullable": true, "default": null, "constraints": [] },
+        { "name": "is_501c3", "type": "boolean", "nullable": false, "default": "false", "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [],
+      "rlsEnabled": true,
+      "tenantScoped": false,
+      "immutable": false
+    },
+    {
+      "name": "users",
+      "schema": "public",
+      "purpose": "Application users linked to Supabase Auth. Belongs to one organization (tenant).",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": null, "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "email", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "full_name", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "role", "type": "text", "nullable": false, "default": "'member'", "constraints": ["NOT NULL", "CHECK (role IN ('owner','admin','member','viewer'))"] },
+        { "name": "avatar_url", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["id"], "referencesTable": "auth.users", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "search_profiles",
+      "schema": "public",
+      "purpose": "One-per-organization configurable search profile controlling research agent parameters.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL", "UNIQUE"] },
+        { "name": "name", "type": "text", "nullable": false, "default": "'Default Profile'", "constraints": ["NOT NULL"] },
+        { "name": "funding_types", "type": "text[]", "nullable": false, "default": "ARRAY['grants']", "constraints": ["NOT NULL"] },
+        { "name": "source_type_filters", "type": "text[]", "nullable": false, "default": "ARRAY[]::text[]", "constraints": ["NOT NULL"] },
+        { "name": "focus_area_weights", "type": "jsonb", "nullable": false, "default": "'{}'::jsonb", "constraints": ["NOT NULL"] },
+        { "name": "amount_min_cents", "type": "bigint", "nullable": true, "default": null, "constraints": [] },
+        { "name": "amount_max_cents", "type": "bigint", "nullable": true, "default": null, "constraints": [] },
+        { "name": "geographic_scope", "type": "jsonb", "nullable": false, "default": "'{\"type\":\"national\"}'::jsonb", "constraints": ["NOT NULL"] },
+        { "name": "eligibility_filters", "type": "jsonb", "nullable": false, "default": "'{}'::jsonb", "constraints": ["NOT NULL"] },
+        { "name": "negative_filters", "type": "text[]", "nullable": false, "default": "ARRAY[]::text[]", "constraints": ["NOT NULL"] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "agents",
+      "schema": "public",
+      "purpose": "Configured AI research agents per organization defining provider, model, and prompt templates.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "name", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "provider", "type": "text", "nullable": false, "default": "'anthropic'", "constraints": ["NOT NULL", "CHECK (provider IN ('anthropic','openai'))"] },
+        { "name": "model", "type": "text", "nullable": false, "default": "'claude-opus-4-5'", "constraints": ["NOT NULL"] },
+        { "name": "system_prompt", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "is_active", "type": "boolean", "nullable": false, "default": "true", "constraints": ["NOT NULL"] },
+        { "name": "timeout_seconds", "type": "integer", "nullable": false, "default": "90", "constraints": ["NOT NULL"] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "research_runs",
+      "schema": "public",
+      "purpose": "Records each parallel research execution session, its status, and aggregate deduplication statistics.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "search_profile_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "triggered_by_user_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "status", "type": "text", "nullable": false, "default": "'running'", "constraints": ["NOT NULL", "CHECK (status IN ('running','completed','partial','failed'))"] },
+        { "name": "started_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": ["NOT NULL"] },
+        { "name": "completed_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "deduplication_stats", "type": "jsonb", "nullable": true, "default": null, "constraints": [] },
+        { "name": "error_message", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["search_profile_id"], "referencesTable": "search_profiles", "referencesColumns": ["id"], "onDelete": "SET NULL" },
+        { "columns": ["triggered_by_user_id"], "referencesTable": "users", "referencesColumns": ["id"], "onDelete": "SET NULL" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "research_run_agents",
+      "schema": "public",
+      "purpose": "Per-agent execution record within a research run, tracking individual agent status and raw results.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "research_run_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "agent_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "status", "type": "text", "nullable": false, "default": "'pending'", "constraints": ["NOT NULL", "CHECK (status IN ('pending','running','completed','failed'))"] },
+        { "name": "started_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "completed_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "raw_results", "type": "jsonb", "nullable": true, "default": null, "constraints": [] },
+        { "name": "grants_found_count", "type": "integer", "nullable": true, "default": null, "constraints": [] },
+        { "name": "error_message", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "error_code", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["research_run_id"], "referencesTable": "research_runs", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["agent_id"], "referencesTable": "agents", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "grants",
+      "schema": "public",
+      "purpose": "Core grant opportunity records with source categorization, eligibility scoring, and pipeline status.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "research_run_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "title", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "funder_name", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "funder_name_normalized", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "program_name", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "program_name_normalized", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "description", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "url", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "url_normalized", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "source_type", "type": "text", "nullable": true, "default": "'other'", "constraints": ["CHECK (source_type IN ('federal_government','state_government','local_government','private_foundation','corporate_foundation','community_foundation','international','faith_based','individual_donor','other'))"] },
+        { "name": "status", "type": "text", "nullable": false, "default": "'discovered'", "constraints": ["NOT NULL", "CHECK (status IN ('discovered','researching','eligible','applied','under_review','awarded','rejected','archived'))"] },
+        { "name": "amount_requested_cents", "type": "bigint", "nullable": true, "default": null, "constraints": [] },
+        { "name": "amount_awarded_cents", "type": "bigint", "nullable": true, "default": null, "constraints": [] },
+        { "name": "deadline", "type": "date", "nullable": true, "default": null, "constraints": [] },
+        { "name": "match_percentage", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (match_percentage >= 0 AND match_percentage <= 100)"] },
+        { "name": "eligibility_flag", "type": "text", "nullable": false, "default": "'unscored'", "constraints": ["NOT NULL", "CHECK (eligibility_flag IN ('high_match','moderate_match','low_match','unscored'))"] },
+        { "name": "eligibility_notes", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "eligibility_scored_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "consensus_validated", "type": "boolean", "nullable": false, "default": "false", "constraints": ["NOT NULL"] },
+        { "name": "consensus_score", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (consensus_score >= 0 AND consensus_score <= 100)"] },
+        { "name": "tags", "type": "text[]", "nullable": false, "default": "ARRAY[]::text[]", "constraints": ["NOT NULL"] },
+        { "name": "focus_areas", "type": "text[]", "nullable": false, "default": "ARRAY[]::text[]", "constraints": ["NOT NULL"] },
+        { "name": "geographic_scope", "type": "jsonb", "nullable": true, "default": null, "constraints": [] },
+        { "name": "ai_confidence_score", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (ai_confidence_score >= 0 AND ai_confidence_score <= 100)"] },
+        { "name": "is_manually_added", "type": "boolean", "nullable": false, "default": "false", "constraints": ["NOT NULL"] },
+        { "name": "notes", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["research_run_id"], "referencesTable": "research_runs", "referencesColumns": ["id"], "onDelete": "SET NULL" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "consensus_validations",
+      "schema": "public",
+      "purpose": "Stores multi-model AI consensus validation results per grant, one row per validation run.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "grant_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "primary_model_provider", "type": "text", "nullable": false, "default": "'anthropic'", "constraints": ["NOT NULL"] },
+        { "name": "primary_model_name", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "primary_model_score", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (primary_model_score >= 0 AND primary_model_score <= 100)"] },
+        { "name": "primary_model_verdict", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "secondary_model_provider", "type": "text", "nullable": false, "default": "'openai'", "constraints": ["NOT NULL"] },
+        { "name": "secondary_model_name", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "secondary_model_score", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (secondary_model_score >= 0 AND secondary_model_score <= 100)"] },
+        { "name": "secondary_model_verdict", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "consensus_score", "type": "integer", "nullable": true, "default": null, "constraints": ["CHECK (consensus_score >= 0 AND consensus_score <= 100)"] },
+        { "name": "consensus_agreed", "type": "boolean", "nullable": true, "default": null, "constraints": [] },
+        { "name": "disagreement_delta", "type": "integer", "nullable": true, "default": null, "constraints": [] },
+        { "name": "validation_notes", "type": "text", "nullable": true, "default": null, "constraints": [] },
+        { "name": "validated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": ["NOT NULL"] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["grant_id"], "referencesTable": "grants", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "alerts",
+      "schema": "public",
+      "purpose": "Notification center records for all system-generated and rule-based alerts per organization.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "user_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "alert_type", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL", "CHECK (alert_type IN ('high_match_grant','deadline_approaching','research_run_complete','research_run_failed','eligibility_scored','consensus_validated','new_grant_discovered'))"] },
+        { "name": "severity", "type": "text", "nullable": false, "default": "'info'", "constraints": ["NOT NULL", "CHECK (severity IN ('info','warning','critical'))"] },
+        { "name": "title", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "message", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "related_grant_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "related_research_run_id", "type": "uuid", "nullable": true, "default": null, "constraints": [] },
+        { "name": "metadata", "type": "jsonb", "nullable": true, "default": null, "constraints": [] },
+        { "name": "is_read", "type": "boolean", "nullable": false, "default": "false", "constraints": ["NOT NULL"] },
+        { "name": "read_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "is_dismissed", "type": "boolean", "nullable": false, "default": "false", "constraints": ["NOT NULL"] },
+        { "name": "dismissed_at", "type": "timestamptz", "nullable": true, "default": null, "constraints": [] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["user_id"], "referencesTable": "users", "referencesColumns": ["id"], "onDelete": "SET NULL" },
+        { "columns": ["related_grant_id"], "referencesTable": "grants", "referencesColumns": ["id"], "onDelete": "SET NULL" },
+        { "columns": ["related_research_run_id"], "referencesTable": "research_runs", "referencesColumns": ["id"], "onDelete": "SET NULL" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    },
+    {
+      "name": "alert_preferences",
+      "schema": "public",
+      "purpose": "Per-user alert notification preferences controlling which alert types trigger and via what channels.",
+      "columns": [
+        { "name": "id", "type": "uuid", "nullable": false, "default": "gen_random_uuid()", "constraints": ["PRIMARY KEY"] },
+        { "name": "organization_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "user_id", "type": "uuid", "nullable": false, "default": null, "constraints": ["NOT NULL"] },
+        { "name": "alert_type", "type": "text", "nullable": false, "default": null, "constraints": ["NOT NULL", "CHECK (alert_type IN ('high_match_grant','deadline_approaching','research_run_complete','research_run_failed','eligibility_scored','consensus_validated','new_grant_discovered'))"] },
+        { "name": "in_app_enabled", "type": "boolean", "nullable": false, "default": "true", "constraints": ["NOT NULL"] },
+        { "name": "email_enabled", "type": "boolean", "nullable": false, "default": "false", "constraints": ["NOT NULL"] },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "now()", "constraints": [] }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [
+        { "columns": ["organization_id"], "referencesTable": "organizations", "referencesColumns": ["id"], "onDelete": "CASCADE" },
+        { "columns": ["user_id"], "referencesTable": "users", "referencesColumns": ["id"], "onDelete": "CASCADE" }
+      ],
+      "rlsEnabled": true,
+      "tenantScoped": true,
+      "immutable": false
+    }
+  ],
+  "indexes": [
+    { "name": "idx_users_organization_id", "table": "users", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_users_email", "table": "users", "columns": ["email"], "unique": true, "method": "btree", "where": null },
+    { "name": "idx_search_profiles_organization_id", "table": "search_profiles", "columns": ["organization_id"], "unique": true, "method": "btree", "where": null },
+    { "name": "idx_agents_organization_id", "table": "agents", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_agents_organization_active", "table": "agents", "columns": ["organization_id", "is_active"], "unique": false, "method": "btree", "where": "is_active = true" },
+    { "name": "idx_research_runs_organization_id", "table": "research_runs", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_research_runs_status", "table": "research_runs", "columns": ["organization_id", "status"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_research_runs_started_at", "table": "research_runs", "columns": ["organization_id", "started_at"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_research_run_agents_run_id", "table": "research_run_agents", "columns": ["research_run_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_research_run_agents_organization_id", "table": "research_run_agents", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_organization_id", "table": "grants", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_status", "table": "grants", "columns": ["organization_id", "status"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_source_type", "table": "grants", "columns": ["organization_id", "source_type"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_eligibility_flag", "table": "grants", "columns": ["organization_id", "eligibility_flag"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_deadline", "table": "grants", "columns": ["organization_id", "deadline"], "unique": false, "method": "btree", "where": "deadline IS NOT NULL" },
+    { "name": "idx_grants_url_normalized", "table": "grants", "columns": ["organization_id", "url_normalized"], "unique": false, "method": "btree", "where": "url_normalized IS NOT NULL" },
+    { "name": "idx_grants_dedup_funder_program", "table": "grants", "columns": ["organization_id", "funder_name_normalized", "program_name_normalized"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_created_at", "table": "grants", "columns": ["organization_id", "created_at"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_grants_match_percentage", "table": "grants", "columns": ["organization_id", "match_percentage"], "unique": false, "method": "btree", "where": "match_percentage IS NOT NULL" },
+    { "name": "idx_consensus_validations_grant_id", "table": "consensus_validations", "columns": ["grant_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_consensus_validations_organization_id", "table": "consensus_validations", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_alerts_organization_id", "table": "alerts", "columns": ["organization_id"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_alerts_unread", "table": "alerts", "columns": ["organization_id", "is_read"], "unique": false, "method": "btree", "where": "is_read = false AND is_dismissed = false" },
+    { "name": "idx_alerts_user_id", "table": "alerts", "columns": ["user_id"], "unique": false, "method": "btree", "where": "user_id IS NOT NULL" },
+    { "name": "idx_alerts_related_grant_id", "table": "alerts", "columns": ["related_grant_id"], "unique": false, "method": "btree", "where": "related_grant_id IS NOT NULL" },
+    { "name": "idx_alerts_created_at", "table": "alerts", "columns": ["organization_id", "created_at"], "unique": false, "method": "btree", "where": null },
+    { "name": "idx_alert_preferences_user_org", "table": "alert_preferences", "columns": ["user_id", "organization_id", "alert_type"], "unique": true, "method": "btree", "where": null }
+  ],
+  "rlsPolicies": [
+    {
+      "name": "organizations_select_own",
+      "table": "organizations",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "organizations_update_own",
+      "table": "organizations",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin'))",
+      "check": null
+    },
+    {
+      "name": "users_select_same_org",
+      "table": "users",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "users_insert_own",
+      "table": "users",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "id = auth.uid()"
+    },
+    {
+      "name": "users_update_own",
+      "table": "users",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "id = auth.uid()",
+      "check": null
+    },
+    {
+      "name": "search_profiles_select_own_org",
+      "table": "search_profiles",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "search_profiles_insert_own_org",
+      "table": "search_profiles",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin','member'))"
+    },
+    {
+      "name": "search_profiles_update_own_org",
+      "table": "search_profiles",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin','member'))",
+      "check": null
+    },
+    {
+      "name": "agents_select_own_org",
+      "table": "agents",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "agents_insert_own_org",
+      "table": "agents",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin'))"
+    },
+    {
+      "name": "agents_update_own_org",
+      "table": "agents",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin'))",
+      "check": null
+    },
+    {
+      "name": "agents_delete_own_org",
+      "table": "agents",
+      "command": "DELETE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin'))",
+      "check": null
+    },
+    {
+      "name": "research_runs_select_own_org",
+      "table": "research_runs",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "research_runs_insert_own_org",
+      "table": "research_runs",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())"
+    },
+    {
+      "name": "research_runs_update_own_org",
+      "table": "research_runs",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "research_run_agents_select_own_org",
+      "table": "research_run_agents",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "research_run_agents_insert_own_org",
+      "table": "research_run_agents",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())"
+    },
+    {
+      "name": "research_run_agents_update_own_org",
+      "table": "research_run_agents",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "grants_select_own_org",
+      "table": "grants",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "grants_insert_own_org",
+      "table": "grants",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())"
+    },
+    {
+      "name": "grants_update_own_org",
+      "table": "grants",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "grants_delete_own_org",
+      "table": "grants",
+      "command": "DELETE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid() AND role IN ('owner','admin','member'))",
+      "check": null
+    },
+    {
+      "name": "consensus_validations_select_own_org",
+      "table": "consensus_validations",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "consensus_validations_insert_own_org",
+      "table": "consensus_validations",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())"
+    },
+    {
+      "name": "alerts_select_own_org",
+      "table": "alerts",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "alerts_insert_own_org",
+      "table": "alerts",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())"
+    },
+    {
+      "name": "alerts_update_own_org",
+      "table": "alerts",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid())",
+      "check": null
+    },
+    {
+      "name": "alert_preferences_select_own",
+      "table": "alert_preferences",
+      "command": "SELECT",
+      "roles": ["authenticated"],
+      "using": "user_id = auth.uid()",
+      "check": null
+    },
+    {
+      "name": "alert_preferences_insert_own",
+      "table": "alert_preferences",
+      "command": "INSERT",
+      "roles": ["authenticated"],
+      "using": null,
+      "check": "user_id = auth.uid()"
+    },
+    {
+      "name": "alert_preferences_update_own",
+      "table": "alert_preferences",
+      "command": "UPDATE",
+      "roles": ["authenticated"],
+      "using": "user_id = auth.uid()",
+      "check": null
+    },
+    {
+      "name": "alert_preferences_delete_own",
+      "table": "alert_preferences",
+      "command": "DELETE",
+      "roles": ["authenticated"],
+      "using": "user_id = auth.uid()",
+      "check": null
+    }
+  ],
+  "seeds": [
+    {
+      "table": "organizations",
+      "description": "One demo organization 'Benavora Demo Nonprofit' for local development and CI testing.",
+      "rowCount": 1
+    },
+    {
+      "table": "users",
+      "description": "Three seed users (owner, admin, member roles) linked to the demo organization for local development.",
+      "rowCount": 3
+    },
+    {
+      "table": "agents",
+      "description": "Two default agent configurations per org: one Anthropic Claude primary agent and one OpenAI GPT-4o consensus agent.",
+      "rowCount": 2
+    },
+    {
+      "table": "search_profiles",
+      "description": "One default search profile for the demo organization with all system-default values populated.",
+      "rowCount": 1
+    },
+    {
+      "table": "grants",
+      "description": "Twenty sample grant records across multiple source_types, statuses, and eligibility flags for UI development and chart testing.",
+      "rowCount": 20
+    },
+    {
+      "table": "alerts",
+      "description": "Five sample alert records of mixed types and read states for notification center UI development.",
+      "rowCount": 5
+    }
+  ],
+  "migrations": [
+    {
+      "filename": "20240101000001_create_organizations.sql",
+      "description": "Create organizations table with all base columns, primary key, and updated_at trigger."
+    },
+    {
+      "filename": "20240101000002_create_users.sql",
+      "description": "Create users table linked to auth.users and organizations; enable RLS; add role check constraint."
+    },
+    {
+      "filename": "20240101000003_create_search_profiles.sql",
+      "description": "Create search_profiles table with JSONB configuration columns, unique constraint on organization_id, and RLS."
+    },
+    {
+      "filename": "20240101000004_create_agents.sql",
+      "description": "Create agents table with provider/model columns, is_active flag, and RLS."
+    },
+    {
+      "filename": "20240101000005_create_research_runs.sql",
+      "description": "Create research_runs table with status enum constraint, deduplication_stats JSONB, and RLS."
+    },
+    {
+      "filename": "20240101000006_create_research_run_agents.sql",
+      "description": "Create research_run_agents table with per-agent status tracking, raw_results JSONB, and RLS. Enables Supabase Realtime on this table."
+    },
+    {
+      "filename": "20240101000007_create_grants.sql",
+      "description": "Create grants table with source_type check constraint, eligibility columns (match_percentage, eligibility_flag, eligibility_notes, eligibility_scored_at), consensus columns, status enum, amount columns in cents, and RLS."
+    },
+    {
+      "filename": "20240101000008_create_consensus_validations.sql",
+      "description": "Create consensus_validations table with dual-model scoring columns, consensus_agreed flag, and RLS."
+    },
+    {
+      "filename": "20240101000009_create_alerts.sql",
+      "description": "Create alerts table with alert_type and severity check constraints, related entity FK columns, read/dismissed tracking, and RLS."
+    },
+    {
+      "filename": "20240101000010_create_alert_preferences.sql",
+      "description": "Create alert_preferences table with per-user per-alert-type channel preferences and unique constraint."
+    },
+    {
+      "filename": "20240101000011_create_indexes.sql",
+      "description": "Create all composite and partial indexes for performance on organization-scoped queries: grants by status/source_type/eligibility_flag/deadline/url_normalized, research_runs by status, alerts by unread state."
+    },
+    {
+      "filename": "20240101000012_enable_rls_policies.sql",
+      "description": "Apply all RLS policies across every table: organizations, users, search_profiles, agents, research_runs, research_run_agents, grants, consensus_validations, alerts, alert_preferences."
+    },
+    {
+      "filename": "20240101000013_updated_at_triggers.sql",
+      "description": "Create a shared moddatetime trigger function and apply it to all tables with an updated_at column: organizations, users, search_profiles, agents, grants, alert_preferences."
+    },
+    {
+      "filename": "20240101000014_enable_realtime.sql",
+      "description": "Enable Supabase Realtime publication for research_run_agents and alerts tables to support live UI updates."
+    },
+    {
+      "filename": "20240101000015_seed_development_data.sql",
+      "description": "Insert development seed data: demo organization, three users, two agents, one search profile, twenty sample grants, five alerts. Guarded by environment check (only runs in non-production)."
+    }
+  ],
+  "markdown": "# Database Architecture\n\n## Overview\n\nBenavora uses a **Supabase Postgres** database with **Row-Level Security (RLS)** enforced on every table. The schema is multi-tenant: every resource table carries an `organization_id` foreign key that scopes all reads and writes to a single tenant. Authentication is delegated to **Supabase Auth**; the `users` table mirrors `auth.users` and adds application role data.\n\nAll monetary values are stored as **integer cents** (`bigint`) to avoid floating-point precision issues. All timestamps use `timestamptz` (UTC). Enum-like columns use `text` with `CHECK` constraints rather than Postgres `ENUM` types, making future value additions simpler (no `ALTER TYPE` migration required).\n\n---\n\n## Tables\n\n### `organizations`\n**Purpose:** Root tenant entity. Every multi-tenant table references this via `organization_id`.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| name | text | No | — | Display name |\n| slug | text | No | — | UNIQUE, URL-safe identifier |\n| ein | text | Yes | — | Employer Identification Number |\n| ntee_code | text | Yes | — | Nonprofit sector classification |\n| website_url | text | Yes | — | |\n| staff_size | integer | Yes | — | |\n| annual_budget_cents | bigint | Yes | — | Stored in cents |\n| years_in_operation | integer | Yes | — | |\n| is_501c3 | boolean | No | false | |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**RLS:** Enabled. Users may SELECT/UPDATE only their own organization (by joining `users` table on `auth.uid()`). UPDATE restricted to `owner`/`admin` roles.\n\n---\n\n### `users`\n**Purpose:** Application users linked to Supabase Auth. Belongs to one organization.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | — | PK, FK → auth.users(id) ON DELETE CASCADE |\n| organization_id | uuid | No | — | FK → organizations(id) ON DELETE CASCADE |\n| email | text | No | — | UNIQUE |\n| full_name | text | Yes | — | |\n| role | text | No | 'member' | CHECK IN ('owner','admin','member','viewer') |\n| avatar_url | text | Yes | — | |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**RLS:** Users may SELECT any user in the same organization. INSERT restricted to own `auth.uid()`. UPDATE restricted to own row.\n\n---\n\n### `search_profiles`\n**Purpose:** One-per-organization configurable search profile controlling research agent parameters (funding types, source filters, focus area weights, amount range, geographic scope, eligibility pre-filters, negative filters).\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id); UNIQUE (one profile per org) |\n| name | text | No | 'Default Profile' | |\n| funding_types | text[] | No | ARRAY['grants'] | e.g. ['grants','fellowships','contracts'] |\n| source_type_filters | text[] | No | ARRAY[]::text[] | Subset of source_type enum values to include |\n| focus_area_weights | jsonb | No | '{}' | e.g. {\"Education\": 80, \"Health\": 60} |\n| amount_min_cents | bigint | Yes | NULL | NULL = no minimum |\n| amount_max_cents | bigint | Yes | NULL | NULL = no maximum |\n| geographic_scope | jsonb | No | '{\"type\":\"national\"}' | e.g. {\"type\":\"state\",\"states\":[\"CA\",\"NY\"]} |\n| eligibility_filters | jsonb | No | '{}' | 501c3, years, budget, staff, populations |\n| negative_filters | text[] | No | ARRAY[]::text[] | Keywords/funders to exclude |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**RLS:** All org members (owner/admin/member) may SELECT, INSERT, UPDATE. Viewers may SELECT only.\n\n---\n\n### `agents`\n**Purpose:** Configured AI research agents per organization. Defines provider, model, system prompt, and operational settings.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| name | text | No | — | Display name e.g. \"Primary Researcher\" |\n| provider | text | No | 'anthropic' | CHECK IN ('anthropic','openai') |\n| model | text | No | 'claude-opus-4-5' | Model identifier string |\n| system_prompt | text | Yes | — | Override prompt; NULL uses platform default |\n| is_active | boolean | No | true | Only active agents run in parallel execution |\n| timeout_seconds | integer | No | 90 | Per PRD: 90s timeout per agent |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**RLS:** SELECT for all org members. INSERT/UPDATE/DELETE restricted to owner/admin roles.\n\n---\n\n### `research_runs`\n**Purpose:** Records each parallel research execution session with aggregate status and deduplication statistics.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| search_profile_id | uuid | Yes | NULL | FK → search_profiles(id) ON DELETE SET NULL |\n| triggered_by_user_id | uuid | Yes | NULL | FK → users(id) ON DELETE SET NULL |\n| status | text | No | 'running' | CHECK IN ('running','completed','partial','failed') |\n| started_at | timestamptz | No | now() | Used by stale-run cron detection |\n| completed_at | timestamptz | Yes | NULL | |\n| deduplication_stats | jsonb | Yes | NULL | {total_found,duplicates_removed,unique_saved,already_tracked} |\n| error_message | text | Yes | NULL | Set on failed status |\n| created_at | timestamptz | No | now() | |\n\n**RLS:** All org members may SELECT, INSERT, UPDATE scoped to their `organization_id`.\n\n---\n\n### `research_run_agents`\n**Purpose:** Per-agent execution record within a research run. Enables real-time progress tracking via Supabase Realtime.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id); for RLS |\n| research_run_id | uuid | No | — | FK → research_runs(id) ON DELETE CASCADE |\n| agent_id | uuid | No | — | FK → agents(id) ON DELETE CASCADE |\n| status | text | No | 'pending' | CHECK IN ('pending','running','completed','failed') |\n| started_at | timestamptz | Yes | NULL | |\n| completed_at | timestamptz | Yes | NULL | |\n| raw_results | jsonb | Yes | NULL | Full AI response payload before dedup |\n| grants_found_count | integer | Yes | NULL | Count before deduplication |\n| error_message | text | Yes | NULL | |\n| error_code | text | Yes | NULL | e.g. 'timeout', 'rate_limited' |\n| created_at | timestamptz | No | now() | |\n\n**Realtime:** This table is added to Supabase Realtime publication so the frontend can subscribe to agent status changes.\n\n**RLS:** All org members may SELECT, INSERT, UPDATE scoped to their `organization_id`.\n\n---\n\n### `grants`\n**Purpose:** Core grant opportunity records. Supports source categorization (Feature 1), eligibility scoring (Feature 5), consensus validation (Feature 7), pipeline status, and financial tracking.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| research_run_id | uuid | Yes | NULL | FK → research_runs(id) ON DELETE SET NULL |\n| title | text | No | — | Grant program title |\n| funder_name | text | No | — | Raw funder name from AI |\n| funder_name_normalized | text | Yes | — | Lowercased, punctuation-stripped for dedup |\n| program_name | text | Yes | — | |\n| program_name_normalized | text | Yes | — | For fuzzy dedup |\n| description | text | Yes | — | |\n| url | text | Yes | — | Original grant URL |\n| url_normalized | text | Yes | — | UTM-stripped, lowercased, trailing-slash removed |\n| source_type | text | Yes | 'other' | CHECK IN ('federal_government','state_government','local_government','private_foundation','corporate_foundation','community_foundation','international','faith_based','individual_donor','other') |\n| status | text | No | 'discovered' | CHECK IN ('discovered','researching','eligible','applied','under_review','awarded','rejected','archived') |\n| amount_requested_cents | bigint | Yes | NULL | |\n| amount_awarded_cents | bigint | Yes | NULL | |\n| deadline | date | Yes | NULL | |\n| match_percentage | integer | Yes | NULL | 0–100; CHECK constraint enforced |\n| eligibility_flag | text | No | 'unscored' | CHECK IN ('high_match','moderate_match','low_match','unscored') |\n| eligibility_notes | text | Yes | NULL | AI rationale text |\n| eligibility_scored_at | timestamptz | Yes | NULL | Timestamp of last scoring |\n| consensus_validated | boolean | No | false | Set true after consensus_validations run |\n| consensus_score | integer | Yes | NULL | Averaged score from both models |\n| tags | text[] | No | ARRAY[]::text[] | Free-form tags merged from agents |\n| focus_areas | text[] | No | ARRAY[]::text[] | Matched focus area names |\n| geographic_scope | jsonb | Yes | NULL | Grant's own geographic eligibility |\n| ai_confidence_score | integer | Yes | NULL | Agent's confidence in discovery accuracy |\n| is_manually_added | boolean | No | false | True if added by user, not agent |\n| notes | text | Yes | NULL | User notes |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**RLS:** All org members may SELECT, INSERT, UPDATE. DELETE restricted to owner/admin/member roles.\n\n---\n\n### `consensus_validations`\n**Purpose:** Stores multi-model AI consensus validation results per grant. One row per validation run (history preserved). The latest row drives `grants.consensus_validated` and `grants.consensus_score`.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| grant_id | uuid | No | — | FK → grants(id) ON DELETE CASCADE |\n| primary_model_provider | text | No | 'anthropic' | |\n| primary_model_name | text | No | — | e.g. 'claude-opus-4-5' |\n| primary_model_score | integer | Yes | NULL | 0–100 |\n| primary_model_verdict | text | Yes | NULL | Free text rationale |\n| secondary_model_provider | text | No | 'openai' | |\n| secondary_model_name | text | No | — | e.g. 'gpt-4o' |\n| secondary_model_score | integer | Yes | NULL | 0–100 |\n| secondary_model_verdict | text | Yes | NULL | |\n| consensus_score | integer | Yes | NULL | Average of both scores |\n| consensus_agreed | boolean | Yes | NULL | True if delta ≤ 20 points |\n| disagreement_delta | integer | Yes | NULL | Absolute difference between scores |\n| validation_notes | text | Yes | NULL | System summary of consensus result |\n| validated_at | timestamptz | No | now() | |\n| created_at | timestamptz | No | now() | |\n\n**RLS:** All org members may SELECT, INSERT scoped to their `organization_id`.\n\n---\n\n### `alerts`\n**Purpose:** Notification center records for all system-generated and rule-based alerts. Supports in-app notification badge and alert center feed.\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| user_id | uuid | Yes | NULL | FK → users(id); NULL = org-wide alert |\n| alert_type | text | No | — | CHECK IN ('high_match_grant','deadline_approaching','research_run_complete','research_run_failed','eligibility_scored','consensus_validated','new_grant_discovered') |\n| severity | text | No | 'info' | CHECK IN ('info','warning','critical') |\n| title | text | No | — | Short display title |\n| message | text | No | — | Full alert message |\n| related_grant_id | uuid | Yes | NULL | FK → grants(id) ON DELETE SET NULL |\n| related_research_run_id | uuid | Yes | NULL | FK → research_runs(id) ON DELETE SET NULL |\n| metadata | jsonb | Yes | NULL | Extra structured data for the alert |\n| is_read | boolean | No | false | |\n| read_at | timestamptz | Yes | NULL | |\n| is_dismissed | boolean | No | false | |\n| dismissed_at | timestamptz | Yes | NULL | |\n| created_at | timestamptz | No | now() | |\n\n**Realtime:** Added to Supabase Realtime publication for live badge updates.\n\n**RLS:** Users SELECT alerts where `organization_id` matches their org. INSERT/UPDATE by org members.\n\n---\n\n### `alert_preferences`\n**Purpose:** Per-user, per-alert-type notification channel preferences (in-app vs. email).\n\n| Column | Type | Nullable | Default | Notes |\n|---|---|---|---|---|\n| id | uuid | No | gen_random_uuid() | PK |\n| organization_id | uuid | No | — | FK → organizations(id) |\n| user_id | uuid | No | — | FK → users(id) ON DELETE CASCADE |\n| alert_type | text | No | — | Same CHECK constraint as alerts.alert_type |\n| in_app_enabled | boolean | No | true | |\n| email_enabled | boolean | No | false | |\n| created_at | timestamptz | No | now() | |\n| updated_at | timestamptz | No | now() | Auto-updated via trigger |\n\n**Unique constraint:** `(user_id, organization_id, alert_type)` — one preference row per user per alert type.\n\n**RLS:** Users SELECT/INSERT/UPDATE/DELETE only their own preference rows (`user_id = auth.uid()`).\n\n---\n\n## Indexes\n\nAll performance-critical query paths are covered by composite indexes scoped to `organization_id`:\n\n- **grants:** Composite indexes on `(organization_id, status)`, `(organization_id, source_type)`, `(organization_id, eligibility_flag)`, `(organization_id, deadline)` (partial: NOT NULL), `(organization_id, url_normalized)` (partial: NOT NULL), `(organization_id, funder_name_normalized, program_name_normalized)` for deduplication lookups, `(organization_id, match_percentage)` for eligibility sorting.\n- **research_runs:** Composite on `(organization_id, status)` for active-run detection; `(organization_id, started_at)`

@@ -1,0 +1,374 @@
+{
+  "routes": [
+    {
+      "path": "/api/grants",
+      "method": "GET",
+      "purpose": "List grants for the authenticated organization with optional filters for source_type, eligibility_flag, status, date range, and pagination",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ source_type?: string (comma-separated enum values), eligibility_flag?: 'high_match'|'moderate_match'|'low_match'|'unscored', status?: string, from?: string (ISO date), to?: string (ISO date), page?: number, limit?: number }",
+      "responseSchema": "{ data: Grant[], total: number, page: number, limit: number }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_FILTER", "description": "One or more filter values are not valid enum members" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/grants/[id]",
+      "method": "GET",
+      "purpose": "Fetch full detail for a single grant owned by the authenticated organization",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ id: string (UUID path param) }",
+      "responseSchema": "{ data: Grant }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Grant does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Grant with given id does not exist" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/grants/[id]",
+      "method": "PATCH",
+      "purpose": "Update mutable fields on a grant (source_type, status, amount_requested, amount_awarded, deadline) for the authenticated organization",
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "requestSchema": "{ source_type?: 'federal_government'|'state_government'|'local_government'|'private_foundation'|'corporate_foundation'|'community_foundation'|'international'|'faith_based'|'individual_donor'|'other', status?: string, amount_requested?: number, amount_awarded?: number, deadline?: string (ISO date) }",
+      "responseSchema": "{ data: Grant }",
+      "dbReads": ["grants"],
+      "dbWrites": ["grants"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Grant does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Grant with given id does not exist" },
+        { "status": 400, "code": "INVALID_SOURCE_TYPE", "description": "Provided source_type is not a valid enum value" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database update failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/grants/[id]/rescore",
+      "method": "POST",
+      "purpose": "Trigger a manual eligibility re-score for a specific grant using the organization's current search profile",
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "requestSchema": "{ id: string (UUID path param) }",
+      "responseSchema": "{ data: { match_percentage: number, eligibility_flag: string, eligibility_notes: string, eligibility_scored_at: string } }",
+      "dbReads": ["grants", "search_profiles"],
+      "dbWrites": ["grants"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Grant does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Grant with given id does not exist" },
+        { "status": 422, "code": "NO_SEARCH_PROFILE", "description": "Organization has no search profile configured; scoring skipped" },
+        { "status": 502, "code": "AI_PROVIDER_ERROR", "description": "AI provider returned an error or unparseable response" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database update failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/research/run",
+      "method": "POST",
+      "purpose": "Initiate a parallel research run across all active agents for the organization; enforces single concurrent run per organization",
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "requestSchema": "{ search_profile_id?: string (UUID, optional override) }",
+      "responseSchema": "{ data: { research_run_id: string, status: 'running', agent_count: number } }",
+      "dbReads": ["research_runs", "agents", "search_profiles"],
+      "dbWrites": ["research_runs", "research_run_agents"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 409, "code": "RUN_IN_PROGRESS", "description": "A research run is already in progress for this organization" },
+        { "status": 422, "code": "NO_ACTIVE_AGENTS", "description": "No active agent configurations found for this organization" },
+        { "status": 500, "code": "DB_ERROR", "description": "Failed to initialize research run records" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/research/runs",
+      "method": "GET",
+      "purpose": "List past research runs for the authenticated organization with summary stats",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ page?: number, limit?: number }",
+      "responseSchema": "{ data: ResearchRun[], total: number }",
+      "dbReads": ["research_runs"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/research/runs/[id]",
+      "method": "GET",
+      "purpose": "Fetch detail for a single research run including per-agent statuses and deduplication stats",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ id: string (UUID path param) }",
+      "responseSchema": "{ data: ResearchRun & { agents: ResearchRunAgent[], deduplication_stats: { total_found: number, duplicates_removed: number, unique_saved: number, already_tracked: number } } }",
+      "dbReads": ["research_runs", "research_run_agents"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Research run does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Research run with given id does not exist" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/search-profiles",
+      "method": "GET",
+      "purpose": "Fetch the search profile for the authenticated organization; returns 404 if none exists so frontend can apply defaults",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{}",
+      "responseSchema": "{ data: SearchProfile | null }",
+      "dbReads": ["search_profiles"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 404, "code": "NOT_FOUND", "description": "No search profile exists for this organization" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/search-profiles",
+      "method": "POST",
+      "purpose": "Create or update (upsert) the search profile for the authenticated organization",
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "requestSchema": "{ funding_types: string[], source_type_filters: string[], focus_area_weights: Record<string,number>, amount_min: number, amount_max: number | null, geographic_scope: { type: 'national'|'regional'|'state'|'local'|'international', states?: string[] }, eligibility_filters: { is_501c3: boolean, min_years_operation: number, budget_min: number | null, budget_max: number | null, staff_size_min: number | null, staff_size_max: number | null, served_populations: string[] }, negative_filters: string[] }",
+      "responseSchema": "{ data: SearchProfile }",
+      "dbReads": ["search_profiles"],
+      "dbWrites": ["search_profiles"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "VALIDATION_ERROR", "description": "One or more fields fail validation (e.g. min > max, no funding types, state scope missing states)" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database upsert failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/summary",
+      "method": "GET",
+      "purpose": "Return aggregate summary metrics for the analytics dashboard: total grants, total requested, total awarded, overall success rate with trend comparison",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ from?: string (ISO date), to?: string (ISO date) }",
+      "responseSchema": "{ data: { total_grants: number, total_requested: number, total_awarded: number, success_rate: number, previous_success_rate: number, amounts_incomplete_pct: number } }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_DATE_RANGE", "description": "from or to is not a valid ISO date string" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/funnel",
+      "method": "GET",
+      "purpose": "Return grant counts per pipeline status stage for the funnel chart",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ from?: string (ISO date), to?: string (ISO date) }",
+      "responseSchema": "{ data: { stage: string, count: number, drop_off_pct: number }[] }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_DATE_RANGE", "description": "Invalid date parameter" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/financials",
+      "method": "GET",
+      "purpose": "Return monthly aggregated dollars requested vs. awarded for the bar chart",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ from?: string (ISO date), to?: string (ISO date) }",
+      "responseSchema": "{ data: { month: string (YYYY-MM), total_requested: number, total_awarded: number }[] }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_DATE_RANGE", "description": "Invalid date parameter" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/by-source",
+      "method": "GET",
+      "purpose": "Return grant counts and total amounts grouped by source_type for the pie chart",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ from?: string (ISO date), to?: string (ISO date) }",
+      "responseSchema": "{ data: { source_type: string, count: number, total_amount: number }[] }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_DATE_RANGE", "description": "Invalid date parameter" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/deadlines",
+      "method": "GET",
+      "purpose": "Return daily deadline counts for the next 90 days for the calendar heatmap",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{}",
+      "responseSchema": "{ data: { date: string (ISO date), count: number }[] }",
+      "dbReads": ["grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/analytics/agent-activity",
+      "method": "GET",
+      "purpose": "Return daily research run activity and discovery counts for the agent activity line chart",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ from?: string (ISO date), to?: string (ISO date) }",
+      "responseSchema": "{ data: { date: string (ISO date), runs: number, grants_found: number, duplicates_removed: number }[] }",
+      "dbReads": ["research_runs"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 400, "code": "INVALID_DATE_RANGE", "description": "Invalid date parameter" },
+        { "status": 500, "code": "DB_ERROR", "description": "Aggregation query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/alerts",
+      "method": "GET",
+      "purpose": "List alerts for the authenticated organization with optional unread filter and pagination",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ unread_only?: boolean, page?: number, limit?: number }",
+      "responseSchema": "{ data: Alert[], total: number, unread_count: number }",
+      "dbReads": ["alerts"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/alerts/[id]/read",
+      "method": "POST",
+      "purpose": "Mark a specific alert as read for the authenticated user",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ id: string (UUID path param) }",
+      "responseSchema": "{ data: { id: string, read_at: string } }",
+      "dbReads": ["alerts"],
+      "dbWrites": ["alerts"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Alert does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Alert with given id does not exist" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database update failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/alerts/read-all",
+      "method": "POST",
+      "purpose": "Mark all unread alerts as read for the authenticated organization",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{}",
+      "responseSchema": "{ data: { updated_count: number } }",
+      "dbReads": ["alerts"],
+      "dbWrites": ["alerts"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database bulk update failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/consensus/validate",
+      "method": "POST",
+      "purpose": "Run multi-model consensus validation on a specific grant using both Anthropic Claude and OpenAI GPT-4o, returning individual model verdicts and a consensus result",
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "requestSchema": "{ grant_id: string (UUID) }",
+      "responseSchema": "{ data: { grant_id: string, consensus: 'validated'|'disputed'|'rejected', confidence: number, model_results: { model: string, verdict: string, rationale: string, score: number }[], validated_at: string } }",
+      "dbReads": ["grants", "search_profiles"],
+      "dbWrites": ["grants", "consensus_validations"],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Grant does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Grant with given id does not exist" },
+        { "status": 502, "code": "AI_PROVIDER_ERROR", "description": "One or both AI providers returned an error or unparseable response" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database write failed" }
+      ],
+      "immutable": false
+    },
+    {
+      "path": "/api/consensus/[grant_id]",
+      "method": "GET",
+      "purpose": "Fetch the latest consensus validation result for a specific grant",
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "requestSchema": "{ grant_id: string (UUID path param) }",
+      "responseSchema": "{ data: { grant_id: string, consensus: string, confidence: number, model_results: { model: string, verdict: string, rationale: string, score: number }[], validated_at: string } | null }",
+      "dbReads": ["consensus_validations", "grants"],
+      "dbWrites": [],
+      "errors": [
+        { "status": 401, "code": "UNAUTHORIZED", "description": "No valid session token provided" },
+        { "status": 403, "code": "FORBIDDEN", "description": "Grant does not belong to authenticated organization" },
+        { "status": 404, "code": "NOT_FOUND", "description": "Grant with given id does not exist" },
+        { "status": 500, "code": "DB_ERROR", "description": "Database query failed" }
+      ],
+      "immutable": false
+    }
+  ],
+  "conventions": [
+    "All API routes are implemented as Next.js 14 App Router Route Handlers under /app/api/",
+    "organization_id is ALWAYS derived from the Supabase Auth session (supabase.auth.getUser()) — never accepted from request body or query params",
+    "All Supabase queries are executed with the service-role client only after session verification; RLS policies enforce organization_id scoping on every multi-tenant table",
+    "Request body parsing uses zod schemas; validation errors return HTTP 400 with code VALIDATION_ERROR and a field-level errors array",
+    "Successful responses use envelope { data: T }; errors use { error: { code: string, message: string, fields?: Record<string,string> } }",
+    "All timestamps are ISO 8601 UTC strings in API responses",
+    "Monetary amounts are stored and transmitted as integers in cents; API responses include a formatted display string alongside the raw integer",
+    "Pagination uses { page: number (1-indexed), limit: number (default 25, max 100) } query params; responses include total count",
+    "PATCH routes accept partial payloads; omitted fields are not modified (no implicit nulling)",
+    "All POST mutation routes that modify AI-scored fields log the model name, prompt version, and raw response to an audit_logs table",
+    "Supabase Realtime subscriptions are used on research_run_agents and alerts tables for live UI updates; no polling fallback needed",
+    "The /api/research/run endpoint spawns agent tasks using Promise.allSettled and persists results transactionally; it responds immediately with the run ID while processing continues asynchronously",
+    "Route /outcomes performs a Next.js permanent redirect (HTTP 301) to /analytics at the framework routing layer, not as an API route",
+    "All Recharts components on the /analytics page are loaded with dynamic(() => import(...), { ssr: false }) to prevent SSR hydration mismatches",
+    "Agent timeout is enforced via Promise.race with a 90-second AbortController signal per agent task",
+    "AI provider retries: single retry after 5-second delay on HTTP 429; no retry on other errors",
+    "Eligibility scoring is triggered asynchronously after grant INSERT via a queued background task; it does not block the research run response",
+    "Stale running research runs (started_at older than 10 minutes) are marked failed by a Vercel Cron job at /api/cron/cleanup-stale-runs scheduled every 10 minutes",
+    "TypeScript strict mode is enabled; all route handler request/response types are explicitly typed with no implicit any"
+  ],
+  "markdown": "# API Architecture\n\n## Overview\n\nBenavora's API layer is built on **Next.js 14 App Router Route Handlers** (`/app/api/...`) backed by **Supabase Postgres** with Row-Level Security. Every route derives `organization_id` exclusively from the authenticated Supabase session — it is never accepted from request bodies or query parameters. All multi-tenant tables enforce RLS policies keyed on `organization_id`.\n\n---\n\n## Authentication & Authorization\n\n- Authentication: Supabase Auth JWT, verified via `supabase.auth.getUser()` on every request.\n- Authorization: Three roles — `grants_manager`, `executive_director`, `grant_researcher`. Role is stored in the `users` table and checked after session validation.\n- `organization_id` is read from the verified session user record only.\n- Unauthenticated requests receive HTTP 401 `UNAUTHORIZED`.\n- Cross-organization access attempts receive HTTP 403 `FORBIDDEN` (enforced at both RLS and application layer).\n\n---\n\n## Response Envelope\n\nAll successful responses:\n```json\n{ \"data\": <T> }\n```\nAll error responses:\n```json\n{ \"error\": { \"code\": \"STRING_CODE\", \"message\": \"Human readable\", \"fields\": { \"fieldName\": \"error\" } } }\n```\n\n---\n\n## Routes\n\n### Grants\n\n#### `GET /api/grants`\n**Purpose:** List grants for the authenticated organization.\n\n**Auth:** Required. Roles: `grants_manager`, `executive_director`, `grant_researcher`.\n\n**Query Params:**\n| Param | Type | Description |\n|---|---|---|\n| source_type | string | Comma-separated enum values to filter by |\n| eligibility_flag | string | One of: high_match, moderate_match, low_match, unscored |\n| status | string | Pipeline status stage |\n| from | ISO date | Start of date range filter |\n| to | ISO date | End of date range filter |\n| page | number | Page number (default: 1) |\n| limit | number | Results per page (default: 25, max: 100) |\n\n**DB Reads:** `grants`\n\n**Errors:** 401 UNAUTHORIZED, 400 INVALID_FILTER, 500 DB_ERROR\n\n---\n\n#### `GET /api/grants/[id]`\n**Purpose:** Fetch full detail for a single grant.\n\n**Auth:** Required. Roles: all.\n\n**Path Params:** `id` (UUID)\n\n**DB Reads:** `grants`\n\n**Errors:** 401, 403 FORBIDDEN, 404 NOT_FOUND, 500 DB_ERROR\n\n---\n\n#### `PATCH /api/grants/[id]`\n**Purpose:** Update mutable grant fields including `source_type`.\n\n**Auth:** Required. Roles: `grants_manager`, `grant_researcher`.\n\n**Request Body (partial):**\n```ts\n{\n  source_type?: 'federal_government' | 'state_government' | 'local_government' |\n                'private_foundation' | 'corporate_foundation' | 'community_foundation' |\n                'international' | 'faith_based' | 'individual_donor' | 'other',\n  status?: string,\n  amount_requested?: number,  // cents\n  amount_awarded?: number,    // cents\n  deadline?: string           // ISO date\n}\n```\n\n**DB Reads:** `grants` (ownership check)\n**DB Writes:** `grants`\n\n**Errors:** 401, 403, 404, 400 INVALID_SOURCE_TYPE, 500 DB_ERROR\n\n---\n\n#### `POST /api/grants/[id]/rescore`\n**Purpose:** Trigger manual eligibility re-score via Anthropic Claude.\n\n**Auth:** Required. Roles: `grants_manager`, `grant_researcher`.\n\n**Behavior:**\n1. Fetches grant and organization's `search_profiles.eligibility_filters`.\n2. Constructs AI prompt; calls Anthropic Claude.\n3. Parses `{ score, rationale }` from response.\n4. Updates `match_percentage`, `eligibility_flag`, `eligibility_notes`, `eligibility_scored_at`.\n5. Flag thresholds: ≥80 → `high_match`; 50–79 → `moderate_match`; <50 → `low_match`.\n\n**DB Reads:** `grants`, `search_profiles`\n**DB Writes:** `grants`\n\n**Errors:** 401, 403, 404, 422 NO_SEARCH_PROFILE, 502 AI_PROVIDER_ERROR, 500 DB_ERROR\n\n---\n\n### Research\n\n#### `POST /api/research/run`\n**Purpose:** Initiate a parallel research run across all active agents.\n\n**Auth:** Required. Roles: `grants_manager`, `grant_researcher`.\n\n**Request Body:**\n```ts\n{ search_profile_id?: string }  // optional UUID override\n```\n\n**Behavior:**\n1. Checks for existing `research_runs` row with `status='running'` for org → 409 if found.\n2. INSERTs `research_runs` row (`status='running'`, `started_at=now()`).\n3. INSERTs one `research_run_agents` row per active agent (`status='pending'`).\n4. Responds immediately with `{ research_run_id, status: 'running', agent_count }`.\n5. Asynchronously: runs all agent tasks via `Promise.allSettled`; updates `research_run_agents` rows as each settles; runs deduplication pipeline; INSERTs unique grants; triggers eligibility scoring jobs; updates `research_runs.status` and `deduplication_stats`.\n\n**Deduplication Pipeline:**\n- Normalize URLs (strip UTM params, trailing slashes, lowercase).\n- Group by normalized URL; keep first occurrence.\n- For URL-less entries: fuzzy match on `(funder_name, program_name)` with Levenshtein ≤ 3.\n- Merge metadata (union tags, highest confidence score).\n- Cross-check against existing `grants` rows for org; skip if already tracked.\n\n**Agent Timeouts:** 90s per agent via `Promise.race` with `AbortController`.\n**Rate Limit Retry:** Single retry after 5s on HTTP 429.\n\n**DB Reads:** `research_runs`, `agents`, `search_profiles`\n**DB Writes:** `research_runs`, `research_run_agents`\n\n**Errors:** 401, 409 RUN_IN_PROGRESS, 422 NO_ACTIVE_AGENTS, 500 DB_ERROR\n\n---\n\n#### `GET /api/research/runs`\n**Purpose:** List past research runs with summary stats.\n\n**Auth:** Required. Roles: all.\n\n**Query Params:** `page`, `limit`\n\n**DB Reads:** `research_runs`\n\n**Errors:** 401, 500 DB_ERROR\n\n---\n\n#### `GET /api/research/runs/[id]`\n**Purpose:** Fetch a single research run with per-agent statuses and deduplication stats.\n\n**Auth:** Required. Roles: all.\n\n**Response includes:** `deduplication_stats: { total_found, duplicates_removed, unique_saved, already_tracked }`\n\n**DB Reads:** `research_runs`, `research_run_agents`\n\n**Errors:** 401, 403, 404, 500 DB_ERROR\n\n---\n\n### Search Profiles\n\n#### `GET /api/search-profiles`\n**Purpose:** Fetch the organization's search profile. Returns 404 if none exists; frontend applies hardcoded defaults.\n\n**Auth:** Required. Roles: all.\n\n**DB Reads:** `search_profiles`\n\n**Errors:** 401, 404 NOT_FOUND, 500 DB_ERROR\n\n---\n\n#### `POST /api/search-profiles`\n**Purpose:** Create or update (upsert by `organization_id`) the search profile.\n\n**Auth:** Required. Roles: `grants_manager`, `grant_researcher`.\n\n**Request Body:**\n```ts\n{\n  funding_types: string[],                  // min 1 required\n  source_type_filters: string[],\n  focus_area_weights: Record<string, number>, // 0–100 per area\n  amount_min: number,                        // cents\n  amount_max: number | null,                 // null = unlimited\n  geographic_scope: {\n    type: 'national' | 'regional' | 'state' | 'local' | 'international',\n    states?: string[]                        // required if type='state'\n  },\n  eligibility_filters: {\n    is_501c3: boolean,\n    min_years_operation: number,\n    budget_min: number | null,\n    budget_max: number | null,\n    staff_size_min: number | null,\n    staff_size_max: number | null,\n    served_populations: string[]\n  },\n  negative_filters: string[]                 // exclusion tags\n}\n```\n\n**Validation Rules:**\n- `amount_min` must be ≤ `amount_max` (when max is not null).\n- `funding_types` must have at least one entry.\n- If `geographic_scope.type === 'state'`, `states` array must be non-empty.\n- `amount_max = 0` is coerced to `null` (unlimited).\n\n**DB Reads:** `search_profiles` (upsert check)\n**DB Writes:** `search_profiles`\n\n**Errors:** 401, 400 VALIDATION_ERROR, 500 DB_ERROR\n\n---\n\n### Analytics\n\nAll analytics routes are read-only, require authentication, support all three roles, and accept optional `from`/`to` ISO date query params (defaulting to last 30 days when omitted). All queries are SQL aggregations executed server-side for performance; target response time <2s for datasets up to 10,000 grants.\n\n#### `GET /api/analytics/summary`\nReturns: `{ total_grants, total_requested, total_awarded, success_rate, previous_success_rate, amounts_incomplete_pct }`\n\n**DB Reads:** `grants`\n\n---\n\n#### `GET /api/analytics/funnel`\nReturns: `{ stage, count, drop_off_pct }[]` for stages: Discovered → Researching → Eligible → Applied → Under Review → Awarded/Rejected.\n\n**DB Reads:** `grants`\n\n---\n\n#### `GET /api/analytics/financials`\nReturns: `{ month (YYYY-MM), total_requested, total_awarded }[]` grouped by calendar month.\n\n**DB Reads:** `grants`\n\n---\n\n#### `GET /api/analytics/by-source`\nReturns: `{ source_type, count, total_amount }[]` — powers the source category pie chart.\n\n**DB Reads:** `grants`\n\n---\n\n#### `GET /api/analytics/deadlines`\nReturns: `{ date (ISO), count }[]` for grants with deadlines in the next 90 days from today.\n\n**DB Reads:** `grants`\n\n---\n\n#### `GET /api/analytics/agent-activity`\nReturns: `{ date (ISO), runs, grants_found, duplicates_removed }[]`.\n\n**DB Reads:** `research_runs`\n\n---\n\n### Alerts\n\n#### `GET /api/alerts`\n**Purpose:** List alerts for the organization.\n\n**Query Params:** `unread_only?: boolean`, `page`, `limit`\n\n**Response:** `{ data: Alert[], total, unread_count }`\n\n**DB Reads:** `alerts`\n\n**Errors:** 401, 500 DB_ERROR\n\n---\n\n#### `POST /api/alerts/[id]/read`\n**Purpose:** Mark a single alert as read.\n\n**DB Reads:** `alerts` (ownership check)\n**DB Writes:** `alerts`\n\n**Errors:** 401, 403, 404, 500 DB_ERROR\n\n---\n\n#### `POST /api/alerts/read-all`\n**Purpose:** Mark all unread alerts as read for the organization.\n\n**DB Reads:** `alerts`\n**DB Writes:** `alerts`\n\n**Response:** `{ data: { updated_count: number } }`\n\n**Errors:** 401, 500 DB_ERROR\n\n---\n\n### Consensus Validation\n\n#### `POST /api/consensus/validate`\n**Purpose:** Run multi-model consensus validation on a grant using Anthropic Claude + OpenAI GPT-4o in parallel.\n\n**Auth:** Required. Roles: `grants_manager`, `grant_researcher`.\n\n**Request Body:**\n```ts\n{ grant_id: string }\n```\n\n**Behavior:**\n1. Fetches grant details and org search profile.\n2. Runs both AI model calls in parallel via `Promise.allSettled`.\n3. Each model returns `{ verdict: string, rationale: string, score: number }`.\n4. Consensus logic: if both models agree → `validated` or `rejected`; if they disagree → `disputed`.\n5. Confidence = average of both model scores.\n6. Writes result to `consensus_validations` table and updates `grants.consensus_status`.\n\n**DB Reads:** `grants`, `search_profiles`\n**DB Writes:** `grants`, `consensus_validations`\n\n**Errors:** 401, 403, 404, 502 AI_PROVIDER_ERROR, 500 DB_ERROR\n\n---\n\n#### `GET /api/consensus/[grant_id]`\n**Purpose:** Fetch the latest consensus validation result for a grant.\n\n**DB Reads:** `consensus_validations`, `grants`\n\n**Errors:** 401, 403, 404, 500 DB_ERROR\n\n---\n\n## Background & Cron Jobs\n\n### Stale Run Cleanup — `GET /api/cron/cleanup-stale-runs`\n- **Schedule:** Every 10 minutes via Vercel Cron.\n- **Action:** Marks any `research_runs` row with `status='running'` and `started_at < now() - interval '10 minutes'` as `status='failed'`.\n- **Auth:** Vercel Cron secret header `Authorization: Bearer $CRON_SECRET`.\n\n### Eligibility Scoring (Async)\n- Triggered internally after grant INSERT during research run completion.\n- Calls Anthropic Claude; updates `grants.match_percentage`, `eligibility_flag`, `eligibility_notes`, `eligibility_scored_at`.\n- If `eligibility_flag='high_match'` and grant age <24h, INSERTs into `alerts` with `alert_type='high_match_grant'`.\n\n---\n\n## Routing Conventions\n\n- `GET /outcomes` → permanent 301 redirect to `/analytics` (Next.js `next.config.js` redirects, not an API route).\n- All Recharts components wrapped in `dynamic(() => import(...), { ssr: false })`.\n\n---\n\n## Error Code Reference\n\n| Code | HTTP | Description |\n|---|---|---|\n| UNAUTHORIZED | 401 | Missing or invalid session |\n| FORBIDDEN | 403 | Session valid but resource belongs to different org |\n| NOT_FOUND | 404 | Resource does not exist |\n| INVALID_FILTER | 400 | Invalid enum filter value |\n| INVALID_SOURCE_TYPE | 400 | source_type not in enum |\n| INVALID_DATE_RANGE | 400 | Malformed date param |\n| VALIDATION_ERROR | 400 | Zod schema validation failure with field-level details |\n| RUN_IN_PROGRESS | 409 | Concurrent research run exists |\n| NO_ACTIVE_AGENTS | 422 | No agents configured for org |\n| NO_SEARCH_PROFILE | 422 | Scoring requires search profile |\n| AI_PROVIDER_ERROR | 502 | Upstream AI provider failure |\n| DB_ERROR | 500 | Supabase database error |\n"
+}

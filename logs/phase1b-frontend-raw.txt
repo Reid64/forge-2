@@ -1,0 +1,587 @@
+{
+  "pages": [
+    {
+      "path": "/",
+      "name": "LandingPage",
+      "purpose": "Public marketing landing page with value proposition, pricing tiers, feature highlights, and CTAs to sign up or log in",
+      "components": ["HeroSection", "PricingCards", "FeatureComparisonTable", "FAQAccordion", "FinalCTABanner", "NavBar", "FooterSection"],
+      "apiCalls": [],
+      "authRequired": false,
+      "roles": [],
+      "immutable": false
+    },
+    {
+      "path": "/login",
+      "name": "LoginPage",
+      "purpose": "Supabase Auth email/password login form with redirect to /dashboard on success",
+      "components": ["AuthCard", "EmailInput", "PasswordInput", "SubmitButton", "ForgotPasswordLink", "SignUpLink"],
+      "apiCalls": [],
+      "authRequired": false,
+      "roles": [],
+      "immutable": false
+    },
+    {
+      "path": "/signup",
+      "name": "SignUpPage",
+      "purpose": "New organization registration form: org name, user email, password, role selection; creates Supabase Auth user and organization row",
+      "components": ["AuthCard", "OrgNameInput", "EmailInput", "PasswordInput", "RoleSelect", "SubmitButton", "LoginLink"],
+      "apiCalls": [],
+      "authRequired": false,
+      "roles": [],
+      "immutable": false
+    },
+    {
+      "path": "/dashboard",
+      "name": "DashboardPage",
+      "purpose": "Primary daily-use hub showing pipeline summary, recent high-match grants, upcoming deadlines, unread alert count, and quick-launch research run button",
+      "components": ["DashboardLayout", "PipelineSummaryCards", "RecentGrantsList", "UpcomingDeadlinesList", "AlertBadge", "RunResearchButton", "ResearchRunProgressPanel", "SourceTypeBadge", "EligibilityFlagBadge", "EmptyStatePlaceholder"],
+      "apiCalls": ["GET /api/grants", "GET /api/alerts", "GET /api/analytics/summary", "POST /api/research/run", "GET /api/research/runs"],
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/grants",
+      "name": "GrantsListPage",
+      "purpose": "Full paginated and filterable list of all grants for the organization with source type, eligibility flag, and status filters; inline badge display",
+      "components": ["AppLayout", "GrantsFilterPanel", "GrantsTable", "SourceTypeBadge", "EligibilityFlagBadge", "ActiveFilterChips", "PaginationControls", "EmptyStatePlaceholder", "LoadingSkeleton"],
+      "apiCalls": ["GET /api/grants"],
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/grants/[id]",
+      "name": "GrantDetailPage",
+      "purpose": "Full detail view for a single grant: editable source type, eligibility score panel, consensus validation status, AI rationale, notes, and status management",
+      "components": ["AppLayout", "GrantDetailHeader", "SourceTypeBadge", "SourceTypeSelect", "EligibilityScorePanel", "EligibilityFlagBadge", "ConsensusValidationPanel", "GrantStatusSelect", "GrantMetaFields", "ResScoreButton", "ToastNotification", "LoadingSkeleton"],
+      "apiCalls": ["GET /api/grants/[id]", "PATCH /api/grants/[id]", "POST /api/grants/[id]/rescore", "GET /api/consensus/[grant_id]", "POST /api/consensus/validate"],
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/research",
+      "name": "ResearchPage",
+      "purpose": "Research run management: launch parallel research runs, view per-agent live status, run history with deduplication stats, and link to search profile config",
+      "components": ["AppLayout", "RunResearchButton", "ResearchRunProgressPanel", "AgentStatusCard", "ResearchRunHistoryTable", "DeduplicationStatsBanner", "EmptyStatePlaceholder", "LoadingSkeleton", "ToastNotification"],
+      "apiCalls": ["POST /api/research/run", "GET /api/research/runs", "GET /api/research/runs/[id]"],
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/analytics",
+      "name": "AnalyticsDashboardPage",
+      "purpose": "Rich analytics dashboard with pipeline funnel, success rate card, financials bar chart, source category pie chart, deadline heatmap, and agent activity line chart; replaces legacy /outcomes route",
+      "components": ["AppLayout", "DateRangePicker", "PipelineFunnelChart", "SuccessRateCard", "FinancialsBarChart", "SourceCategoryPieChart", "DeadlineHeatmap", "AgentActivityLineChart", "FilterableGrantTable", "ActiveFilterChips", "EmptyStatePlaceholder", "LoadingSkeleton", "ChartWrapper"],
+      "apiCalls": ["GET /api/analytics/summary", "GET /api/analytics/funnel", "GET /api/analytics/financials", "GET /api/analytics/by-source", "GET /api/analytics/deadlines", "GET /api/analytics/agent-activity", "GET /api/grants"],
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/alerts",
+      "name": "AlertsPage",
+      "purpose": "Notification center listing all alerts (high-match grants, deadline warnings, run completions, consensus flags) with read/unread state and bulk mark-all-read",
+      "components": ["AppLayout", "AlertsList", "AlertItemCard", "MarkAllReadButton", "AlertTypeBadge", "EmptyStatePlaceholder", "LoadingSkeleton", "ToastNotification"],
+      "apiCalls": ["GET /api/alerts", "POST /api/alerts/[id]/read", "POST /api/alerts/read-all"],
+      "authRequired": true,
+      "roles": ["grants_manager", "executive_director", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/settings/search-profile",
+      "name": "SearchProfilePage",
+      "purpose": "Fully configurable search profile editor: funding type toggles, source type filters, focus area weight sliders, dollar range inputs, geographic scope selector, eligibility pre-filters, negative filters tag input, save and reset controls",
+      "components": ["AppLayout", "SearchProfileForm", "FundingTypeToggles", "SourceTypeFilterChecklist", "FocusAreaWeightSliders", "DollarRangeInputs", "GeographicScopeSelector", "StateMultiSelect", "EligibilityPrefilterFields", "NegativeFiltersTagInput", "SaveProfileButton", "ResetToDefaultsLink", "ConfirmResetModal", "FormValidationErrors", "LoadingSkeleton", "ToastNotification"],
+      "apiCalls": ["GET /api/search-profiles", "POST /api/search-profiles"],
+      "authRequired": true,
+      "roles": ["grants_manager", "grant_researcher"],
+      "immutable": false
+    },
+    {
+      "path": "/settings/organization",
+      "name": "OrganizationSettingsPage",
+      "purpose": "Organization profile management: name, logo, contact info, subscription tier display",
+      "components": ["AppLayout", "OrgProfileForm", "LogoUploader", "SaveButton", "ToastNotification", "LoadingSkeleton"],
+      "apiCalls": [],
+      "authRequired": true,
+      "roles": ["grants_manager"],
+      "immutable": false
+    },
+    {
+      "path": "/settings/team",
+      "name": "TeamSettingsPage",
+      "purpose": "Team member management: invite by email, assign roles (grants_manager, grant_researcher, executive_director), revoke access",
+      "components": ["AppLayout", "TeamMembersTable", "InviteMemberForm", "RoleSelect", "RevokeAccessButton", "ToastNotification", "LoadingSkeleton", "EmptyStatePlaceholder"],
+      "apiCalls": [],
+      "authRequired": true,
+      "roles": ["grants_manager"],
+      "immutable": false
+    }
+  ],
+  "components": [
+    {
+      "name": "NavBar",
+      "type": "layout",
+      "description": "Top navigation bar for public pages. Contains Benavora logo (Cormorant Garamond, #7C3AED), nav links, Login and Sign Up CTA buttons (#F97316). Sticky on scroll. Height 64px. Shadow: --shadow-sm."
+    },
+    {
+      "name": "AppLayout",
+      "type": "layout",
+      "description": "Authenticated shell wrapper: fixed left sidebar (240px wide) containing logo, nav links to /dashboard, /grants, /research, /analytics, /alerts (with unread badge), /settings/search-profile, /settings/organization, /settings/team. Main content area with top header bar showing user avatar menu. Background #FAF5FF. Sidebar background #7C3AED with white text."
+    },
+    {
+      "name": "DashboardLayout",
+      "type": "layout",
+      "description": "Specialized dashboard grid layout wrapping the /dashboard page. Uses CSS grid with 3-column layout at 1440px, 2-column at 768px, single-column at 375px. Extends AppLayout."
+    },
+    {
+      "name": "HeroSection",
+      "type": "section",
+      "description": "Full-width landing hero with headline (Cormorant Garamond 56px, #4C1D95), subheadline (Libre Baskerville 18px), primary CTA button (#F97316), and secondary CTA outline button (#7C3AED). Background gradient from #FAF5FF to #EDE9FE. Min-height 600px."
+    },
+    {
+      "name": "PricingCards",
+      "type": "section",
+      "description": "Three-column pricing card section. Cards use .card spec (background #FAF5FF, border-radius 12px, shadow-md). Middle card (Most Popular) has #7C3AED border 2px and a 'Most Popular' badge. CTA buttons use .btn-primary. Annual/monthly toggle above cards."
+    },
+    {
+      "name": "FeatureComparisonTable",
+      "type": "section",
+      "description": "Full-width table comparing features across pricing tiers. Headers in Cormorant Garamond 18px #7C3AED. Check marks use Lucide CheckCircle icon in #7C3AED; X marks use Lucide XCircle in #9CA3AF. Row dividers: 1px solid #E2E8F0."
+    },
+    {
+      "name": "FAQAccordion",
+      "type": "section",
+      "description": "Accordion FAQ section. Each item has a question (Libre Baskerville 16px bold #4C1D95) and collapsible answer. Expand/collapse uses Lucide ChevronDown icon with 200ms rotation transition. Border-bottom 1px solid #E2E8F0 between items."
+    },
+    {
+      "name": "FinalCTABanner",
+      "type": "section",
+      "description": "Full-width banner at page bottom with headline, subtext, and two CTA buttons. Background #7C3AED, white text. Primary CTA #F97316, secondary CTA outlined white."
+    },
+    {
+      "name": "FooterSection",
+      "type": "section",
+      "description": "Footer with logo, nav links, legal links (Privacy Policy, Terms of Service), and copyright text. Background #4C1D95, text white/lavender. 3-column grid at desktop, stacked at mobile."
+    },
+    {
+      "name": "AuthCard",
+      "type": "container",
+      "description": "Centered auth form card. Max-width 400px. Background white. Border-radius 16px. Shadow --shadow-xl. Padding 32px. Contains logo, heading (Cormorant Garamond 28px #4C1D95), and form fields."
+    },
+    {
+      "name": "SourceTypeBadge",
+      "type": "display",
+      "description": "Pill badge displaying grant source type. Color map: federal_government=#3B82F6(blue), state_government=#6366F1(indigo), local_government=#8B5CF6(violet), private_foundation=#10B981(emerald), corporate_foundation=#14B8A6(teal), community_foundation=#06B6D4(cyan), international=#F59E0B(amber), faith_based=#F97316(orange), individual_donor=#EC4899(pink), other=#6B7280(gray), null/uncategorized=#9CA3AF(gray). Font Libre Baskerville 12px. Padding 2px 8px. Border-radius 9999px. White text."
+    },
+    {
+      "name": "EligibilityFlagBadge",
+      "type": "display",
+      "description": "Badge for eligibility scoring state. high_match: green background #10B981, white text, Lucide Star icon, label 'High Match'. moderate_match: yellow background #F59E0B, white text, Lucide Minus icon, label 'Moderate Match'. low_match: no badge shown by default. unscored: gray #9CA3AF, label 'Unscored' or 'Scoring...' spinner. Font 12px Libre Baskerville."
+    },
+    {
+      "name": "AlertBadge",
+      "type": "display",
+      "description": "Red circular badge with unread alert count overlaid on Lucide Bell icon in sidebar nav. Background #EF4444, white text, font-size 11px. Disappears when count is 0."
+    },
+    {
+      "name": "AlertTypeBadge",
+      "type": "display",
+      "description": "Small pill badge for alert type categorization. high_match_grant: green. deadline_warning: orange #F97316. run_complete: purple #7C3AED. consensus_flag: red #EF4444. Font 11px."
+    },
+    {
+      "name": "RunResearchButton",
+      "type": "interactive",
+      "description": "Primary CTA button triggering POST /api/research/run. Uses .btn-primary spec. Label: 'Run Research'. Shows Lucide Zap icon. Disabled state when run in progress with tooltip 'A research run is already in progress.' Disabled: opacity 0.5, cursor-not-allowed."
+    },
+    {
+      "name": "ResearchRunProgressPanel",
+      "type": "interactive",
+      "description": "Real-time panel shown during active research runs. Lists each agent as a card with name, status badge (Queued/Running/Completed/Failed), and animated spinner for Running state. Uses Supabase Realtime subscription. Dismisses on run completion. Background white, border-radius 12px, shadow-md, padding 24px."
+    },
+    {
+      "name": "AgentStatusCard",
+      "type": "display",
+      "description": "Individual agent status card inside ResearchRunProgressPanel. Shows agent name (Libre Baskerville 14px), status badge, and optional error message. Status colors: Queued=gray, Running=#7C3AED with Lucide Loader spin animation, Completed=#10B981, Failed=#EF4444."
+    },
+    {
+      "name": "DeduplicationStatsBanner",
+      "type": "display",
+      "description": "Post-run summary banner: 'Research complete. Found [N] opportunities, removed [M] duplicates, saved [K] unique grants.' Background #EDE9FE, text #4C1D95, Lucide CheckCircle icon. Auto-dismisses after 10 seconds or on manual close."
+    },
+    {
+      "name": "GrantsFilterPanel",
+      "type": "interactive",
+      "description": "Left-side or top collapsible filter panel for grants list. Contains: source type multi-select checkboxes, eligibility flag radio group (All/High Match/Moderate/Low/Unscored), status select, date range inputs. Updates URL query params on change. On mobile: collapses into a 'Filters' drawer triggered by Lucide SlidersHorizontal icon button."
+    },
+    {
+      "name": "GrantsTable",
+      "type": "display",
+      "description": "Paginated data table of grants. Columns: Grant Name (link), Funder, Source Type (SourceTypeBadge), Eligibility (EligibilityFlagBadge), Match %, Status, Amount, Deadline, Actions. Sortable columns. Row click navigates to /grants/[id]. Font Libre Baskerville 14px. Row hover background #F5F3FF. Striped rows: alternate #FAF5FF / white."
+    },
+    {
+      "name": "ActiveFilterChips",
+      "type": "display",
+      "description": "Horizontal scrollable row of active filter chips above list/table. Each chip shows filter label with Lucide X dismiss button. Clearing a chip removes that filter from URL params. 'Clear All' text link at end."
+    },
+    {
+      "name": "PaginationControls",
+      "type": "interactive",
+      "description": "Page navigation: Previous/Next buttons (.btn-secondary), current page indicator, page size select (10/25/50). Font Libre Baskerville 14px. Disabled state for Previous on page 1, Next on last page."
+    },
+    {
+      "name": "GrantDetailHeader",
+      "type": "display",
+      "description": "Top section of grant detail page: grant name (Cormorant Garamond 32px #4C1D95), funder name, SourceTypeBadge, EligibilityFlagBadge, match percentage circle, deadline display, status select. Background white, padding 32px, shadow-sm, border-radius 12px."
+    },
+    {
+      "name": "SourceTypeSelect",
+      "type": "interactive",
+      "description": "Dropdown select for manual source type assignment on Grant Detail. Renders all enum values as human-readable options. On change triggers PATCH /api/grants/[id]. Optimistic update with rollback on error. Uses .input CSS spec with 8px border-radius."
+    },
+    {
+      "name": "EligibilityScorePanel",
+      "type": "display",
+      "description": "Expandable accordion panel on Grant Detail. Shows: circular progress indicator (0-100, color green ≥80, yellow 50-79, red <50), AI rationale text (Libre Baskerville 14px #4C1D95), scoring timestamp, ResScoreButton. Collapsed by default; expand via 'View Eligibility Details' link."
+    },
+    {
+      "name": "ResScoreButton",
+      "type": "interactive",
+      "description": "Button to trigger manual re-scoring POST /api/grants/[id]/rescore. Label 'Re-score'. Uses .btn-secondary spec. Loading state: spinner with label 'Scoring...'. Disabled while in-flight."
+    },
+    {
+      "name": "ConsensusValidationPanel",
+      "type": "display",
+      "description": "Panel on Grant Detail showing multi-model consensus validation results. Displays: primary model (Claude) result with confidence, secondary model (GPT-4o) result with confidence, consensus outcome (Validated/Disputed/Pending), reasoning summary. Lucide ShieldCheck icon for Validated (green), Lucide AlertTriangle for Disputed (orange). Button 'Validate Now' triggers POST /api/consensus/validate."
+    },
+    {
+      "name": "GrantStatusSelect",
+      "type": "interactive",
+      "description": "Dropdown to change grant pipeline status. Values: Discovered, Researching, Eligible, Applied, Under Review, Awarded, Rejected. PATCH /api/grants/[id] on change. Optimistic update."
+    },
+    {
+      "name": "GrantMetaFields",
+      "type": "display",
+      "description": "Structured metadata section on Grant Detail: description (full text, Libre Baskerville 14px), eligibility_notes, amount_requested/awarded, URL (external link with Lucide ExternalLink icon), tags, created_at, last updated."
+    },
+    {
+      "name": "ResearchRunHistoryTable",
+      "type": "display",
+      "description": "Table of past research runs. Columns: Run ID, Started, Completed, Status badge, Agents (count), Total Found, Duplicates Removed, Unique Saved, Profile Used. Row click shows run detail drawer. Font Libre Baskerville 14px."
+    },
+    {
+      "name": "DateRangePicker",
+      "type": "interactive",
+      "description": "Preset date range selector for analytics. Options: Last 30 Days, Last 90 Days, Last 12 Months, All Time. Renders as segmented button group. Selected state: background #7C3AED, white text. Updates URL query params. Accessible via keyboard."
+    },
+    {
+      "name": "ChartWrapper",
+      "type": "container",
+      "description": "HOC wrapper for all Recharts components. Applies dynamic(() => import(...), { ssr: false }) pattern to prevent hydration mismatch. Renders LoadingSkeleton while loading. Card container: background white, border-radius 12px, padding 24px, shadow-md."
+    },
+    {
+      "name": "PipelineFunnelChart",
+      "type": "chart",
+      "description": "Recharts FunnelChart rendered via ChartWrapper. Stages: Discovered → Researching → Eligible → Applied → Under Review → Awarded/Rejected. Fill color #7C3AED gradient. Count labels on each segment. Drop-off percentage between stages. Empty state: EmptyStatePlaceholder with Lucide GitFork icon."
+    },
+    {
+      "name": "SuccessRateCard",
+      "type": "display",
+      "description": "Metric card: large percentage (Cormorant Garamond 48px #4C1D95), label 'Success Rate', trend arrow (Lucide TrendingUp green / TrendingDown red) vs previous period. Card spec: background white, border-radius 12px, shadow-md, padding 24px. No applications state: shows em-dash with note."
+    },
+    {
+      "name": "FinancialsBarChart",
+      "type": "chart",
+      "description": "Recharts BarChart via ChartWrapper. Two bars per month: Amount Requested (#7C3AED) and Amount Awarded (#F97316). X-axis: month labels. Y-axis: dollar-formatted. Custom tooltip with exact values. Empty state at zero renders placeholder bars."
+    },
+    {
+      "name": "SourceCategoryPieChart",
+      "type": "chart",
+      "description": "Recharts PieChart via ChartWrapper. Slices per source_type using same hex colors as SourceTypeBadge. Legend below chart. Hover tooltip: source type, count, total dollars. Click slice updates FilterableGrantTable. Empty state: single gray slice with prompt."
+    },
+    {
+      "name": "DeadlineHeatmap",
+      "type": "chart",
+      "description": "Calendar grid heatmap via ChartWrapper. 90-day lookahead. Each day cell colored by deadline count: 0=white, 1=#EDE9FE, 2-3=#C4B5FD, 4+=#7C3AED. Click cell filters FilterableGrantTable. Empty state: light grid with message."
+    },
+    {
+      "name": "AgentActivityLineChart",
+      "type": "chart",
+      "description": "Recharts LineChart via ChartWrapper. Two lines: Research Runs (#7C3AED) and Grants Discovered (#F97316). X-axis: dates. Y-axis: count. Dot markers on data points. Legend. Empty state with Lucide BotMessageSquare icon."
+    },
+    {
+      "name": "FilterableGrantTable",
+      "type": "display",
+      "description": "Grants table on analytics page that reacts to chart filter interactions (pie slice click, heatmap day click). Shares filter state via React context. Columns: Grant Name, Source Type, Status, Match %, Deadline. Paginated. Empty state when no grants match filter."
+    },
+    {
+      "name": "AlertsList",
+      "type": "display",
+      "description": "Scrollable list of AlertItemCards on /alerts page. Grouped by date (Today, Yesterday, Earlier). Unread items have left border 3px solid #7C3AED and background #F5F3FF. Read items background white. Sorted by created_at desc."
+    },
+    {
+      "name": "AlertItemCard",
+      "type": "display",
+      "description": "Single alert row card. Shows AlertTypeBadge, alert message (Libre Baskerville 14px), relative timestamp, and if linked to a grant, a 'View Grant' link. Click marks as read via POST /api/alerts/[id]/read. Cursor pointer. Transition 200ms on hover."
+    },
+    {
+      "name": "MarkAllReadButton",
+      "type": "interactive",
+      "description": "Button at top of /alerts page. Label 'Mark All Read'. .btn-secondary spec. Triggers POST /api/alerts/read-all. Disabled when no unread alerts. Success: all AlertItemCards transition to read state."
+    },
+    {
+      "name": "SearchProfileForm",
+      "type": "form",
+      "description": "Full search profile editor form container on /settings/search-profile. Sections: Funding Types, Source Filters, Focus Areas, Dollar Range, Geographic Scope, Eligibility Pre-filters, Negative Filters. Footer: SaveProfileButton + ResetToDefaultsLink. Form state managed with React Hook Form."
+    },
+    {
+      "name": "FundingTypeToggles",
+      "type": "interactive",
+      "description": "Toggle switches for: Grants, Fellowships, Contracts, Loans, In-Kind, Other. Each uses styled checkbox as switch (purple #7C3AED when on). At least one must be selected. Validation error shown if all deselected on save attempt."
+    },
+    {
+      "name": "SourceTypeFilterChecklist",
+      "type": "interactive",
+      "description": "Checklist of source type enum values for search profile filtering. Same labels as SourceTypeBadge. Each row: checkbox + label. Stores checked values in search_profiles.source_type_filters."
+    },
+    {
+      "name": "FocusAreaWeightSliders",
+      "type": "interactive",
+      "description": "Weight editor for 12 focus areas: Education, Health, Environment, Arts, Housing, Food Security, Workforce, Youth, Seniors, Disability, Immigration, Other. Each area: label + range input (0-100) + numeric display. Running sum displayed as 'Total Weight: [N]'. Sum display only, not enforced to 100."
+    },
+    {
+      "name": "DollarRangeInputs",
+      "type": "interactive",
+      "description": "Two currency-formatted number inputs: Minimum Award and Maximum Award. Inline validation: min > max shows error 'Minimum amount cannot exceed maximum amount.' Max=0 displayed as 'No upper limit'. Format: $X,XXX display."
+    },
+    {
+      "name": "GeographicScopeSelector",
+      "type": "interactive",
+      "description": "Segmented button group: National, Regional, State-specific, Local/County, International. On 'State-specific' select, reveals StateMultiSelect below. Selected state chips displayed."
+    },
+    {
+      "name": "StateMultiSelect",
+      "type": "interactive",
+      "description": "Multi-select dropdown of all 50 US states (2-letter abbreviation values, full name labels). Selected states shown as dismissible chips. Requires at least one state if State-specific scope selected. Searchable input to filter states list."
+    },
+    {
+      "name": "EligibilityPrefilterFields",
+      "type": "interactive",
+      "description": "Form section with: 501(c)(3) toggle, years in operation min input, annual budget range (min/max), staff size range (min/max), served population tags (free-text tag input). All stored in eligibility_filters JSONB."
+    },
+    {
+      "name": "NegativeFiltersTagInput",
+      "type": "interactive",
+      "description": "Tag input for exclusion keywords/funder names/regions. Enter or comma to add tag. Each tag rendered as dismissible chip (#EF4444 border, gray background). Duplicate detection: highlights existing chip briefly (200ms pulse animation) without adding. Warning message shown if >100 tags."
+    },
+    {
+      "name": "SaveProfileButton",
+      "type": "interactive",
+      "description": ".btn-primary button labeled 'Save Search Profile'. Disabled during validation errors or network in-flight. Loading state shows spinner."
+    },
+    {
+      "name": "ResetToDefaultsLink",
+      "type": "interactive",
+      "description": "Text link 'Reset to Defaults' (Libre Baskerville 14px, #7C3AED underline). Triggers ConfirmResetModal. Cursor pointer."
+    },
+    {
+      "name": "ConfirmResetModal",
+      "type": "modal",
+      "description": "Confirmation modal using .modal spec. Title: 'Reset Search Profile'. Body: 'This will reset all search profile settings to system defaults. Continue?' Two buttons: 'Cancel' (.btn-secondary) and 'Reset' (.btn-primary #EF4444 background). Backdrop blur 4px."
+    },
+    {
+      "name": "PipelineSummaryCards",
+      "type": "display",
+      "description": "Row of 4 metric cards on Dashboard: Total Grants, High Match Grants, Applications This Month, Success Rate. Each card: white background, border-radius 12px, shadow-md, padding 24px, large number (Cormorant Garamond 36px #4C1D95), label (Libre Baskerville 12px #7C3AED)."
+    },
+    {
+      "name": "RecentGrantsList",
+      "type": "display",
+      "description": "Dashboard widget showing 5 most recently discovered grants. Each row: grant name link, SourceTypeBadge, EligibilityFlagBadge, deadline. Card container white, padding 24px, border-radius 12px, shadow-sm. 'View All Grants' link at bottom."
+    },
+    {
+      "name": "UpcomingDeadlinesList",
+      "type": "display",
+      "description": "Dashboard widget showing grants with deadlines in next 30 days, sorted ascending. Each row: grant name, days until deadline (red if ≤7 days), amount. Empty state: 'No upcoming deadlines.' Card container white, padding 24px, border-radius 12px, shadow-sm."
+    },
+    {
+      "name": "EmptyStatePlaceholder",
+      "type": "display",
+      "description": "Reusable empty state component. Props: icon (Lucide SVG), heading (Cormorant Garamond 20px #4C1D95), subtext (Libre Baskerville 14px #7C3AED), optional CTA button. Centered layout, padding 48px."
+    },
+    {
+      "name": "LoadingSkeleton",
+      "type": "display",
+      "description": "Animated shimmer placeholder for data-loading states. Renders gray rounded rectangles matching approximate layout of target component. Uses CSS animation: pulse 1.5s ease-in-out infinite. Background: linear-gradient(90deg, #E2E8F0, #F1F5F9, #E2E8F0)."
+    },
+    {
+      "name": "ToastNotification",
+      "type": "feedback",
+      "description": "Slide-in toast notifications. Position: bottom-right, 16px offset. Types: success (left border #10B981), warning (left border #F59E0B), error (left border #EF4444), info (left border #7C3AED). Auto-dismiss after 5 seconds. Manual close via Lucide X button. Font Libre Baskerville 14px. Background white, shadow-lg, border-radius 8px, padding 16px."
+    },
+    {
+      "name": "OrgProfileForm",
+      "type": "form",
+      "description": "Organization settings form with fields: organization name, contact email, website URL, mission statement (textarea). .input CSS spec on all fields. SaveButton triggers upsert. LogoUploader component for org logo."
+    },
+    {
+      "name": "LogoUploader",
+      "type": "interactive",
+      "description": "Drag-and-drop or click-to-upload logo uploader. Max file size 2MB, accepts PNG/JPG/SVG. Preview shown after upload. Supabase Storage bucket upload. Border-dashed 2px #7C3AED, border-radius 12px, background #F5F3FF, padding 24px."
+    },
+    {
+      "name": "TeamMembersTable",
+      "type": "display",
+      "description": "Table of current team members. Columns: Name, Email, Role (RoleSelect dropdown), Status (Active/Invited), Actions (RevokeAccessButton). Font Libre Baskerville 14px. Empty state: EmptyStatePlaceholder with Lucide Users icon."
+    },
+    {
+      "name": "InviteMemberForm",
+      "type": "form",
+      "description": "Inline form: Email input + RoleSelect + 'Send Invite' .btn-primary button. Validates email format. On success: new row added to TeamMembersTable with Invited status. Toast confirmation."
+    },
+    {
+      "name": "RoleSelect",
+      "type": "interactive",
+      "description": "Select dropdown for role assignment. Options: Grants Manager (grants_manager), Executive Director (executive_director), Grant Researcher (grant_researcher). .input CSS spec."
+    },
+    {
+      "name": "RevokeAccessButton",
+      "type": "interactive",
+      "description": "Danger action button in TeamMembersTable. Label 'Revoke'. Renders as small .btn-secondary with red border (#EF4444). Triggers confirmation modal before action."
+    },
+    {
+      "name": "FormValidationErrors",
+      "type": "display",
+      "description": "Inline validation error messages below form fields. Font Libre Baskerville 12px, color #EF4444. Icons: Lucide AlertCircle 14px inline. Fade-in transition 150ms on appear."
+    },
+    {
+      "name": "EmailInput",
+      "type": "interactive",
+      "description": "Controlled email input using .input CSS spec. type=email, autocomplete=email, required. Inline validation error via FormValidationErrors."
+    },
+    {
+      "name": "PasswordInput",
+      "type": "interactive",
+      "description": "Password input with Lucide Eye/EyeOff toggle for show/hide. type=password, autocomplete. .input CSS spec. Strength meter shown on signup (4 levels: weak/fair/good/strong)."
+    },
+    {
+      "name": "SaveButton",
+      "type": "interactive",
+      "description": "Generic save button using .btn-primary spec. Label configurable via prop. Loading state: Lucide Loader spin animation with label 'Saving...'. Disabled when in-flight or no changes."
+    }
+  ],
+  "layouts": [
+    {
+      "name": "PublicLayout",
+      "description": "Layout for unauthenticated pages (/, /login, /signup). Contains NavBar at top (sticky, 64px), full-width main content area, FooterSection at bottom. Background #FAF5FF. No sidebar.",
+      "appliesTo": ["/", "/login", "/signup"]
+    },
+    {
+      "name": "AppLayout",
+      "description": "Authenticated application shell. Fixed left sidebar 240px: background #7C3AED, white text/icons, Lucide SVG nav icons, AlertBadge on Alerts link. Top header bar 64px: background white, shadow-sm, breadcrumb left, user avatar menu right. Main content area: margin-left 240px, padding 32px, background #FAF5FF. Responsive: sidebar collapses to 64px icon-only at 1024px, off-canvas drawer at 768px and below.",
+      "appliesTo": ["/dashboard", "/grants", "/grants/[id]", "/research", "/analytics", "/alerts", "/settings/search-profile", "/settings/organization", "/settings/team"]
+    },
+    {
+      "name": "DashboardLayout",
+      "description": "Extends AppLayout. Main content uses CSS grid: 12-column at 1440px, 8-column at 1024px, 4-column at 768px, 1-column at 375px. PipelineSummaryCards span full width. Charts and lists in 2-column grid at desktop, single column at mobile.",
+      "appliesTo": ["/dashboard"]
+    },
+    {
+      "name": "AnalyticsLayout",
+      "description": "Extends AppLayout. Two-row layout: top row contains DateRangePicker and SuccessRateCard; second row is a 2x3 grid of chart cards at desktop (PipelineFunnelChart, FinancialsBarChart, SourceCategoryPieChart, DeadlineHeatmap, AgentActivityLineChart); FilterableGrantTable below charts full width. All chart cards equal height 400px.",
+      "appliesTo": ["/analytics"]
+    },
+    {
+      "name": "SettingsLayout",
+      "description": "Extends AppLayout. Two-column layout: left secondary nav (200px) listing settings sections (Search Profile, Organization, Team) with active state indicator (#F97316 left border 3px). Right content area renders active settings page. Collapses to tab bar on mobile.",
+      "appliesTo": ["/settings/search-profile", "/settings/organization", "/settings/team"]
+    }
+  ],
+  "designTokens": {
+    "colors": {
+      "primary": "#7C3AED",
+      "secondary": "#A78BFA",
+      "cta": "#F97316",
+      "background": "#FAF5FF",
+      "text": "#4C1D95",
+      "textMuted": "#6B7280",
+      "textLight": "#9CA3AF",
+      "surface": "#FFFFFF",
+      "surfaceHover": "#F5F3FF",
+      "border": "#E2E8F0",
+      "borderFocus": "#7C3AED",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6",
+      "sourceType": {
+        "federal_government": "#3B82F6",
+        "state_government": "#6366F1",
+        "local_government": "#8B5CF6",
+        "private_foundation": "#10B981",
+        "corporate_foundation": "#14B8A6",
+        "community_foundation": "#06B6D4",
+        "international": "#F59E0B",
+        "faith_based": "#F97316",
+        "individual_donor": "#EC4899",
+        "other": "#6B7280"
+      }
+    },
+    "typography": {
+      "headingFont": "Cormorant Garamond",
+      "bodyFont": "Libre Baskerville",
+      "googleFontsUrl": "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&display=swap",
+      "scale": {
+        "xs": "11px",
+        "sm": "12px",
+        "base": "14px",
+        "md": "16px",
+        "lg": "18px",
+        "xl": "20px",
+        "2xl": "24px",
+        "3xl": "28px",
+        "4xl": "32px",
+        "5xl": "36px",
+        "6xl": "48px",
+        "hero": "56px"
+      },
+      "weights": {
+        "regular": "400",
+        "semibold": "600",
+        "bold": "700"
+      },
+      "lineHeights": {
+        "tight": "1.25",
+        "normal": "1.5",
+        "relaxed": "1.75"
+      }
+    },
+    "spacing": {
+      "xs": "4px",
+      "sm": "8px",
+      "md": "16px",
+      "lg": "24px",
+      "xl": "32px",
+      "2xl": "48px",
+      "3xl": "64px"
+    },
+    "radii": {
+      "sm": "4px",
+      "md": "8px",
+      "lg": "12px",
+      "xl": "16px",
+      "full": "9999px"
+    },
+    "shadows": {
+      "sm": "0 1px 2px rgba(0,0,0,0.05)",
+      "md": "0 4px 6px rgba(0,0,0,0.1)",
+      "lg": "0 10px 15px rgba(0,0,0,0.1)",
+      "xl": "0 20px 25px rgba(0,0,0,0.15)"
+    }
+  },
+  "responsiveStrategy": "Mobile-first with 4 explicit breakpoints: 375px (mobile), 768px (tablet), 1024px (laptop), 1440px (desktop). AppLayout sidebar: full 240px at ≥1024px, icon-only 64px at 768px-1023px, off-canvas drawer at <768px triggered by Lucide Menu icon. Grid columns: 1 at mobile, 2 at tablet, 3-4 at desktop. All chart components use ResponsiveContainer from Recharts to fill parent width. Typography scales: hero headlines reduce from 56px to 36px at mobile. Tables switch to card-stack layout at <768px. Touch targets minimum 44px height on all interactive elements. Horizontal scroll prevented globally via overflow-x:hidden on body. Content never hidden behind fixed elements via appropriate padding-top on main content areas.",
+  "markdown": "# Frontend Architecture — benavora Tier 2\n\n## Overview\n\nBenavora is an AI-powered nonprofit funding discovery and management platform. This document describes the complete frontend architecture for the Tier 2 feature set, covering all pages, components, layouts, design tokens, and responsive strategy.\n\nThe stack is **Next.js 14 (App Router)**, **TypeScript strict**, **Supabase** (Postgres + Auth + RLS), deployed on **Vercel**, managed with **pnpm**.\n\n---\n\n## Design System Conformance\n\nAll UI strictly uses the benavora design system:\n\n- **Primary:** `#7C3AED` (violet/purple)\n- **CTA/Accent:** `#F97316` (orange)\n- **Background:** `#FAF5FF`\n- **Text:** `#4C1D95`\n- **Heading Font:** Cormorant Garamond\n- **Body Font:** Libre Baskerville\n- Google Fonts CDN import included in root `layout.tsx`\n- All interactive elements: `cursor-pointer`, transitions 150–300ms, visible focus states\n- No emojis as icons — Lucide React SVG icons throughout\n- Minimum 4.5:1 contrast ratio on all text\n- `prefers-reduced-motion` respected via CSS media query\n\n---\n\n## Layouts\n\n### PublicLayout\nApplies to: `/`, `/login`, `/signup`\n\nSticky NavBar (64px) → full-width main content → FooterSection. Background `#FAF5FF`. No sidebar.\n\n### AppLayout\nApplies to all authenticated routes.\n\nFixed left sidebar (240px, background `#7C3AED`, white icons/text) containing:\n- Benavora logo\n- Nav links: Dashboard, Grants, Research, Analytics, Alerts (with red unread badge), Settings sections\n- User avatar at bottom\n\nTop header bar (64px, white, shadow-sm) with breadcrumb and user menu.\n\nMain content: `margin-left: 240px`, `padding: 32px`, background `#FAF5FF`.\n\nResponsive collapse: icon-only sidebar at 768–1023px; off-canvas drawer below 768px.\n\n### DashboardLayout\nExtends AppLayout with a 12-column CSS grid at 1440px, scaling to single column at 375px.\n\n### AnalyticsLayout\nExtends AppLayout. Top row: DateRangePicker + SuccessRateCard. Chart grid (2×3) at desktop. FilterableGrantTable below full-width. All chart cards fixed 400px height.\n\n### SettingsLayout\nExtends AppLayout. Left secondary nav (200px) with Settings sections. Active state: `#F97316` left border 3px. Collapses to tab bar on mobile.\n\n---\n\n## Pages\n\n### `/` — LandingPage\nPublic marketing page. Section order: Hero → Pricing Cards (3 tiers, middle card highlighted) → Feature Comparison Table → FAQ Accordion → Final CTA Banner → Footer. Implements pricing-focused landing pattern per design system.\n\n### `/login` — LoginPage\nCentered AuthCard. Email + Password inputs. Submit triggers Supabase Auth `signInWithPassword`. Redirect to `/dashboard` on success.\n\n### `/signup` — SignUpPage\nCentered AuthCard. Org name + Email + Password + Role select. Creates Supabase Auth user and organization record.\n\n### `/dashboard` — DashboardPage\n**Auth required. Roles: all.**\n\nAPI calls: `GET /api/grants`, `GET /api/alerts`, `GET /api/analytics/summary`, `POST /api/research/run`, `GET /api/research/runs`\n\nKey components:\n- **PipelineSummaryCards**: 4 metric cards (Total Grants, High Match, Applications This Month, Success Rate)\n- **RecentGrantsList**: 5 most recent grants with SourceTypeBadge + EligibilityFlagBadge\n- **UpcomingDeadlinesList**: Grants due within 30 days; red text if ≤7 days\n- **RunResearchButton**: Disabled with tooltip if run in progress (HTTP 409 check)\n- **ResearchRunProgressPanel**: Supabase Realtime subscription for live agent status\n- **AlertBadge**: Unread count badge on sidebar icon\n\nEmpty state: \"Your dashboard is ready. Run your first research session to discover grants.\"\n\n### `/grants` — GrantsListPage\n**Auth required. Roles: all.**\n\nAPI calls: `GET /api/grants` (with filter params)\n\n- **GrantsFilterPanel**: Source type, eligibility flag, status, date range; URL-param driven\n- **GrantsTable**: Paginated, sortable; SourceTypeBadge and EligibilityFlagBadge inline\n- **ActiveFilterChips**: Dismissible active filter display\n- Empty state when no grants match filters\n\n### `/grants/[id]` — GrantDetailPage\n**Auth required. Roles: grants_manager, grant_researcher.**\n\nAPI calls: `GET /api/grants/[id]`, `PATCH /api/grants/[id]`, `POST /api/grants/[id]/rescore`, `GET /api/consensus/[grant_id]`, `POST /api/consensus/validate`\n\n- **GrantDetailHeader**: Name, funder, badges, deadline, status select\n- **SourceTypeSelect**: Dropdown PATCH with optimistic update and rollback\n- **EligibilityScorePanel**: Accordion — circular score, AI rationale, ResScoreButton\n- **ConsensusValidationPanel**: Dual-model results (Claude + GPT-4o), consensus outcome\n- **GrantMetaFields**: Full description, amounts, URL, tags\n\nError states: permission denied toast, network failure rollback.\n\n### `/research` — ResearchPage\n**Auth required. Roles: grants_manager, grant_researcher.**\n\nAPI calls: `POST /api/research/run`, `GET /api/research/runs`, `GET /api/research/runs/[id]`\n\n- **RunResearchButton**: Primary action, disabled on active run\n- **ResearchRunProgressPanel**: Real-time per-agent status cards via Supabase Realtime\n- **DeduplicationStatsBanner**: Post-run summary (Found N, removed M, saved K)\n- **ResearchRunHistoryTable**: Historical runs with stats\n\nEdge cases: concurrent run prevention (HTTP 409), partial failure warning toast, all-failed error toast.\n\n### `/analytics` — AnalyticsDashboardPage\n**Auth required. Roles: all.**\n\nAPI calls: `GET /api/analytics/summary`, `GET /api/analytics/funnel`, `GET /api/analytics/financials`, `GET /api/analytics/by-source`, `GET /api/analytics/deadlines`, `GET /api/analytics/agent-activity`, `GET /api/grants`\n\n**Note:** `/outcomes` redirects to `/analytics` via HTTP 301.\n\nAll Recharts components wrapped in `ChartWrapper` with `dynamic(() => import(...), { ssr: false })` to prevent SSR hydration mismatch.\n\n- **DateRangePicker**: Last 30d / 90d / 12mo / All Time; URL-param driven\n- **PipelineFunnelChart**: Stages with drop-off percentages\n- **SuccessRateCard**: awarded/applied %, trend vs prior period\n- **FinancialsBarChart**: Monthly requested vs awarded grouped bars\n- **SourceCategoryPieChart**: Source type breakdown; click-to-filter\n- **DeadlineHeatmap**: 90-day calendar; color intensity by deadline count; click-to-filter\n- **AgentActivityLineChart**: Runs + discoveries over time\n- **FilterableGrantTable**: Reacts to chart click filters via shared React context\n\nOrg with zero grants shows page-level empty state message.\n\n### `/alerts` — AlertsPage\n**Auth required. Roles: all.**\n\nAPI calls: `GET /api/alerts`, `POST /api/alerts/[id]/read`, `POST /api/alerts/read-all`\n\n- **AlertsList**: Grouped by date (Today / Yesterday / Earlier)\n- **AlertItemCard**: Type badge, message, timestamp, optional 'View Grant' link; click marks read\n- **MarkAllReadButton**: Disabled when no unread alerts\n\nAlert types: `high_match_grant` (green), `deadline_warning` (orange), `run_complete` (purple), `consensus_flag` (red)\n\n### `/settings/search-profile` — SearchProfilePage\n**Auth required. Roles: grants_manager, grant_researcher.**\n\nAPI calls: `GET /api/search-profiles`, `POST /api/search-profiles` (upsert)\n\n- **FundingTypeToggles**: Grants, Fellowships, Contracts, Loans, In-Kind, Other; at least one required\n- **SourceTypeFilterChecklist**: Source type enum multi-select\n- **FocusAreaWeightSliders**: 12 areas, 0–100 each, running sum display\n- **DollarRangeInputs**: Min ≤ max validation; max=0 → NULL (no upper limit)\n- **GeographicScopeSelector**: National/Regional/State-specific/Local/International; reveals StateMultiSelect conditionally\n- **EligibilityPrefilterFields**: 501(c)(3), years, budget, staff, populations\n- **NegativeFiltersTagInput**: Dismissible chips, duplicate detection, >100 warning\n- **ConfirmResetModal**: Confirmation before reset to defaults\n\n### `/settings/organization` — OrganizationSettingsPage\n**Auth required. Roles: grants_manager.**\n\nOrg name, contact, website, mission statement, logo upload to Supabase Storage.\n\n### `/settings/team` — TeamSettingsPage\n**Auth required. Roles: grants_manager.**\n\nTeam member management, invite by email, role assignment (grants_manager / executive_director / grant_researcher), revoke access.\n\n---\n\n## Component Catalog Summary\n\n| Component | Type | Key Purpose |\n|---|---|---|\n| NavBar | Layout | Public top nav with auth CTAs |\n| AppLayout | Layout | Authenticated sidebar + header shell |\n| SourceTypeBadge | Display | Color-coded source type pill (10 variants) |\n| EligibilityFlagBadge | Display | High/Moderate/Low/Unscored match indicator |\n| AlertBadge | Display | Unread count overlay on Bell icon |\n| RunResearchButton | Interactive | Launch parallel research run |\n| ResearchRunProgressPanel | Interactive | Realtime per-agent status |\n| DeduplicationStatsBanner | Display | Post-run dedup stats |\n| ChartWrapper | Container | SSR-safe dynamic import for all Recharts |\n| PipelineFunnelChart | Chart | Grant pipeline stages |\n| SuccessRateCard | Display | awarded/applied % with trend |\n| FinancialsBarChart | Chart | Monthly requested vs awarded |\n| SourceCategoryPieChart | Chart | Source type breakdown with filter |\n| DeadlineHeatmap | Chart | 90-day deadline density calendar |\n| AgentActivityLineChart | Chart | Research run + discovery trends |\n| FilterableGrantTable | Display | Chart-driven filtered grant list |\n| EligibilityScorePanel | Display | AI score + rationale accordion |\n| ConsensusValidationPanel | Display | Dual-model consensus results |\n| SearchProfileForm | Form | Full search profile editor |\n| NegativeFiltersTagInput | Interactive | Exclusion tag management |\n| ToastNotification | Feedback | Slide-in typed notifications |\n| EmptyStatePlaceholder | Display | Reusable empty state with CTA |\n| LoadingSkeleton | Display | Shimmer loading placeholders |\n\n---\n\n## Responsive Strategy\n\nMobile-first with 4 breakpoints:\n- **375px** (mobile): Single column, off-canvas sidebar drawer, stacked forms\n- **768px** (tablet): 2-column grids, icon-only sidebar, tab bar for settings\n- **1024px** (laptop): Full sidebar, 3-column grids, desktop tables\n- **1440px** (desktop): Maximum 12-column grid, full chart layouts\n\nAll Recharts charts use `<ResponsiveContainer width=\"100%\">`. Tables become card-stack below 768px. Touch targets minimum 44px. No horizontal scroll on body.\n\n---\n\n## Multi-Tenancy & Security\n\n- All API calls are organization-scoped: Supabase RLS policies enforce `organization_id` isolation\n- Auth state managed via Supabase Auth; protected routes redirect to `/login` if no session\n- Role-based route access enforced at both middleware (Next.js) and API route levels\n- Optimistic updates always include rollback on API error to prevent stale UI state\n\n---\n\n## Key Anti-Patterns Avoided\n\n- No SSR for Recharts (all wrapped in `dynamic` with `ssr: false`)\n- No emojis as icons (Lucide SVG throughout)\n- No layout-shifting hover transforms (only translateY(-2px) on cards, contained)\n- No missing focus states (all inputs, buttons, links have visible `:focus-visible` outlines)\n- No instant state changes (all transitions 150–300ms)\n- No content hidden behind fixed navbars (main content has correct padding-top)"
+}

@@ -1,0 +1,194 @@
+{
+  "flows": [
+    {
+      "name": "Sign Up",
+      "steps": [
+        "User navigates to /signup",
+        "User submits email, password, organization name, and full name",
+        "Frontend calls supabase.auth.signUp({ email, password, options: { data: { full_name, organization_name } } })",
+        "Supabase Auth creates auth.users row and sends confirmation email",
+        "Supabase DB trigger on auth.users INSERT fires create_organization_and_user() function",
+        "Trigger INSERTs new row into organizations table with name=organization_name, plan='free'",
+        "Trigger INSERTs new row into users table with id=auth.uid(), organization_id=new_org.id, role='admin'",
+        "User clicks confirmation link in email; Supabase sets email_confirmed_at",
+        "User redirected to /dashboard on successful session establishment",
+        "If confirmation pending: user sees /signup/confirm-email holding page"
+      ]
+    },
+    {
+      "name": "Log In",
+      "steps": [
+        "User navigates to /login",
+        "User submits email and password",
+        "Frontend calls supabase.auth.signInWithPassword({ email, password })",
+        "On success: Supabase returns session with JWT containing user id and role claim",
+        "Frontend stores session via Supabase Auth cookie helper (createClientComponentClient)",
+        "Middleware reads session cookie, fetches user row from users table to confirm organization_id and role",
+        "If user row missing or fetch fails: middleware redirects to /login immediately (Iron Law 4)",
+        "If user row valid: middleware sets request headers x-user-id, x-organization-id, x-user-role",
+        "User redirected to /dashboard",
+        "On invalid credentials: toast error 'Invalid email or password. Please try again.'"
+      ]
+    },
+    {
+      "name": "Log Out",
+      "steps": [
+        "User clicks 'Sign Out' in sidebar or settings menu",
+        "Frontend calls supabase.auth.signOut()",
+        "Supabase clears session cookie",
+        "Middleware on next request finds no session, redirects to /login",
+        "User lands on /login page"
+      ]
+    },
+    {
+      "name": "Password Reset",
+      "steps": [
+        "User clicks 'Forgot password?' on /login",
+        "User navigates to /forgot-password and submits email",
+        "Frontend calls supabase.auth.resetPasswordForEmail(email, { redirectTo: '/reset-password' })",
+        "Supabase sends password reset email with magic link",
+        "User clicks link, lands on /reset-password with token in URL hash",
+        "Frontend calls supabase.auth.updateUser({ password: newPassword })",
+        "On success: toast 'Password updated successfully.' Redirect to /dashboard",
+        "On error: toast 'Password reset failed. The link may have expired. Please request a new one.'"
+      ]
+    },
+    {
+      "name": "Invite Team Member",
+      "steps": [
+        "Admin user navigates to /settings/team",
+        "Admin enters invitee email and selects role (admin or member)",
+        "Frontend calls POST /api/invitations with { email, role, organization_id }",
+        "Backend verifies caller has role='admin' for the organization via RLS and x-user-role header",
+        "Backend calls supabase.auth.admin.inviteUserByEmail(email, { data: { organization_id, role } })",
+        "Supabase sends invitation email with magic link",
+        "Invitee clicks link, lands on /accept-invite page",
+        "Supabase Auth confirms invitation, creates auth.users row",
+        "DB trigger fires: INSERTs users row with organization_id and role from invitation metadata",
+        "Invitee redirected to /dashboard",
+        "On duplicate email within same org: API returns 409, toast 'This user is already a member of your organization.'"
+      ]
+    },
+    {
+      "name": "Session Refresh and Protected Route Access",
+      "steps": [
+        "User navigates to any protected route (not /login, /signup, /forgot-password, /reset-password)",
+        "Next.js middleware intercepts the request",
+        "Middleware calls createMiddlewareClient(req, res).auth.getSession()",
+        "If no session found: middleware returns NextResponse.redirect('/login') immediately",
+        "If session found but expired: Supabase client auto-refreshes token using refresh_token cookie",
+        "If refresh fails: middleware returns NextResponse.redirect('/login') immediately",
+        "If session valid: middleware queries users table for user row matching auth.uid()",
+        "If users query returns error or empty: middleware returns NextResponse.redirect('/login') immediately — never renders page",
+        "If users row found: middleware attaches x-user-id, x-organization-id, x-user-role to request headers",
+        "Request proceeds to Next.js App Router page or API route handler"
+      ]
+    },
+    {
+      "name": "Role-Based Access Control Enforcement",
+      "steps": [
+        "API route handler reads x-user-role and x-organization-id from request headers set by middleware",
+        "Handler checks role against required permission for the operation",
+        "If role insufficient (e.g., member attempting admin-only action): return HTTP 403 with { error: 'Forbidden' }",
+        "Supabase RLS policies independently enforce organization_id scoping on all DB queries",
+        "If RLS policy rejects query: Supabase returns empty result or error; API returns HTTP 403",
+        "Frontend receives 403: displays toast 'You do not have permission to perform this action.'",
+        "No sensitive data from other organizations is ever returned due to dual enforcement (middleware headers + RLS)"
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "name": "admin",
+      "description": "Organization administrator with full access to all features, settings, team management, and data within their organization. Typically the account creator or an invited director-level user. Maps to persona: Grants Manager (Maria Chen) and Executive Director (James Okafor) in ownership capacity.",
+      "permissions": [
+        "READ grants (own organization)",
+        "CREATE grants (own organization)",
+        "UPDATE grants (own organization)",
+        "DELETE grants (own organization)",
+        "PATCH grants source_type (own organization)",
+        "POST grants/[id]/rescore (own organization)",
+        "READ research_runs (own organization)",
+        "CREATE research_runs via POST /api/research/run (own organization)",
+        "READ research_run_agents (own organization)",
+        "READ search_profiles (own organization)",
+        "CREATE search_profiles (own organization)",
+        "UPDATE search_profiles (own organization)",
+        "READ analytics/summary (own organization)",
+        "READ analytics/funnel (own organization)",
+        "READ analytics/financials (own organization)",
+        "READ analytics/by-source (own organization)",
+        "READ analytics/deadlines (own organization)",
+        "READ analytics/agent-activity (own organization)",
+        "READ alerts (own organization)",
+        "UPDATE alerts mark-read via POST /api/alerts/[id]/read (own organization)",
+        "UPDATE alerts mark-all-read via POST /api/alerts/read-all (own organization)",
+        "CREATE consensus validation via POST /api/consensus/validate (own organization)",
+        "READ consensus results via GET /api/consensus/[grant_id] (own organization)",
+        "READ users (own organization)",
+        "CREATE invitations (own organization)",
+        "UPDATE user roles (own organization)",
+        "DELETE users from organization (own organization)",
+        "READ organization settings (own organization)",
+        "UPDATE organization settings (own organization)",
+        "READ agents configuration (own organization)",
+        "CREATE agents configuration (own organization)",
+        "UPDATE agents configuration (own organization)",
+        "DELETE agents configuration (own organization)"
+      ]
+    },
+    {
+      "name": "member",
+      "description": "Standard team member with read and operational access to grants, research, analytics, and alerts, but no team management or organization settings access. Maps to persona: Grant Researcher/Associate (Sofia Reyes) and day-to-day staff.",
+      "permissions": [
+        "READ grants (own organization)",
+        "CREATE grants (own organization)",
+        "UPDATE grants (own organization)",
+        "PATCH grants source_type (own organization)",
+        "POST grants/[id]/rescore (own organization)",
+        "READ research_runs (own organization)",
+        "CREATE research_runs via POST /api/research/run (own organization)",
+        "READ research_run_agents (own organization)",
+        "READ search_profiles (own organization)",
+        "CREATE search_profiles (own organization)",
+        "UPDATE search_profiles (own organization)",
+        "READ analytics/summary (own organization)",
+        "READ analytics/funnel (own organization)",
+        "READ analytics/financials (own organization)",
+        "READ analytics/by-source (own organization)",
+        "READ analytics/deadlines (own organization)",
+        "READ analytics/agent-activity (own organization)",
+        "READ alerts (own organization)",
+        "UPDATE alerts mark-read via POST /api/alerts/[id]/read (own organization)",
+        "UPDATE alerts mark-all-read via POST /api/alerts/read-all (own organization)",
+        "CREATE consensus validation via POST /api/consensus/validate (own organization)",
+        "READ consensus results via GET /api/consensus/[grant_id] (own organization)",
+        "READ own user profile",
+        "UPDATE own user profile (name, password)"
+      ]
+    },
+    {
+      "name": "viewer",
+      "description": "Read-only stakeholder access. Intended for board members or executive directors who need to review dashboards and analytics without modifying data. Can view all data within their organization but cannot create, update, or delete any records.",
+      "permissions": [
+        "READ grants (own organization)",
+        "READ research_runs (own organization)",
+        "READ research_run_agents (own organization)",
+        "READ search_profiles (own organization)",
+        "READ analytics/summary (own organization)",
+        "READ analytics/funnel (own organization)",
+        "READ analytics/financials (own organization)",
+        "READ analytics/by-source (own organization)",
+        "READ analytics/deadlines (own organization)",
+        "READ analytics/agent-activity (own organization)",
+        "READ alerts (own organization)",
+        "UPDATE alerts mark-read via POST /api/alerts/[id]/read (own alerts only)",
+        "READ consensus results via GET /api/consensus/[grant_id] (own organization)",
+        "READ own user profile"
+      ]
+    }
+  ],
+  "middleware": "The Next.js 14 App Router middleware is defined in /middleware.ts at the project root. It runs on all routes matched by the config matcher, which excludes: /_next/static, /_next/image, /favicon.ico, /api/auth (Supabase Auth webhook callbacks), /login, /signup, /forgot-password, /reset-password, and /accept-invite. For all other routes (all protected pages and API routes), the middleware executes the following logic in strict order: (1) Instantiate a Supabase server client using createMiddlewareClient from @supabase/auth-helpers-nextjs, passing { req, res } to enable cookie mutation for token refresh. (2) Call await supabase.auth.getSession(). (3) If session is null or getSession() throws any error: immediately return NextResponse.redirect(new URL('/login', req.url)) — no fallback, no default role assignment, no page render (Iron Law 4). (4) If session exists but the JWT is expired, the Supabase client automatically attempts refresh using the refresh_token cookie. If refresh fails or refresh_token is absent: immediately return NextResponse.redirect(new URL('/login', req.url)). (5) If session is valid: query the users table using the service-role Supabase client (to bypass RLS for this internal lookup) for the row matching id = session.user.id. (6) If the query returns an error, returns zero rows, or the returned user's organization_id is null: immediately return NextResponse.redirect(new URL('/login', req.url)) — never render a default or wrong-role page (Iron Law 4 strict enforcement). (7) If the user row is found and valid: clone the request headers and set: x-user-id = user.id, x-organization-id = user.organization_id, x-user-role = user.role (one of: admin, member, viewer). (8) Return NextResponse.next({ request: { headers: clonedHeaders }, response: res }) to proceed. API route handlers read x-user-id, x-organization-id, and x-user-role from request.headers to enforce role-based logic. All Supabase DB queries in API routes additionally rely on organization_id-scoped RLS policies as a second enforcement layer. The middleware never caches role data in cookies or local state; every request re-validates from the database to prevent stale role exploitation.",
+  "permissionsModel": "Benavora uses a flat three-tier RBAC model (admin > member > viewer) enforced at two independent layers: (1) Middleware header injection and API route role checks, and (2) Supabase Row-Level Security policies. Every table that contains organization data carries an organization_id column. RLS is enabled on all such tables. The canonical RLS policy pattern for SELECT is: USING (organization_id = (SELECT organization_id FROM users WHERE id = auth.uid())). For INSERT: WITH CHECK (organization_id = (SELECT organization_id FROM users WHERE id = auth.uid())). For UPDATE and DELETE: USING (organization_id = (SELECT organization_id FROM users WHERE id = auth.uid())). Role-specific write restrictions (e.g., viewer cannot INSERT) are enforced at the API route layer by checking x-user-role from middleware headers before executing any DB mutation. The users table itself has an RLS policy allowing users to SELECT only their own row (id = auth.uid()) for non-admin reads, and allowing admins to SELECT all rows within their organization (organization_id match). Admin-only operations — team invitations, user role updates, user removal, organization settings updates, agent configuration management — return HTTP 403 immediately if x-user-role is not 'admin'. Viewer-only restrictions — blocking all mutations (POST, PATCH, PUT, DELETE) except marking their own alerts read — are enforced by checking x-user-role = 'viewer' in each mutating API route and returning HTTP 403 with { error: 'Viewers have read-only access.' }. Cross-organization data isolation is guaranteed by the combination of organization_id RLS policies and the middleware-injected x-organization-id header being used as the authoritative scope value in all API queries — the API never trusts a client-supplied organization_id in the request body for scoping purposes.",
+  "markdown": "# Auth Architecture\n\n## Overview\n\nBenavora uses Supabase Auth (email/password) as the identity provider, integrated with Next.js 14 App Router via `@supabase/auth-helpers-nextjs`. Authentication state is managed through Supabase session cookies. Authorization is enforced through a two-layer model: (1) Next.js middleware injects verified role and organization context into request headers, and (2) Supabase Row-Level Security policies enforce organization-scoped data isolation at the database layer.\n\nAll users belong to exactly one organization. The organization_id is the tenant identifier throughout the system.\n\n---\n\n## Roles\n\n### `admin`\nFull access to all features within the organization. Can manage team members, organization settings, and all grant/research/analytics data. Created automatically for the organization founder; granted to invited users when role='admin' is specified.\n\n**Key permissions:** All CRUD on grants, research runs, search profiles, agents, alerts, consensus validation. Full team and organization settings management.\n\n### `member`\nOperational access for day-to-day grant work. Can create, read, and update grants, run research, configure search profiles, view analytics, and manage alerts. Cannot manage team membership or organization settings.\n\n**Key permissions:** All grant and research operations. Read/write search profiles. Full analytics and alerts access. No team management.\n\n### `viewer`\nRead-only stakeholder access. Intended for board members or executives who need visibility without operational access. Can view all organization data but cannot create, update, or delete any records (except marking their own alerts as read).\n\n**Key permissions:** READ-only on all data. Mark own alerts read. No mutations.\n\n---\n\n## Auth Flows\n\n### Sign Up\n1. User submits email, password, organization name, and full name at `/signup`.\n2. Frontend calls `supabase.auth.signUp()` with user metadata.\n3. Supabase Auth creates `auth.users` row and sends confirmation email.\n4. A Supabase DB trigger (`create_organization_and_user()`) fires on `auth.users` INSERT:\n   - INSERTs a new row into `organizations` with `name=organization_name`, `plan='free'`.\n   - INSERTs a new row into `users` with `id=auth.uid()`, `organization_id=new_org.id`, `role='admin'`.\n5. User confirms email; session established; redirect to `/dashboard`.\n\n### Log In\n1. User submits credentials at `/login`.\n2. `supabase.auth.signInWithPassword()` called.\n3. On success: Supabase sets session cookie with JWT.\n4. Middleware validates session, fetches user row, injects context headers.\n5. Redirect to `/dashboard`.\n6. On failure: toast \"Invalid email or password. Please try again.\"\n\n### Log Out\n1. User clicks \"Sign Out\".\n2. `supabase.auth.signOut()` called; session cookie cleared.\n3. Next request: middleware finds no session, redirects to `/login`.\n\n### Password Reset\n1. User submits email at `/forgot-password`.\n2. `supabase.auth.resetPasswordForEmail()` called with `redirectTo: '/reset-password'`.\n3. User clicks emailed link, lands on `/reset-password`.\n4. `supabase.auth.updateUser({ password })` called.\n5. On success: toast + redirect to `/dashboard`.\n\n### Invite Team Member (admin only)\n1. Admin submits invitee email and role at `/settings/team`.\n2. `POST /api/invitations` called; backend verifies caller role='admin'.\n3. `supabase.auth.admin.inviteUserByEmail()` called with `organization_id` and `role` in metadata.\n4. Invitee clicks email link, lands on `/accept-invite`.\n5. DB trigger fires: INSERTs `users` row with `organization_id` and `role` from metadata.\n6. Redirect to `/dashboard`.\n\n### Session Refresh and Protected Route Access\n1. User navigates to any protected route.\n2. Middleware intercepts; calls `supabase.auth.getSession()`.\n3. **If no session or error → redirect to `/login` immediately (Iron Law 4).**\n4. If session expired: Supabase auto-refreshes using `refresh_token` cookie.\n5. **If refresh fails → redirect to `/login` immediately.**\n6. If session valid: middleware queries `users` table (service-role client, bypasses RLS) for user row.\n7. **If query errors or returns zero rows → redirect to `/login` immediately — never render default or wrong-role page (Iron Law 4).**\n8. If user row valid: middleware sets `x-user-id`, `x-organization-id`, `x-user-role` on request headers.\n9. Request proceeds to page or API handler.\n\n---\n\n## Middleware (`/middleware.ts`)\n\n```\nMatcher: all routes EXCEPT:\n  /_next/static/**\n  /_next/image/**\n  /favicon.ico\n  /api/auth/**\n  /login\n  /signup\n  /forgot-password\n  /reset-password\n  /accept-invite\n```\n\n**Execution order (strict):**\n1. Create Supabase middleware client with `createMiddlewareClient({ req, res })`.\n2. Call `supabase.auth.getSession()`. On null/error → `redirect('/login')`.\n3. If JWT expired → Supabase auto-refreshes. On refresh failure → `redirect('/login')`.\n4. Query `users` table via service-role client for `id = session.user.id`.\n5. On query error or empty result → `redirect('/login')`.\n6. Clone request headers; set `x-user-id`, `x-organization-id`, `x-user-role`.\n7. Return `NextResponse.next()` with mutated headers and response.\n\n**Iron Law 4 enforcement:** On ANY role-fetch failure at step 4–5, redirect to `/login` only — never render a default role, never render the requested page with degraded permissions.\n\n**Role data is never cached** in cookies or session storage. Every request re-validates role from the database.\n\n---\n\n## Permissions Model\n\nBenavora uses a **flat three-tier RBAC model** (`admin > member > viewer`) enforced at two independent layers.\n\n### Layer 1: API Route Role Checks (middleware-injected headers)\n- All API routes read `x-user-role` from headers (set by middleware, never from client-supplied body).\n- Admin-only endpoints (team invitations, organization settings, agent management) return HTTP 403 if `x-user-role !== 'admin'`.\n- Viewer write-blocking: all mutating routes (POST/PATCH/PUT/DELETE) check `x-user-role === 'viewer'` and return HTTP 403 with `{ error: 'Viewers have read-only access.' }` before any DB operation.\n- `x-organization-id` header is the authoritative tenant scope — client-supplied `organization_id` values in request bodies are **never** used for query scoping.\n\n### Layer 2: Supabase Row-Level Security\n\nRLS is enabled on all organization-scoped tables. The standard policy pattern:\n\n**SELECT policy:**\n```sql\nUSING (\n  organization_id = (\n    SELECT organization_id FROM users WHERE id = auth.uid()\n  )\n)\n```\n\n**INSERT policy:**\n```sql\nWITH CHECK (\n  organization_id = (\n    SELECT organization_id FROM users WHERE id = auth.uid()\n  )\n)\n```\n\n**UPDATE/DELETE policy:**\n```sql\nUSING (\n  organization_id = (\n    SELECT organization_id FROM users WHERE id = auth.uid()\n  )\n)\n```\n\n**`users` table special policies:**\n- Non-admin users: `SELECT WHERE id = auth.uid()` (own row only).\n- Admin users: `SELECT WHERE organization_id = (SELECT organization_id FROM users WHERE id = auth.uid())`.\n\n### Tables with RLS Enabled and `organization_id` column\n- `organizations` (tenant root; RLS on id match via users join)\n- `users` (organization_id)\n- `grants` (organization_id)\n- `research_runs` (organization_id)\n- `research_run_agents` (organization_id, via research_run join enforced in policy)\n- `search_profiles` (organization_id)\n- `agents` (organization_id)\n- `alerts` (organization_id)\n- `consensus_results` (organization_id)\n- `eligibility_scores` (organization_id, if stored separately from grants)\n\n### Permission Matrix Summary\n\n| Operation | admin | member | viewer |\n|---|---|---|---|\n| Read grants | ✅ | ✅ | ✅ |\n| Create/update/delete grants | ✅ | ✅ | ❌ |\n| Run research | ✅ | ✅ | ❌ |\n| Configure search profiles | ✅ | ✅ | ❌ |\n| View analytics | ✅ | ✅ | ✅ |\n| View alerts | ✅ | ✅ | ✅ |\n| Mark alerts read | ✅ | ✅ | ✅ (own only) |\n| Consensus validate | ✅ | ✅ | ❌ |\n| Manage team/invitations | ✅ | ❌ | ❌ |\n| Update organization settings | ✅ | ❌ | ❌ |\n| Manage agent configuration | ✅ | ❌ | ❌ |\n\n---\n\n## Public Routes (No Auth Required)\n\n- `/login`\n- `/signup`\n- `/forgot-password`\n- `/reset-password`\n- `/accept-invite`\n- `/api/auth/**` (Supabase Auth webhook callbacks)\n\nAll other routes require a valid authenticated session with a resolvable `users` row."
+}

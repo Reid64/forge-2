@@ -1,0 +1,152 @@
+{
+  "environments": [
+    {
+      "name": "development",
+      "description": "Local development environment running Next.js dev server with a dedicated Supabase project (or local Supabase CLI instance). All AI provider calls use sandbox/test API keys with reduced rate limits. Vercel CLI used for local preview of edge functions.",
+      "variables": [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_DB_URL",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "NEXT_PUBLIC_APP_URL",
+        "CRON_SECRET",
+        "RESEND_API_KEY",
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "SENTRY_DSN",
+        "SENTRY_ORG",
+        "SENTRY_PROJECT",
+        "AGENT_TIMEOUT_MS",
+        "AGENT_RETRY_DELAY_MS",
+        "MAX_CONCURRENT_AGENTS",
+        "ELIGIBILITY_SCORE_HIGH_THRESHOLD",
+        "ELIGIBILITY_SCORE_MODERATE_THRESHOLD",
+        "LOG_LEVEL"
+      ]
+    },
+    {
+      "name": "preview",
+      "description": "Vercel preview deployments created automatically for every pull request. Uses a dedicated Supabase staging project with seeded test data. AI provider keys are production-grade but budget-capped. Preview URLs are ephemeral and scoped per PR branch. Used for QA, design review, and integration testing.",
+      "variables": [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_DB_URL",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "NEXT_PUBLIC_APP_URL",
+        "CRON_SECRET",
+        "RESEND_API_KEY",
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "SENTRY_DSN",
+        "SENTRY_ORG",
+        "SENTRY_PROJECT",
+        "AGENT_TIMEOUT_MS",
+        "AGENT_RETRY_DELAY_MS",
+        "MAX_CONCURRENT_AGENTS",
+        "ELIGIBILITY_SCORE_HIGH_THRESHOLD",
+        "ELIGIBILITY_SCORE_MODERATE_THRESHOLD",
+        "LOG_LEVEL",
+        "VERCEL_ENV",
+        "VERCEL_URL"
+      ]
+    },
+    {
+      "name": "production",
+      "description": "Vercel production deployment on the main branch. Connected to the production Supabase project with full RLS enforcement, connection pooling via Supabase PgBouncer, and Vercel Edge Network CDN. All secrets stored in Vercel encrypted environment variables. Cron jobs managed via vercel.json cron config. Sentry error tracking and PostHog analytics fully enabled. Supabase Realtime enabled for research_run_agents and alerts tables.",
+      "variables": [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_DB_URL",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "NEXT_PUBLIC_APP_URL",
+        "CRON_SECRET",
+        "RESEND_API_KEY",
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "SENTRY_DSN",
+        "SENTRY_ORG",
+        "SENTRY_PROJECT",
+        "SENTRY_AUTH_TOKEN",
+        "AGENT_TIMEOUT_MS",
+        "AGENT_RETRY_DELAY_MS",
+        "MAX_CONCURRENT_AGENTS",
+        "ELIGIBILITY_SCORE_HIGH_THRESHOLD",
+        "ELIGIBILITY_SCORE_MODERATE_THRESHOLD",
+        "LOG_LEVEL",
+        "VERCEL_ENV",
+        "VERCEL_URL"
+      ]
+    }
+  ],
+  "deployConfig": "Platform: Vercel (Next.js 14 App Router). Package manager: pnpm. Node.js runtime: 20.x LTS.\n\nBuild command: `pnpm build` (runs `next build` with TypeScript strict checks and ESLint).\nInstall command: `pnpm install --frozen-lockfile`.\nOutput directory: `.next` (default Next.js output).\n\nVercel project settings:\n- Framework preset: Next.js\n- Root directory: `/` (monorepo-style single app)\n- Environment variables: set per-environment in Vercel dashboard; sensitive keys marked as encrypted secrets.\n\nEdge/Serverless function regions: `iad1` (US East, primary); AI agent routes (`/api/research/run`, `/api/grants/[id]/rescore`, `/api/consensus/validate`) configured with `maxDuration: 300` seconds (Vercel Pro) to accommodate multi-agent parallel AI calls.\n\nCron jobs (vercel.json):\n- `/api/cron/stale-runs` — schedule: `*/10 * * * *` (every 10 minutes) — marks research_runs with status='running' and started_at > 10 min ago as 'failed'. Protected by CRON_SECRET bearer token.\n- `/api/cron/alert-digest` — schedule: `0 8 * * *` (daily at 08:00 UTC) — triggers daily alert digest emails via Resend. Protected by CRON_SECRET bearer token.\n\nSupabase migrations: Applied via `supabase db push` in CI (GitHub Actions) before Vercel deploy completes. Migration files stored in `supabase/migrations/`. CI step: checkout → pnpm install → supabase db push → vercel deploy.\n\nRealtime: Supabase Realtime enabled on `research_run_agents` (for per-agent status cards) and `alerts` (for sidebar badge count). Realtime channels use row-level filter `organization_id=eq.{org_id}` to prevent cross-tenant data leakage.\n\nStatic assets: Served via Vercel Edge CDN. Next.js Image Optimization enabled for all `<Image>` components.\n\nHeaders (next.config.ts):\n- `X-Frame-Options: DENY`\n- `X-Content-Type-Options: nosniff`\n- `Referrer-Policy: strict-origin-when-cross-origin`\n- `Permissions-Policy: camera=(), microphone=(), geolocation=()`\n- `Content-Security-Policy`: script-src 'self' 'nonce-{nonce}' https://cdn.posthog.com; default-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://api.openai.com https://app.posthog.com; frame-ancestors 'none'.",
+  "monitoring": "Error Tracking: Sentry (sentry.io) integrated via `@sentry/nextjs`. Both client-side and server-side errors captured. Source maps uploaded during build using SENTRY_AUTH_TOKEN. Alerts configured for: error rate spike >1% over 5 min, new unhandled exception types, AI provider API errors (tagged `ai_provider`). Sentry performance tracing enabled with 10% sample rate in production.\n\nProduct Analytics: PostHog (self-hosted on posthog.com cloud) integrated via `posthog-js` on client and `posthog-node` on server. Key events tracked:\n- `research_run_started` (properties: agent_count, search_profile_configured)\n- `research_run_completed` (properties: total_found, duplicates_removed, unique_saved, duration_ms, partial_failure)\n- `grant_eligibility_scored` (properties: score, flag, rescore_manual)\n- `consensus_validation_requested` (properties: grant_id, models_used)\n- `alert_viewed`, `alert_dismissed`, `alert_read_all`\n- `search_profile_saved` (properties: funding_types_count, negative_filters_count, geographic_scope_type)\n- `analytics_dashboard_viewed` (properties: date_range)\n\nLogging: Structured JSON logs via `pino` logger (LOG_LEVEL env controls verbosity). Server-side logs streamed to Vercel Log Drains → forwarded to Vercel's built-in observability. Log fields: `level`, `timestamp`, `organization_id` (hashed for PII), `route`, `duration_ms`, `ai_provider`, `agent_id`, `error_code`.\n\nUptime Monitoring: Vercel built-in checks on `/` and `/api/health` (custom health endpoint returning 200 with `{ status: 'ok', supabase: 'connected', timestamp }`).\n\nPerformance Monitoring: Vercel Speed Insights (automatic Core Web Vitals collection in production). Sentry performance transactions for all API routes >200ms. Long-running AI routes (`/api/research/run`) emit custom Sentry spans for: `agent_execution`, `deduplication`, `eligibility_scoring`, `db_insert`.\n\nDatabase Monitoring: Supabase Dashboard — query performance panel monitored weekly. Slow query threshold: 500ms. Indexes to monitor: `grants(organization_id, source_type)`, `grants(organization_id, eligibility_flag)`, `grants(organization_id, deadline)`, `research_runs(organization_id, status, started_at)`, `alerts(organization_id, is_read, created_at)`.\n\nAI Provider Monitoring: Custom middleware wraps all Anthropic and OpenAI calls, logging: provider, model, prompt_tokens, completion_tokens, latency_ms, success/error. Token usage aggregated per organization_id in `ai_usage_logs` table for cost attribution and rate limit awareness.\n\nAlerts and On-call: Sentry alert rules → PagerDuty (or email fallback) for P0 issues: all agents failing in a research run, Supabase connection pool exhausted, cron job missing 2 consecutive executions.",
+  "performanceBudgets": [
+    {
+      "metric": "Largest Contentful Paint (LCP) — Dashboard page",
+      "target": "≤ 2.5 seconds (75th percentile, measured by Vercel Speed Insights)"
+    },
+    {
+      "metric": "First Input Delay (FID) / Interaction to Next Paint (INP)",
+      "target": "≤ 200 milliseconds (75th percentile)"
+    },
+    {
+      "metric": "Cumulative Layout Shift (CLS)",
+      "target": "≤ 0.1 (all pages)"
+    },
+    {
+      "metric": "Time to First Byte (TTFB) — Server-rendered pages",
+      "target": "≤ 600 milliseconds (p95, measured at Vercel edge)"
+    },
+    {
+      "metric": "GET /api/grants (paginated, up to 100 rows) response time",
+      "target": "≤ 300 milliseconds (p95)"
+    },
+    {
+      "metric": "GET /api/analytics/summary response time",
+      "target": "≤ 2000 milliseconds (p95, aggregation over up to 10,000 grants)"
+    },
+    {
+      "metric": "GET /api/analytics/funnel, /api/analytics/financials, /api/analytics/by-source, /api/analytics/deadlines, /api/analytics/agent-activity — individual endpoint response time",
+      "target": "≤ 800 milliseconds each (p95)"
+    },
+    {
+      "metric": "POST /api/research/run — total parallel agent execution time",
+      "target": "≤ 90 seconds (hard timeout per agent); full run with 5 agents ≤ 120 seconds end-to-end"
+    },
+    {
+      "metric": "POST /api/grants/[id]/rescore — single grant eligibility scoring",
+      "target": "≤ 15 seconds (p95, includes AI provider round-trip)"
+    },
+    {
+      "metric": "POST /api/consensus/validate — multi-model consensus validation",
+      "target": "≤ 30 seconds (p95, parallel calls to Anthropic + OpenAI)"
+    },
+    {
+      "metric": "Total JavaScript bundle size (initial page load, gzipped)",
+      "target": "≤ 250 KB (first-load JS chunks, excluding lazy-loaded routes)"
+    },
+    {
+      "metric": "Recharts analytics page — chart render time after data load",
+      "target": "≤ 500 milliseconds (measured from data fetch completion to paint)"
+    },
+    {
+      "metric": "Supabase Realtime — research_run_agents status update propagation latency",
+      "target": "≤ 1000 milliseconds from DB write to client event receipt (p95)"
+    },
+    {
+      "metric": "GET /api/alerts — unread alert count + list for sidebar badge",
+      "target": "≤ 200 milliseconds (p95, indexed query on organization_id + is_read)"
+    },
+    {
+      "metric": "Core Web Vitals pass rate",
+      "target": "≥ 90% of page loads passing all three Core Web Vitals thresholds (Google definition: LCP ≤ 2.5s, INP ≤ 200ms, CLS ≤ 0.1)"
+    }
+  ],
+  "markdown": "# Infrastructure & Deployment Architecture\n\n## Overview\n\nBenavora is deployed on **Vercel** (Next.js 14 App Router, TypeScript strict, pnpm) backed by **Supabase** (Postgres + Auth + RLS + Realtime). This document specifies the three environment tiers, all environment variable names, deployment pipeline, monitoring/telemetry stack, and measurable performance budgets.\n\n---\n\n## Environments\n\n### 1. Development\n\nLocal developer machines running `pnpm dev` (Next.js dev server on port 3000) connected to either a local Supabase CLI instance (`supabase start`) or a shared dev Supabase project.\n\n**Purpose:** Feature development, unit/integration testing, local debugging of AI agent flows.\n\n**AI Keys:** Sandbox/test API keys for Anthropic and OpenAI with reduced spend caps.\n\n**Environment Variables:**\n\n| Variable | Purpose |\n|---|---|\n| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project REST/Realtime URL (public) |\n| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon JWT for client-side RLS queries |\n| `SUPABASE_SERVICE_ROLE_KEY` | Service role key for server-side admin operations |\n| `SUPABASE_DB_URL` | Direct Postgres connection string for migrations |\n| `ANTHROPIC_API_KEY` | Anthropic Claude API key (ResearchAgent, EligibilityScoringAgent) |\n| `OPENAI_API_KEY` | OpenAI GPT-4o key (ConsensusValidationAgent) |\n| `NEXT_PUBLIC_APP_URL` | Base URL for constructing absolute links |\n| `CRON_SECRET` | Bearer token protecting cron API routes from unauthorized calls |\n| `RESEND_API_KEY` | Resend transactional email key (alert digests) |\n| `NEXT_PUBLIC_POSTHOG_KEY` | PostHog project API key (client-side analytics) |\n| `NEXT_PUBLIC_POSTHOG_HOST` | PostHog ingest host URL |\n| `SENTRY_DSN` | Sentry DSN for error capture |\n| `SENTRY_ORG` | Sentry organization slug |\n| `SENTRY_PROJECT` | Sentry project slug |\n| `AGENT_TIMEOUT_MS` | Per-agent execution timeout in milliseconds (default: 90000) |\n| `AGENT_RETRY_DELAY_MS` | Delay before agent retry after rate-limit (default: 5000) |\n| `MAX_CONCURRENT_AGENTS` | Maximum parallel agents per research run (default: 10) |\n| `ELIGIBILITY_SCORE_HIGH_THRESHOLD` | Score threshold for high_match flag (default: 80) |\n| `ELIGIBILITY_SCORE_MODERATE_THRESHOLD` | Score threshold for moderate_match flag (default: 50) |\n| `LOG_LEVEL` | Pino log level: debug / info / warn / error |\n\n---\n\n### 2. Preview\n\nVercel preview deployments automatically created for every pull request. Each preview gets a unique ephemeral URL (`benavora-git-{branch}-{team}.vercel.app`). Connected to a dedicated Supabase **staging** project with seeded test organizations, grants, and research runs.\n\n**Purpose:** QA testing, design review, stakeholder demos, integration testing before merge.\n\n**Environment Variables:** All development variables plus:\n\n| Variable | Purpose |\n|---|---|\n| `VERCEL_ENV` | Set by Vercel: `preview` |\n| `VERCEL_URL` | Ephemeral deployment URL injected by Vercel |\n\n---\n\n### 3. Production\n\nVercel production deployment triggered by merges to the `main` branch. Connected to the production Supabase project with PgBouncer connection pooling, full RLS enforcement, and Supabase Realtime enabled on `research_run_agents` and `alerts` tables.\n\n**Purpose:** Live application serving real nonprofit organizations.\n\n**Environment Variables:** All preview variables plus:\n\n| Variable | Purpose |\n|---|---|\n| `SENTRY_AUTH_TOKEN` | Token for uploading source maps to Sentry during build |\n\n---\n\n## Deployment Pipeline\n\n### CI/CD Flow\n\n```\nGitHub PR opened\n  → GitHub Actions: pnpm install → TypeScript check → ESLint → unit tests\n  → Supabase: supabase db push (staging)\n  → Vercel: preview deployment created\n  → GitHub PR merged to main\n  → GitHub Actions: pnpm install → TypeScript check → ESLint → unit tests\n  → Supabase: supabase db push (production)\n  → Vercel: production deployment promoted\n```\n\n### Build Configuration\n\n- **Build command:** `pnpm build` (runs `next build` with strict TypeScript and ESLint)\n- **Install command:** `pnpm install --frozen-lockfile`\n- **Output:** `.next` (standard Next.js build output)\n- **Node.js version:** 20.x LTS\n- **Framework preset:** Next.js (Vercel auto-detected)\n\n### Serverless Function Configuration\n\nAI-heavy API routes require extended execution time and are configured in `next.config.ts`:\n\n| Route | maxDuration | Reason |\n|---|---|---|\n| `POST /api/research/run` | 300s | Parallel multi-agent AI execution |\n| `POST /api/grants/[id]/rescore` | 30s | Single AI eligibility scoring |\n| `POST /api/consensus/validate` | 60s | Parallel dual-model consensus |\n| `GET /api/analytics/summary` | 30s | Heavy aggregation query |\n| All other routes | 10s (default) | Standard CRUD operations |\n\nPrimary deployment region: `iad1` (US East, Virginia) — closest to Supabase default region.\n\n### Cron Jobs (`vercel.json`)\n\n| Path | Schedule | Purpose |\n|---|---|---|\n| `GET /api/cron/stale-runs` | `*/10 * * * *` (every 10 min) | Marks `research_runs` with `status='running'` and `started_at > 10 min ago` as `failed`. Prevents indefinitely stuck runs from blocking new research. |\n| `GET /api/cron/alert-digest` | `0 8 * * *` (daily 08:00 UTC) | Triggers daily alert digest emails via Resend for organizations with unread alerts. |\n\nAll cron routes validate the `Authorization: Bearer {CRON_SECRET}` header and return 401 for unauthorized requests.\n\n### Security Headers (`next.config.ts`)\n\nApplied globally via `headers()` configuration:\n\n```\nX-Frame-Options: DENY\nX-Content-Type-Options: nosniff\nReferrer-Policy: strict-origin-when-cross-origin\nPermissions-Policy: camera=(), microphone=(), geolocation=()\nContent-Security-Policy:\n  default-src 'self';\n  script-src 'self' 'nonce-{nonce}' https://cdn.posthog.com;\n  connect-src 'self' https://*.supabase.co wss://*.supabase.co\n    https://api.anthropic.com https://api.openai.com https://app.posthog.com;\n  frame-ancestors 'none';\n```\n\n### Supabase Realtime Channels\n\nTwo Realtime subscriptions active in production:\n\n1. **`research_run_agents` table** — subscribed during active research runs; filter: `organization_id=eq.{org_id}`. Drives per-agent status card updates (Queued → Running → Completed/Failed).\n2. **`alerts` table** — subscribed globally while authenticated; filter: `organization_id=eq.{org_id}`. Drives sidebar alert badge count and real-time alert panel updates.\n\nRow-level filter on Realtime channels prevents cross-tenant data exposure.\n\n---\n\n## Monitoring & Telemetry\n\n### Error Tracking: Sentry\n\n- **SDK:** `@sentry/nextjs`\n- **Coverage:** Client-side React errors, server-side API route exceptions, Edge Function errors\n- **Source maps:** Uploaded at build time via `SENTRY_AUTH_TOKEN`\n- **Performance tracing:** Enabled at 10% sample rate in production\n- **Custom spans:** All AI provider calls instrument spans: `agent_execution`, `deduplication`, `eligibility_scoring`, `consensus_validation`, `db_insert`\n- **Alert rules:**\n  - Error rate spike > 1% over 5 minutes → immediate notification\n  - New unhandled exception type → immediate notification\n  - All agents failing in a single research run → P0 alert\n  - Supabase connection pool exhausted → P0 alert\n\n### Product Analytics: PostHog\n\n- **Client SDK:** `posthog-js` initialized in root layout\n- **Server SDK:** `posthog-node` for server-side event capture\n- **PII policy:** `organization_id` is hashed before transmission; no personally identifiable user data in event properties\n\n**Tracked Events:**\n\n| Event | Key Properties |\n|---|---|\n| `research_run_started` | `agent_count`, `search_profile_configured` |\n| `research_run_completed` | `total_found`, `duplicates_removed`, `unique_saved`, `duration_ms`, `partial_failure` |\n| `grant_eligibility_scored` | `score`, `flag`, `rescore_manual` |\n| `consensus_validation_requested` | `grant_id`, `models_used` |\n| `alert_viewed` | `alert_type`, `alert_age_hours` |\n| `alert_dismissed` | `alert_type` |\n| `alert_read_all` | `count` |\n| `search_profile_saved` | `funding_types_count`, `negative_filters_count`, `geographic_scope_type` |\n| `analytics_dashboard_viewed` | `date_range` |\n| `source_type_manually_set` | `source_type` |\n\n### Structured Logging: Pino\n\n- **Format:** JSON, streamed to Vercel Log Drains → Vercel built-in observability dashboard\n- **Log fields:** `level`, `timestamp`, `organization_id` (hashed), `route`, `duration_ms`, `ai_provider`, `agent_id`, `error_code`, `request_id`\n- **Log levels by environment:** `debug` (development), `info` (preview), `warn` (production default), overridable via `LOG_LEVEL`\n\n### AI Usage Logging\n\nAll calls to Anthropic and OpenAI are wrapped by a `withAILogging()` middleware that records to the `ai_usage_logs` table:\n\n| Column | Type | Description |\n|---|---|---|\n| `id` | uuid | Primary key |\n| `organization_id` | uuid | Tenant scope |\n| `provider` | text | `anthropic` or `openai` |\n| `model` | text | e.g., `claude-3-5-sonnet-20241022` |\n| `agent_type` | text | `research`, `eligibility`, `consensus`, `alert` |\n| `prompt_tokens` | integer | Tokens in prompt |\n| `completion_tokens` | integer | Tokens in response |\n| `latency_ms` | integer | Provider round-trip time |\n| `success` | boolean | Whether call succeeded |\n| `error_code` | text | Provider error code if failed |\n| `created_at` | timestamptz | Log timestamp |\n\nThis enables per-organization cost attribution and proactive rate-limit monitoring.\n\n### Uptime Monitoring\n\n- **Endpoint:** `GET /api/health` — returns `{ status: 'ok', supabase: 'connected', timestamp: ISO8601 }` with HTTP 200\n- **Vercel checks:** Automatic uptime checks on `/` and `/api/health` with alerting on 2 consecutive failures\n\n### Database Performance Monitoring\n\n- **Tool:** Supabase Dashboard → Query Performance panel\n- **Slow query threshold:** 500ms (logged and alerted)\n- **Monitored indexes:**\n  - `grants(organization_id, source_type)`\n  - `grants(organization_id, eligibility_flag)`\n  - `grants(organization_id, deadline)`\n  - `grants(organization_id, status, created_at)`\n  - `research_runs(organization_id, status, started_at)`\n  - `alerts(organization_id, is_read, created_at)`\n  - `ai_usage_logs(organization_id, created_at)`\n\n---\n\n## Performance Budgets\n\n| Metric | Target |\n|---|---|\n| **Largest Contentful Paint (LCP)** — Dashboard page | ≤ 2.5s (p75, Vercel Speed Insights) |\n| **Interaction to Next Paint (INP)** | ≤ 200ms (p75) |\n| **Cumulative Layout Shift (CLS)** | ≤ 0.1 (all pages) |\n| **Time to First Byte (TTFB)** — server-rendered pages | ≤ 600ms (p95) |\n| **GET /api/grants** (paginated, ≤ 100 rows) | ≤ 300ms (p95) |\n| **GET /api/analytics/summary** (up to 10,000 grants) | ≤ 2,000ms (p95) |\n| **Individual analytics sub-endpoints** (funnel, financials, by-source, deadlines, agent-activity) | ≤ 800ms each (p95) |\n| **POST /api/research/run** — full parallel run (5 agents) | ≤ 120s end-to-end; 90s per-agent hard timeout |\n| **POST /api/grants/[id]/rescore** — single eligibility score | ≤ 15s (p95) |\n| **POST /api/consensus/validate** — dual-model consensus | ≤ 30s (p95) |\n| **Initial JS bundle** (gzipped, first-load chunks) | ≤ 250 KB |\n| **Analytics chart render** (after data load) | ≤ 500ms |\n| **Supabase Realtime update propagation** (DB write → client event) | ≤ 1,000ms (p95) |\n| **GET /api/alerts** — unread count + list | ≤ 200ms (p95) |\n| **Core Web Vitals pass rate** | ≥ 90% of page loads pass all three CWV thresholds |\n\n---\n\n## Architectural Notes\n\n### Recharts SSR Safety\n\nAll Recharts chart components in `/analytics` are loaded via:\n```typescript\nconst PipelineFunnelChart = dynamic(() => import('@/components/charts/PipelineFunnelChart'), { ssr: false });\n```\nThis prevents hydration mismatch errors since Recharts relies on browser DOM APIs unavailable during SSR.\n\n### Connection Pooling\n\nProduction Supabase connections use PgBouncer (transaction mode) via the `SUPABASE_DB_URL` pooler endpoint. Direct connections (session mode) reserved for migrations only via a separate `SUPABASE_DIRECT_URL` variable used exclusively in `supabase db push` CI steps.\n\n### Multi-Tenant Isolation in Realtime\n\nSupabase Realtime channel subscriptions include row-filter clauses (`organization_id=eq.{currentOrgId}`) to ensure tenants only receive their own real-time events. This is enforced at both the channel subscription level (client) and via RLS policies on the underlying tables (server).\n\n### Cost Controls\n\n- `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` have spend limits configured at the provider dashboard level\n- `MAX_CONCURRENT_AGENTS` environment variable caps parallel AI calls per research run to prevent runaway costs from misconfiguration\n- `ai_usage_logs` table enables monthly cost attribution reports per organization for future billing features"
+}
