@@ -359,3 +359,33 @@ export interface ScheduledTask {
   created_at: string;
   updated_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// agent-shield (AgentShield security scanning)
+// ---------------------------------------------------------------------------
+
+export type SecurityGrade = 'A' | 'B' | 'C' | 'D' | 'F';
+
+export type AgentShieldCategory =
+  | 'secrets'
+  | 'permissions'
+  | 'hook_injection'
+  | 'mcp_risk'
+  | 'insecure_defaults';
+
+export interface SecurityFinding {
+  category: AgentShieldCategory;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  file: string;
+  line?: number;
+  message: string;
+  recommendation: string;
+}
+
+export interface SecurityReport {
+  grade: SecurityGrade;
+  findings: SecurityFinding[];
+  recommendations: string[];
+  scannedPaths: string[];
+  generatedAt: string;
+}
