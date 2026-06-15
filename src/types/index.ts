@@ -423,6 +423,26 @@ export interface SecurityReport {
 }
 
 // ---------------------------------------------------------------------------
+// instincts (automated learning — extracted by instinct-extractor.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * A learned rule distilled from observed build failures and their resolutions.
+ * Stored as objects inside cross_project_insights.evidence.instincts arrays;
+ * not a top-level database table.
+ */
+export interface Instinct {
+  id: string;
+  pattern: string;
+  fix: string;
+  confidence: number;
+  source_project: string;
+  times_applied: number;
+  times_succeeded: number;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // session-hooks (session lifecycle memory persistence)
 // ---------------------------------------------------------------------------
 
