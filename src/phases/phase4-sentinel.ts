@@ -98,7 +98,12 @@ import {
   type ConsensusValidationResult,
 } from '../tools/consensus-validator.js';
 import type { PreviousSentinelStatus } from '../engine/prompt-assembler.js';
-import type { ErrorPattern, ErrorCategory, Resolution, Json, JsonObject } from '../types/index.js';
+import type { ErrorPattern, ErrorCategory, Resolution, Json, JsonObject, SecurityReport, SecurityGrade } from '../types/index.js';
+import { scanProjectSecurity } from '../tools/agent-shield.js';
+import { scanDeadCode, formatDeadCodeReport } from '../tools/dead-code-scanner.js';
+import type { DeadCodeReport } from '../tools/dead-code-scanner.js';
+import { runSixLawsCheck } from '../engine/governance-gate.js';
+import type { SixLawsResult } from '../analysis/six-laws-verifier.js';
 import { BuildMemory } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 
@@ -127,7 +132,12 @@ export type SentinelCheckName =
   | 'accessibility'
   | 'seo'
   | 'architecture'
-  | 'consensus_validation';
+  | 'consensus_validation'
+  | 'agent_shield'
+  | 'live_schema_drift'
+  | 'dead_code'
+  | 'six_laws'
+  | 'playwright';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
@@ -406,6 +416,51 @@ export interface SentinelOptions {
     input: ConsensusValidationInput,
     options?: ConsensusValidatorOptions
   ) => Promise<ConsensusValidationResult>;
+  /**
+   * AgentShield security scan (OPTIONAL). When supplied, Sentinel runs the AgentShield scanner
+   * against the project after every prompt. A grade below B+ (i.e. C / D / F) FAILS the gate
+   * and blocks the build; grades A or B pass; an un-scannable project SKIPS.
+   */
+  agentShield?: { projectPath?: string };
+  /** Override the AgentShield runner (tests). Default: {@link scanProjectSecurity}. */
+  runAgentShieldCheck?: (projectPath: string) => Promise<SecurityReport>;
+  /**
+   * Live schema drift (OPTIONAL). When supplied, Sentinel compares the LIVE database schema
+   * (via `schemaSql`) against SCHEMA_REGISTRY.md AFTER EVERY prompt — regardless of whether
+   * schema prompts have run. `schemaSql` must be provided on `SentinelOptions`; when absent the
+   * check SKIPS (a missing SQL executor must never produce a false failure). Additions are OK;
+   * modifications / deletions FAIL (same semantics as the mandatory `schema_drift` check).
+   */
+  liveSchemaCheck?: { projectPath?: string };
+  /** Override the live-schema registry content (tests). Defaults to the governance dir's SCHEMA_REGISTRY.md. */
+  liveSchemaRegistryContent?: string;
+  /** Override the live-schema extraction function (tests). Default: `extractSchema` with `schemaSql`. */
+  runLiveSchemaExtraction?: () => Promise<SchemaSnapshot>;
+  /**
+   * Dead code scan (OPTIONAL). When supplied, Sentinel scans the project for unused imports,
+   * variables, and exports AFTER EVERY prompt. Results are ALWAYS REPORTED but NEVER BLOCK the
+   * build — this is a report-only check that surfaces dead code for the developer without
+   * stopping the gate. An un-scannable project SKIPS.
+   */
+  deadCodeScan?: { projectPath?: string };
+  /** Override the dead code scanner (tests). Default: {@link scanDeadCode}. */
+  runDeadCodeScan?: (projectPath: string) => Promise<DeadCodeReport>;
+  /**
+   * Six Laws verification (OPTIONAL). When supplied, Sentinel runs the full Six Laws check via
+   * {@link runSixLawsCheck} (governance-gate) AFTER EVERY prompt. A failing law (any law with a
+   * `fail`-severity finding) FAILS the gate; a law that could not be evaluated SKIPS; an
+   * un-reachable app / browser SKIPS (never a false failure).
+   */
+  sixLaws?: { projectPath?: string };
+  /** Override the Six Laws runner (tests). Default: {@link runSixLawsCheck}. */
+  runSixLawsVerification?: (projectPath: string) => Promise<SixLawsResult>;
+  /**
+   * Full Playwright test suite (OPTIONAL). When supplied, Sentinel runs the COMPLETE Playwright
+   * test suite (`pnpm playwright test`) after every prompt — not incremental. Any test failure
+   * FAILS the gate and blocks the build. Timeout defaults to 20 minutes. An environment without
+   * Playwright installed that exits non-zero FAILS (not skipped); a timeout FAILS.
+   */
+  playwright?: { projectPath?: string; command?: string; timeoutMs?: number };
   /** Progress reporter. Default logs to the console with a `[FORGE:sentinel]` prefix. */
   log?: (message: string) => void;
 }
@@ -1245,6 +1300,92 @@ function evaluateMigrationSafety(report: MigrationSafetyReport, durationMs: numb
 }
 
 // ---------------------------------------------------------------------------
+// Check 13 (optional): AgentShield Security Scan (grade B+ required)
+// ---------------------------------------------------------------------------
+
+/** Grades that satisfy the B+ requirement: A or B. */
+const AGENT_SHIELD_PASSING_GRADES = new Set<SecurityGrade>(['A', 'B']);
+
+function evaluateAgentShield(report: SecurityReport, durationMs: number): CheckResult {
+  const totalFindings = report.findings.length;
+  const summary =
+    `AgentShield grade: ${report.grade} (${totalFindings} finding(s) across ${report.scannedPaths.length} path(s)).\n` +
+    report.findings
+      .slice(0, 20)
+      .map(
+        (f) =>
+          `- [${f.severity}] ${f.category} @ ${f.file}${f.line !== undefined ? `:${f.line}` : ''}: ${f.message}`
+      )
+      .join('\n');
+
+  if (!AGENT_SHIELD_PASSING_GRADES.has(report.grade)) {
+    return fail(
+      'agent_shield',
+      `AgentShield grade ${report.grade} is below the required B+ — build blocked`,
+      summary,
+      durationMs
+    );
+  }
+  return pass(
+    'agent_shield',
+    `AgentShield grade ${report.grade} meets B+ requirement (${totalFindings} finding(s))`,
+    summary,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Check 14 (optional): Live Schema Drift (code vs live database — requires schemaSql)
+// ---------------------------------------------------------------------------
+
+// Evaluation is delegated to the existing `evaluateSchemaDrift` — same semantics (additions ok,
+// modifications/deletions fail). The difference from the mandatory `schema_drift` check is that
+// this check REQUIRES a live SQL executor and always runs when configured, regardless of whether
+// schema prompts have executed.
+
+// ---------------------------------------------------------------------------
+// Check 15 (optional): Dead Code Scan (report only — never blocks)
+// ---------------------------------------------------------------------------
+
+function evaluateDeadCode(report: DeadCodeReport, durationMs: number): CheckResult {
+  const total = report.unusedImports.length + report.unusedVariables.length + report.unusedExports.length;
+  const summary = formatDeadCodeReport(report);
+  return pass(
+    'dead_code',
+    total > 0
+      ? `dead code: ${report.unusedImports.length} unused import(s), ${report.unusedVariables.length} unused variable(s), ${report.unusedExports.length} unused export(s) across ${report.scannedFiles} file(s) (report only — non-blocking)`
+      : `no dead code found (${report.scannedFiles} file(s) scanned)`,
+    summary,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Check 16 (optional): Six Laws Verification (governance-gate)
+// ---------------------------------------------------------------------------
+
+function evaluateSixLaws(result: SixLawsResult, durationMs: number): CheckResult {
+  const evaluatedLaws = result.laws.filter((l) => !l.skipped);
+  const failedLaws = evaluatedLaws.filter((l) => !l.passed);
+
+  if (result.passed) {
+    return pass(
+      'six_laws',
+      `all ${evaluatedLaws.length} evaluated Six Law(s) passed`,
+      result.report,
+      durationMs
+    );
+  }
+  const failDetail = failedLaws.map((l) => `Law ${l.law} (${l.name})`).join(', ');
+  return fail(
+    'six_laws',
+    `${failedLaws.length} of ${evaluatedLaws.length} law(s) failed: ${failDetail}`,
+    result.report,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostic report
 // ---------------------------------------------------------------------------
 
@@ -1688,6 +1829,144 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       } else {
         record(evaluateConsensus(cv, nowMs() - startedAt));
       }
+    }
+  }
+
+  // --- 13. AgentShield Security Scan (OPTIONAL — grade B+ required; runs after every prompt) ----
+  // Not part of the mandatory Contract-13 five: appended only when `agentShield` is supplied. Like
+  // the security scan it is NOT gated on UI changes — every prompt's output is scanned. A grade
+  // below B (i.e. C/D/F) FAILS the gate; A or B passes; an un-scannable project SKIPS.
+  if (options.agentShield) {
+    if (shouldSkipRest()) {
+      record(skipRest('agent_shield'));
+    } else {
+      log('check 13: AgentShield Security Scan (grade B+ required)');
+      const startedAt = nowMs();
+      const shieldPath = options.agentShield.projectPath ?? projectPath;
+      const runShield = options.runAgentShieldCheck ?? scanProjectSecurity;
+      let shield: SecurityReport | null;
+      try {
+        shield = await runShield(shieldPath);
+      } catch (error) {
+        log(`WARNING: AgentShield scan failed (${describe(error)})`);
+        shield = null;
+      }
+      if (shield === null) {
+        record(skip('agent_shield', 'AgentShield scanner failed — not evaluated'));
+      } else {
+        record(evaluateAgentShield(shield, nowMs() - startedAt));
+      }
+    }
+  }
+
+  // --- 14. Live Schema Drift (OPTIONAL — requires schemaSql; runs after every prompt) -----------
+  // A second schema-drift pass that SPECIFICALLY requires a live SQL executor. Unlike the mandatory
+  // schema_drift check (which falls back to migration files when no SQL executor is available), this
+  // check is only meaningful against the LIVE database — it SKIPS when `schemaSql` is absent rather
+  // than falling back. This gives an always-current "code vs live DB" picture independent of whether
+  // schema prompts have executed.
+  if (options.liveSchemaCheck) {
+    if (shouldSkipRest()) {
+      record(skipRest('live_schema_drift'));
+    } else if (!options.schemaSql) {
+      record(skip('live_schema_drift', 'no schemaSql executor provided — live schema drift not evaluated'));
+    } else {
+      log('check 14: Live Schema Drift (code vs live database via schemaSql)');
+      const startedAt = nowMs();
+      const livePath = options.liveSchemaCheck.projectPath ?? projectPath;
+      const registryMd =
+        options.liveSchemaRegistryContent ??
+        options.schemaRegistryContent ??
+        (await readTextSafe(join(governanceDir, 'SCHEMA_REGISTRY.md')));
+      if (registryMd === null) {
+        record(skip('live_schema_drift', `SCHEMA_REGISTRY.md not found under ${governanceDir} — live drift not evaluated`));
+      } else {
+        const expected = parseSchemaRegistry(registryMd);
+        let actual: SchemaSnapshot;
+        try {
+          actual = options.runLiveSchemaExtraction
+            ? await options.runLiveSchemaExtraction()
+            : await extractSchema({ projectPath: livePath, sql: options.schemaSql });
+        } catch (error) {
+          log(`WARNING: live schema extraction failed (${describe(error)})`);
+          actual = { tables: [], relationships: [], indexes: [], rlsPolicies: [], source: 'none', migrationFiles: [], warnings: [describe(error)] };
+        }
+        const liveDriftResult = evaluateSchemaDrift(expected, actual, nowMs() - startedAt);
+        record({ ...liveDriftResult, name: 'live_schema_drift' });
+      }
+    }
+  }
+
+  // --- 15. Dead Code Scan (OPTIONAL — report only, never blocks; runs after every prompt) -------
+  // Not part of the mandatory Contract-13 five: appended only when `deadCodeScan` is supplied. It
+  // scans for unused imports, variables, and exports across the project. Results are ALWAYS surfaced
+  // but NEVER block the build (report-only by design, matching the task spec "report, don't block").
+  if (options.deadCodeScan) {
+    if (shouldSkipRest()) {
+      record(skipRest('dead_code'));
+    } else {
+      log('check 15: Dead Code Scan (unused imports / variables / exports — report only)');
+      const startedAt = nowMs();
+      const deadPath = options.deadCodeScan.projectPath ?? projectPath;
+      const runDead = options.runDeadCodeScan ?? scanDeadCode;
+      let dead: DeadCodeReport | null;
+      try {
+        dead = await runDead(deadPath);
+      } catch (error) {
+        log(`WARNING: dead code scan failed (${describe(error)})`);
+        dead = null;
+      }
+      if (dead === null) {
+        record(skip('dead_code', 'dead code scanner failed — not evaluated'));
+      } else {
+        record(evaluateDeadCode(dead, nowMs() - startedAt));
+      }
+    }
+  }
+
+  // --- 16. Six Laws Verification (OPTIONAL — via governance-gate; runs after every prompt) ------
+  // Not part of the mandatory Contract-13 five: appended only when `sixLaws` is supplied. Runs the
+  // full Six Laws check via `runSixLawsCheck` (governance-gate). A failing law FAILS the gate; a
+  // law that cannot be evaluated SKIPS; an un-reachable app / browser SKIPS (never a false failure).
+  if (options.sixLaws) {
+    if (shouldSkipRest()) {
+      record(skipRest('six_laws'));
+    } else {
+      log('check 16: Six Laws Verification (governance-gate)');
+      const startedAt = nowMs();
+      const sixPath = options.sixLaws.projectPath ?? projectPath;
+      const runSix = options.runSixLawsVerification ?? runSixLawsCheck;
+      let six: SixLawsResult | null;
+      try {
+        six = await runSix(sixPath);
+      } catch (error) {
+        log(`WARNING: Six Laws verification failed (${describe(error)})`);
+        six = null;
+      }
+      if (six === null) {
+        record(skip('six_laws', 'Six Laws verifier failed — not evaluated'));
+      } else {
+        record(evaluateSixLaws(six, nowMs() - startedAt));
+      }
+    }
+  }
+
+  // --- 17. Full Playwright Test Suite (OPTIONAL — not incremental; runs after every prompt) -----
+  // Not part of the mandatory Contract-13 five: appended only when `playwright` is supplied. Unlike
+  // the incremental-tester, this runs the COMPLETE Playwright suite (`pnpm playwright test`) every
+  // time — no file-change filtering. Any test failure FAILS the gate; a timeout also FAILS. There
+  // is no SKIP path (a missing Playwright install will produce a non-zero exit, which fails).
+  if (options.playwright) {
+    if (shouldSkipRest()) {
+      record(skipRest('playwright'));
+    } else {
+      const playwrightCmd = options.playwright.command ?? 'pnpm playwright test';
+      const playwrightTimeout = options.playwright.timeoutMs ?? 20 * 60 * 1000;
+      const playwrightPath = options.playwright.projectPath ?? projectPath;
+      log(`check 17: Full Playwright Test Suite (${playwrightCmd})`);
+      record(
+        await runCommandCheck('playwright', playwrightCmd, playwrightPath, playwrightTimeout, run)
+      );
     }
   }
 
