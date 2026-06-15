@@ -489,6 +489,101 @@ export interface SessionMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// repair-command
+// ---------------------------------------------------------------------------
+
+/** Categories of TypeScript compile errors addressed by repair mode. */
+export type RepairErrorCategory =
+  | 'missing_module'   // TS2307, TS7016 — cannot find module / no declaration file
+  | 'missing_import'   // TS2304, TS2305, TS2306 — cannot find name / no exported member
+  | 'type_mismatch'    // TS2322, TS2345, TS2339 — type assignability / property access
+  | 'undefined_var'    // TS2532, TS2533, TS18047 — possibly null or undefined
+  | 'enum_mismatch'    // TS2551, TS2361 — enum value / property mismatch
+  | 'other';
+
+/** A single TypeScript compiler error parsed from `pnpm tsc --noEmit` output. */
+export interface TscError {
+  /** Project-relative file path. */
+  filePath: string;
+  /** 1-based line number. */
+  line: number;
+  /** 1-based column number. */
+  col: number;
+  /** TypeScript error code, e.g. "TS2345". */
+  code: string;
+  /** Human-readable error message. */
+  message: string;
+  /** Classified repair category. */
+  category: RepairErrorCategory;
+}
+
+/** A group of related TypeScript errors addressed by a single repair prompt. */
+export interface RepairCluster {
+  /** Stable id used as the queue entry id. */
+  id: string;
+  /** Human-readable name. */
+  name: string;
+  /** Primary error category for all errors in this cluster. */
+  category: RepairErrorCategory;
+  /** Project-relative paths of files touched by errors in this cluster. */
+  files: string[];
+  errors: TscError[];
+  /** Repair priority (lower = fixed first). */
+  priority: number;
+}
+
+/** Outcome of a compile or build gate check run after repair. */
+export interface RepairGateResult {
+  gate: 'compile' | 'build';
+  passed: boolean;
+  output: string;
+  errorCount: number;
+}
+
+/** Minimal summary of Phase 3 execution embedded in RepairResult (avoids a circular dep on phase3-executor). */
+export interface RepairExecutionSummary {
+  buildRunId: string | null;
+  status: string;
+  completedPrompts: number;
+  failedPrompts: number;
+  skippedPrompts: number;
+  haltReason: string | null;
+  warnings: string[];
+}
+
+/** Options for {@link runRepairMode}. */
+export interface RepairConfig {
+  /** Path to write the generated repair queue.yaml. Defaults to `<projectPath>/repair-queue.yaml`. */
+  repairQueuePath?: string;
+  /** Execute the repair queue through Phase 3. Defaults to true. */
+  executeRepairs?: boolean;
+  /** Enable Autonomous Recovery Mode (Contract 14) during repair execution. Defaults to false. */
+  autonomousRecovery?: boolean;
+  /** Maximum repair clusters to generate; clusters beyond this are dropped with a warning. Defaults to 20. */
+  maxClusters?: number;
+  /** Progress reporter (same contract as other phase `log` callbacks). */
+  log?: (message: string) => void;
+}
+
+/** Overall result of a {@link runRepairMode} run. */
+export interface RepairResult {
+  projectPath: string;
+  status: 'success' | 'partial' | 'failed' | 'no_errors';
+  /** TypeScript errors found before repair. */
+  errorsFound: number;
+  /** TypeScript errors remaining after repair (0 on success). */
+  errorsAfterRepair: number;
+  clusters: RepairCluster[];
+  /** Path of the generated repair queue.yaml, or null if none was written. */
+  repairQueuePath: string | null;
+  /** Phase 3 execution summary, or null when execution was skipped. */
+  executionResult: RepairExecutionSummary | null;
+  gateResults: RepairGateResult[];
+  warnings: string[];
+  generatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // incremental-tester
 // ---------------------------------------------------------------------------
 

@@ -21,6 +21,7 @@
  *   agents            Self-created agents + status
  *   resurrect <path>  Project Autopsy on a failed project (F10)
  *   estimate <path>   Cost/time estimate without building (F17)
+ *   repair <path>     Repair a broken TypeScript repo (diagnose → cluster → queue → execute → verify)
  *
  * House style carried over from the phases: nothing here throws to the top level —
  * a failed command sets `process.exitCode` and prints a diagnostic. Build Memory
@@ -52,6 +53,7 @@ import { runPhase3Executor, type Phase3Result } from '../phases/phase3-executor.
 import { runPhase5Learner } from '../phases/phase5-learner.js';
 import { runProjectAutopsy, renderAutopsyReportMarkdown } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
+import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
 
 import { BuildMemory, runQuery } from '../memory/index.js';
@@ -66,6 +68,7 @@ import type {
   ErrorPattern,
   JsonObject,
   PromptExecution,
+  RepairConfig,
   ScheduledTaskType,
   SelfCreatedAgent,
 } from '../types/index.js';
@@ -750,6 +753,79 @@ async function cmdScheduleTrigger(name: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `forge repair <path>` — repair a broken TypeScript repository
+// ---------------------------------------------------------------------------
+
+/** `forge repair <path>` — diagnose, cluster, queue, execute, and verify repairs. */
+async function cmdRepair(
+  pathArg: string,
+  opts: {
+    generateOnly?: boolean;
+    autonomousRecovery?: boolean;
+    maxClusters?: string;
+    queuePath?: string;
+  }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const projectName = basename(projectPath) || 'project';
+  console.log(chalk.bold(`\nRepairing ${projectName} at ${projectPath}`));
+  if (opts.generateOnly) console.log(chalk.cyan('  GENERATE ONLY — repair queue will be written but not executed.'));
+
+  const maxClusters = opts.maxClusters ? Number.parseInt(opts.maxClusters, 10) : undefined;
+  if (opts.maxClusters !== undefined && (Number.isNaN(maxClusters) || (maxClusters ?? 0) < 1)) {
+    fail('--max-clusters must be a positive integer.');
+    return;
+  }
+
+  const repairConfig: RepairConfig = {
+    repairQueuePath: opts.queuePath,
+    executeRepairs: !opts.generateOnly,
+    autonomousRecovery: opts.autonomousRecovery ?? false,
+    maxClusters,
+  };
+
+  const result = await withSpinner('FORGE Repair Mode', (log) =>
+    runRepairMode(projectPath, { ...repairConfig, log })
+  );
+
+  // Summary
+  console.log(`\n  errors found:  ${chalk.yellow(String(result.errorsFound))}`);
+  console.log(`  errors remain: ${result.errorsAfterRepair === 0 ? chalk.green('0') : chalk.red(String(result.errorsAfterRepair))}`);
+  console.log(`  clusters:      ${result.clusters.length}`);
+  if (result.repairQueuePath) {
+    console.log(chalk.dim(`  queue:         ${result.repairQueuePath}`));
+  }
+
+  if (result.executionResult) {
+    const er = result.executionResult;
+    console.log(
+      `  execution:     ${statusChip(er.status)} — ` +
+        `${chalk.green(String(er.completedPrompts) + ' done')}, ` +
+        `${chalk.red(String(er.failedPrompts) + ' failed')}, ` +
+        `${chalk.dim(String(er.skippedPrompts) + ' skipped')}`
+    );
+  }
+
+  for (const gate of result.gateResults) {
+    const label = gate.passed ? chalk.green('PASS') : chalk.red('FAIL');
+    console.log(`  gate [${gate.gate.padEnd(7, ' ')}]: ${label}${gate.passed ? '' : ` (${gate.errorCount} error(s))`}`);
+  }
+
+  printWarnings(result.warnings);
+
+  if (result.status === 'no_errors') {
+    console.log(chalk.green('\n✔ No TypeScript errors found — repository is already healthy.'));
+  } else if (result.status === 'success') {
+    console.log(chalk.green('\n✔ Repair complete — all gates PASS.'));
+  } else if (result.status === 'partial') {
+    console.log(chalk.yellow(`\n⚠ Partial repair — ${result.errorsAfterRepair} error(s) remain. Re-run to continue.`));
+    process.exitCode = 1;
+  } else {
+    fail(`Repair ${result.status} — ${result.errorsAfterRepair} error(s) remain.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CLI wiring
 // ---------------------------------------------------------------------------
 
@@ -842,6 +918,26 @@ async function main(): Promise<void> {
     .option('--idea <text>', 'raw product idea')
     .option('--prd <path>', 'use an existing PRD file instead of an idea')
     .action((pathArg: string, opts: { idea?: string; prd?: string }) => cmdEstimate(pathArg, opts));
+
+  program
+    .command('repair')
+    .description('Repair a broken TypeScript repo: diagnose → cluster → queue → execute → verify')
+    .argument('<path>', 'target project directory')
+    .option('--generate-only', 'generate the repair queue but skip Phase 3 execution', false)
+    .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14) during repairs', false)
+    .option('--max-clusters <n>', 'cap the number of repair prompt clusters (default 20)')
+    .option('--queue-path <path>', 'custom path to write the repair queue.yaml')
+    .action(
+      (
+        pathArg: string,
+        opts: {
+          generateOnly?: boolean;
+          autonomousRecovery?: boolean;
+          maxClusters?: string;
+          queuePath?: string;
+        }
+      ) => cmdRepair(pathArg, opts)
+    );
 
   const schedule = program
     .command('schedule')
