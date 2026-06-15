@@ -105,15 +105,27 @@ import {
   runSentinel,
   runAutonomousRecovery,
   toPreviousSentinelStatus,
+  normalizeErrorSignature,
   type SentinelResult,
   type SentinelOptions,
   type AutoRecoveryResult,
 } from './phase4-sentinel.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
-import type { JsonObject } from '../types/index.js';
+import type { Instinct, JsonObject } from '../types/index.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { CodebaseRag } from '../tools/codebase-rag.js';
 import { logLine, setLogContext, clearLogContext, runWithBuildContext } from '../tools/forge-logger.js';
+import { HookManager } from '../engine/hook-manager.js';
+import { applyInstincts } from '../analysis/instinct-extractor.js';
+import {
+  selectModelForEntry,
+  classifyPromptComplexity,
+  routeToModel,
+  estimateCost,
+  ModelCostTracker,
+} from '../engine/model-router.js';
+import { runSmokeTests, shouldRunTests } from '../tools/incremental-tester.js';
+import { scanDeadCode } from '../tools/dead-code-scanner.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -387,6 +399,18 @@ export interface Phase3Options {
 
   /** Progress reporter. Default logs to the console with a `[FORGE:phase3]` prefix. */
   log?: (message: string) => void;
+
+  // -- new capabilities (injectable for tests) --------------------------------
+  /**
+   * HookManager instance for pre/post prompt lifecycle events. Default: a new HookManager
+   * with hooks loaded from `<projectPath>/hooks.json` (built-in hooks always active).
+   */
+  hookManager?: HookManager;
+  /**
+   * Known instinct rules (extracted from prior builds) to apply to each prompt before
+   * execution. Default: empty (no instincts). Load via {@link extractInstincts} externally.
+   */
+  instincts?: Instinct[];
 }
 
 // ---------------------------------------------------------------------------
@@ -715,6 +739,16 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const recordDecomposition: NonNullable<Phase3Options['recordDecomposition']> =
     options.recordDecomposition ?? ((record) => defaultRecordDecomposition(projectName, machineId, buildRunId, record));
 
+  // New capabilities: HookManager, instincts, and per-build cost tracker.
+  // HookManager loads custom hooks from <projectPath>/hooks.json; built-in hooks are always active.
+  const hookManager: HookManager = options.hookManager ?? (() => {
+    const hm = new HookManager();
+    if (!dryRun) hm.loadHooks(projectPath);
+    return hm;
+  })();
+  const instincts: Instinct[] = options.instincts ?? [];
+  const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
+
   // 3. Walk the prompts in dependency order.
   const ctx: LoopContext = {
     projectPath,
@@ -740,6 +774,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     updateStateProgress,
     writeHaltReport,
     log,
+    hookManager,
+    instincts,
+    costTracker,
   };
 
   const outcomes: PromptOutcome[] = [];
@@ -870,6 +907,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         : '')
   );
 
+  if (!dryRun && costTracker.entries.length > 0) {
+    const costSummary = costTracker.summary();
+    log(
+      `Model cost estimate: $${costSummary.totalCostUsd.toFixed(4)} across ${costSummary.totalPrompts} prompt(s) ` +
+        `(${costSummary.byModel.map((r) => `${r.model}: ${r.prompts} prompts $${r.costUsd.toFixed(4)}`).join(', ')})`
+    );
+  }
+
   // Build finished — drop the ambient build/prompt context so a later build (or a test running
   // multiple builds in one process) starts clean.
   clearLogContext();
@@ -953,6 +998,12 @@ interface LoopContext {
   updateStateProgress: (line: string) => Promise<void>;
   writeHaltReport: (report: string) => Promise<void>;
   log: (message: string) => void;
+  /** Hook manager for pre_prompt / post_prompt lifecycle events. */
+  hookManager: HookManager;
+  /** Learned instinct rules applied to each prompt before execution. */
+  instincts: Instinct[];
+  /** Accumulates per-prompt model cost estimates across the build. */
+  costTracker: ModelCostTracker;
 }
 
 /** Build the Sentinel options for this build (shared by the main run + recovery re-runs). */
@@ -985,6 +1036,23 @@ async function executePrompt(
       stackFingerprint: ctx.stackFingerprint,
       promptIndex: index,
     });
+
+    // b1. PRE-PROMPT HOOK — fire before assembly so hooks can gate or annotate the prompt.
+    // A 'deny' result skips the prompt (non-fatal: build continues to the next entry).
+    const preHookResults = await ctx.hookManager
+      .fireEvent('pre_prompt', {
+        projectPath: ctx.projectPath,
+        promptId: entry.id,
+        promptIndex: index,
+        promptType: entry.prompt_type,
+        buildRunId: ctx.buildRunId,
+      })
+      .catch(() => [{ action: 'allow' as const }]);
+    if (preHookResults[0]?.action === 'deny') {
+      const denyReason = preHookResults[0]?.reason ?? 'no reason given';
+      log(`prompt ${index} '${entry.id}': pre_prompt hook denied — ${denyReason}; skipping`);
+      return skippedOutcome(entry, index, `pre_prompt hook denied: ${denyReason}`);
+    }
 
     // c0. Codebase RAG (Contract 7 extension): retrieve the 10 existing files most relevant to this
     //     task and render them as an injectable block, so the assembled prompt tells Claude what
@@ -1020,6 +1088,34 @@ async function executePrompt(
       wasRewritten = true;
       log(`prompt ${index} '${entry.id}': rewritten (p=${prediction.probability.toFixed(3)} > 0.4)`);
     }
+
+    // b2. APPLY INSTINCTS — augment the (possibly rewritten) prompt with learned fix rules.
+    // Relevant instincts (confidence ≥ 0.5, keyword overlap ≥ 2) are appended as a block.
+    if (ctx.instincts.length > 0) {
+      const augmented = applyInstincts(promptText, ctx.instincts);
+      if (augmented !== promptText) {
+        log(`prompt ${index} '${entry.id}': instincts applied (+${augmented.length - promptText.length} chars)`);
+        promptText = augmented;
+      }
+    }
+
+    // b3. MODEL ROUTING — classify prompt complexity, select the optimal Claude model,
+    // and record the estimated cost for this prompt (telemetry; never blocks execution).
+    const modelSelection = selectModelForEntry(entry);
+    const complexity = classifyPromptComplexity(promptText);
+    const selectedModel = routeToModel(complexity);
+    const promptCostEstimate = estimateCost(promptText, selectedModel);
+    ctx.costTracker.record({
+      selection: modelSelection,
+      inputTokens: promptCostEstimate.inputTokens,
+      outputTokens: promptCostEstimate.outputTokens,
+      promptName: entry.name,
+      promptIndex: index,
+    });
+    log(
+      `prompt ${index} '${entry.id}': model=${selectedModel} tier=${modelSelection.tier} ` +
+        `complexity=${complexity} ~$${promptCostEstimate.costUsd.toFixed(4)}`
+    );
 
     // e. Create the Contract-10 feature branch.
     const branch = ctx.git.createBranch(buildIdOf(ctx), index, entry.name);
@@ -1093,8 +1189,71 @@ async function executePrompt(
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
     }
 
+    // e1. POST-PROMPT HOOK — fire after execution, before Sentinel. Non-fatal.
+    await ctx.hookManager
+      .fireEvent('post_prompt', {
+        projectPath: ctx.projectPath,
+        promptId: entry.id,
+        promptIndex: index,
+        promptType: entry.prompt_type,
+        buildRunId: ctx.buildRunId,
+        exitCode: run.exitCode ?? null,
+        timedOut: run.timedOut ?? false,
+      })
+      .catch(() => {});
+
+    // e2. COMMIT PROMPT CHANGES — structured commit tracking this prompt's output.
+    // Non-fatal: if nothing was staged (prior commitAll already committed), this is a no-op.
+    try {
+      await ctx.git.commitPromptChanges(entry.id, entry.prompt_type, 'post-run');
+    } catch (commitErr) {
+      log(`prompt ${index} '${entry.id}': commitPromptChanges non-fatal — ${describe(commitErr)}`);
+    }
+
     // Capture the files this branch changed (for the prompt_execution record).
     const changed = filesChanged(ctx);
+
+    // h1. ERROR PATTERN FIX — when Sentinel fails, check the Build Memory error pattern database
+    // for a known fix. If found, apply it via claude and re-run Sentinel. This retry does NOT count
+    // against max_retries (it is a targeted known fix, not a generic retry). Non-fatal.
+    if (!sentinel.passed) {
+      const errorText = sentinel.diagnosticReport ?? '';
+      const sig = normalizeErrorSignature(errorText);
+      if (sig) {
+        try {
+          const knownPattern = await BuildMemory.errors.findMatchingPattern(sig);
+          if (knownPattern) {
+            const resolution = await BuildMemory.resolutions.getResolutionForPattern(knownPattern.id);
+            if (resolution?.resolution_description) {
+              log(`prompt ${index} '${entry.id}': known error pattern matched (sig=${sig.slice(0, 60)}…) — applying fix`);
+              const fixSteps = Array.isArray(resolution.resolution_steps)
+                ? resolution.resolution_steps.map(String).join('\n')
+                : String(resolution.resolution_steps ?? '');
+              const fixPrompt = fixSteps
+                ? `${resolution.resolution_description}\n\nSteps:\n${fixSteps}`
+                : resolution.resolution_description;
+              const fixRun = await ctx.runClaudeImpl(fixPrompt, ctx.projectPath);
+              if (fixRun.success) {
+                ctx.git.commitAll(
+                  `[FORGE] pattern-fix: ${entry.name}\n\nAuto-applied known resolution for prompt ${index} (${entry.id}).`
+                );
+                const fixedSentinel = await ctx.runSentinelImpl(sentinelOptions);
+                if (fixedSentinel.passed) {
+                  log(`prompt ${index} '${entry.id}': pattern fix succeeded — sentinel now green`);
+                  sentinel = fixedSentinel;
+                } else {
+                  log(`prompt ${index} '${entry.id}': pattern fix applied but sentinel still failing — proceeding to normal recovery`);
+                }
+              } else {
+                log(`prompt ${index} '${entry.id}': pattern fix claude run failed — proceeding to normal recovery`);
+              }
+            }
+          }
+        } catch (patternErr) {
+          log(`prompt ${index} '${entry.id}': error pattern lookup non-fatal — ${describe(patternErr)}`);
+        }
+      }
+    }
 
     let recovery: AutoRecoveryResult | null = null;
     let disposition: PromptDisposition;
@@ -1136,6 +1295,50 @@ async function executePrompt(
       changed,
       recovery,
     });
+
+    // Post-finalization: dead code scan on changed files + every-10th smoke tests.
+
+    // DEAD CODE SCAN — scan the whole src tree but report only findings in changed files.
+    // Non-fatal: scan failures are logged and do not affect the prompt's disposition.
+    const changedPaths = [...changed.created, ...changed.modified];
+    if (changedPaths.length > 0) {
+      scanDeadCode(ctx.projectPath)
+        .then((deadReport) => {
+          const changedSet = new Set(changedPaths.map((p) => p.replace(/\\/g, '/')));
+          const unusedImports = deadReport.unusedImports.filter((i) => changedSet.has(i.file));
+          const unusedVars = deadReport.unusedVariables.filter((v) => changedSet.has(v.file));
+          const unusedExports = deadReport.unusedExports.filter((e) => changedSet.has(e.file));
+          const total = unusedImports.length + unusedVars.length + unusedExports.length;
+          if (total > 0) {
+            log(
+              `prompt ${index} '${entry.id}': dead-code scan — ${total} issue(s) in changed files ` +
+                `(imports: ${unusedImports.length}, vars: ${unusedVars.length}, exports: ${unusedExports.length})`
+            );
+          }
+        })
+        .catch((scanErr) => {
+          log(`prompt ${index} '${entry.id}': dead-code scan non-fatal — ${describe(scanErr)}`);
+        });
+    }
+
+    // SMOKE TESTS every 10th prompt — run after completion (regardless of pass/fail for visibility).
+    // Uses shouldRunTests frequency guard and runSmokeTests (compile + build + 3 page probes).
+    if (shouldRunTests(index)) {
+      runSmokeTests(ctx.projectPath)
+        .then((smokeResult) => {
+          log(
+            `prompt ${index} '${entry.id}': smoke tests ${smokeResult.passed ? 'PASS' : 'FAIL'} ` +
+              `(${smokeResult.passedFiles}/${smokeResult.totalFiles} checks)`
+          );
+          if (!smokeResult.passed) {
+            const failing = smokeResult.results.filter((r) => !r.passed).map((r) => r.file);
+            log(`prompt ${index} '${entry.id}': smoke failures — ${failing.join(', ')}`);
+          }
+        })
+        .catch((smokeErr) => {
+          log(`prompt ${index} '${entry.id}': smoke tests non-fatal — ${describe(smokeErr)}`);
+        });
+    }
 
     // Rebuild the Codebase RAG index after a SUCCESSFUL prompt (Contract 7 extension), so the next
     // prompt's retrieval reflects the files this one just wrote/merged. Non-fatal — on failure the
