@@ -45,9 +45,13 @@ import {
   type EnvironmentAudit,
   type DockerStatus,
 } from '../tools/env-auditor.js';
-import { runQuery, nowIso } from '../memory/index.js';
+import { runQuery, nowIso, getClient } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
-import type { BuildRun } from '../types/index.js';
+import { scanProjectSecurity } from '../tools/agent-shield.js';
+import { detectSchemaDrift } from '../tools/schema-validator.js';
+import { HookManager } from '../engine/hook-manager.js';
+import { onSessionStart } from '../memory/session-hooks.js';
+import type { BuildRun, SecurityReport, SessionContext } from '../types/index.js';
 
 const execAsync = promisify(exec);
 
@@ -125,8 +129,14 @@ export interface Phase0Result {
   toolchainManifest: ToolchainManifest;
   /** True iff `blockers` is empty. When false, FORGE must halt. */
   passed: boolean;
-  /** Critical missing tools / env vars that block the build. */
+  /** Critical missing tools / env vars or security failures that block the build. */
   blockers: string[];
+  /** AgentShield security report (null if scan errored out). */
+  securityReport: SecurityReport | null;
+  /** Initialized hook manager with built-in + project hooks loaded (null if init errored). */
+  hookManager: HookManager | null;
+  /** Restored session context from Build Memory (null if unavailable or stateless). */
+  sessionContext: SessionContext | null;
 }
 
 /** Options controlling the scout's side effects (all default to the safe build behavior). */
@@ -633,7 +643,123 @@ export async function runPhase0Scout(
     }
   }
 
-  return { stackFingerprint, environmentAudit: audit, toolchainManifest, passed, blockers };
+  // -------------------------------------------------------------------------
+  // Step 9: AgentShield security scan — must pass grade B+ (A or B) to proceed
+  // -------------------------------------------------------------------------
+  log('step 9: AgentShield security scan');
+  let securityReport: SecurityReport | null = null;
+  try {
+    securityReport = await scanProjectSecurity(projectPath);
+    const { grade, findings } = securityReport;
+    log(`AgentShield: grade=${grade} | ${findings.length} finding(s) | ${securityReport.scannedPaths.length} artifact(s) scanned`);
+    for (const f of findings) {
+      log(`  [${f.severity}] ${f.category}: ${f.message}`);
+    }
+    if (grade !== 'A' && grade !== 'B') {
+      const criticalHighCount = findings.filter((f) => f.severity === 'critical' || f.severity === 'high').length;
+      blockers.push(
+        `AgentShield security grade ${grade} is below required B+ — ` +
+          `${criticalHighCount} critical/high finding(s) must be resolved before proceeding`
+      );
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: AgentShield scan error — ${detail}`);
+    toolchainManifest.warnings.push(`AgentShield scan error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 10: Schema drift detection — non-blocking (some drift expected pre-build)
+  // -------------------------------------------------------------------------
+  log('step 10: schema drift detection');
+  try {
+    const sbUrl =
+      process.env['NEXT_PUBLIC_SUPABASE_URL'] ?? process.env['FORGE_SUPABASE_URL'] ?? '';
+    const sbKey =
+      process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? process.env['FORGE_SUPABASE_SERVICE_KEY'] ?? '';
+    if (sbUrl && sbKey) {
+      const typesPath = join(projectPath, 'src', 'types', 'database.ts');
+      const driftReport = await detectSchemaDrift(sbUrl, sbKey, typesPath);
+      if (driftReport.hasDrift) {
+        const errorCount = driftReport.issues.filter((i) => i.severity === 'error').length;
+        const warnCount = driftReport.issues.filter((i) => i.severity === 'warning').length;
+        const msg = `Schema drift detected: ${driftReport.issues.length} issue(s) (${errorCount} error(s), ${warnCount} warning(s))`;
+        log(`WARNING: ${msg}`);
+        toolchainManifest.warnings.push(msg);
+        for (const issue of driftReport.issues.slice(0, 5)) {
+          log(`  [${issue.severity}] ${issue.issueType}: ${issue.message}`);
+        }
+      } else {
+        log('schema drift: none detected');
+      }
+    } else {
+      log('schema drift: skipped (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set)');
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: schema drift detection error — ${detail}`);
+    toolchainManifest.warnings.push(`Schema drift detection error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 11: Hook system initialization — load hooks.json + register built-ins
+  // -------------------------------------------------------------------------
+  log('step 11: initializing hook system');
+  let hookManager: HookManager | null = null;
+  try {
+    hookManager = new HookManager();
+    hookManager.loadHooks(projectPath);
+    const registeredHooks = hookManager.getHooks();
+    log(`hook system ready: ${registeredHooks.length} hook(s) registered`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: hook system initialization error — ${detail}`);
+    toolchainManifest.warnings.push(`Hook system initialization error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 12: Load session context from Build Memory
+  // -------------------------------------------------------------------------
+  log('step 12: loading session context from Build Memory');
+  let sessionContext: SessionContext | null = null;
+  try {
+    const memoryClient = getClient();
+    if (memoryClient) {
+      sessionContext = await onSessionStart(projectPath, memoryClient);
+      log(
+        `session context loaded: ${sessionContext.activeErrorPatterns.length} error pattern(s), ` +
+          `${sessionContext.applicableInsights.length} applicable insight(s)`
+      );
+    } else {
+      log('session context: skipping (Build Memory unavailable — stateless mode)');
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: session context load error — ${detail}`);
+    toolchainManifest.warnings.push(`Session context load error: ${detail}`);
+  }
+
+  // Recompute passed — AgentShield (step 9) may have added blockers after the
+  // initial environment-only gate was logged and written to TOOLCHAIN.md.
+  const finalPassed = blockers.length === 0;
+  if (finalPassed !== passed) {
+    log(
+      finalPassed
+        ? 'Phase 0 gate (final): PASS'
+        : `Phase 0 gate (final): FAIL (${blockers.length} blocker(s))`
+    );
+  }
+
+  return {
+    stackFingerprint,
+    environmentAudit: audit,
+    toolchainManifest,
+    passed: finalPassed,
+    blockers,
+    securityReport,
+    hookManager,
+    sessionContext,
+  };
 }
 
 export default runPhase0Scout;
