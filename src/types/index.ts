@@ -421,3 +421,35 @@ export interface SecurityReport {
   scannedPaths: string[];
   generatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// session-hooks (session lifecycle memory persistence)
+// ---------------------------------------------------------------------------
+
+/** An error encountered during a FORGE session, for error_patterns extraction. */
+export interface SessionError {
+  signature: string;
+  category: ErrorCategory;
+  message: string;
+}
+
+/** Context hydrated at session_start and injected into prompts to prevent context rot. */
+export interface SessionContext {
+  lastBuildRun: BuildRun | null;
+  activeErrorPatterns: ErrorPattern[];
+  applicableInsights: CrossProjectInsight[];
+  promptInjection: string;
+}
+
+/** Metrics accumulated during a FORGE session, persisted at session_end. */
+export interface SessionMetrics {
+  buildRunId: string;
+  promptsExecuted: number;
+  passCount: number;
+  failCount: number;
+  errorsEncountered: SessionError[];
+  patternsDiscovered: string[];
+  totalTokens: number;
+  totalCostUsd: number;
+  durationMs: number;
+}
