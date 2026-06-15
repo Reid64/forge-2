@@ -43,6 +43,8 @@
  * {@link selectModel} so model selection is automatic at assembly time.
  */
 
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 import type { PromptType, QueueEntry } from './queue-generator.js';
 import { nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
@@ -400,6 +402,140 @@ export class ModelCostTracker {
   reset(): void {
     this._entries.length = 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Intelligent cost optimization: prompt complexity classification
+// ---------------------------------------------------------------------------
+
+/** Coarse complexity bucket for a free-form prompt string. */
+export type PromptComplexity = 'simple' | 'moderate' | 'complex';
+
+const COMPLEX_KEYWORDS = [
+  'architecture', 'multi-file', 'refactor', 'security review', 'governance',
+  'schema design', 'restructure', 'audit', 'overhaul', 'migration',
+];
+const SIMPLE_KEYWORDS = [
+  'scaffold', 'boilerplate', 'format', 'lint', 'linting', 'rename',
+  'typo', 'whitespace', 'indent', 'formatting', 'fix import',
+];
+
+/**
+ * Classify a free-form prompt into a complexity bucket.
+ * - simple: scaffolding, boilerplate, formatting, linting
+ * - moderate: single-feature implementation, bug fixes, test writing
+ * - complex: architecture decisions, multi-file refactors, security reviews
+ */
+export function classifyPromptComplexity(prompt: string): PromptComplexity {
+  const lower = prompt.toLowerCase();
+  if (COMPLEX_KEYWORDS.some(kw => lower.includes(kw))) return 'complex';
+  if (SIMPLE_KEYWORDS.some(kw => lower.includes(kw))) return 'simple';
+  return 'moderate';
+}
+
+// ---------------------------------------------------------------------------
+// Complexity-based model routing
+// ---------------------------------------------------------------------------
+
+/** Configuration for {@link routeToModel} — all fields optional. */
+export interface ModelRouterConfig {
+  /** Force a specific model regardless of complexity. */
+  forceModel?: ClaudeModel;
+  /** Per-complexity overrides for the default tier mapping. */
+  complexityOverrides?: Partial<Record<PromptComplexity, ClaudeModel>>;
+}
+
+const COMPLEXITY_MODEL_MAP: Record<PromptComplexity, ClaudeModel> = {
+  simple: 'claude-haiku-4-5-20251001',
+  moderate: 'claude-sonnet-4-6',
+  complex: 'claude-opus-4-6',
+};
+
+/**
+ * Route a complexity string to a Claude model id.
+ * Config overrides (forceModel or complexityOverrides) take precedence.
+ */
+export function routeToModel(complexity: string, config: ModelRouterConfig = {}): string {
+  if (config.forceModel) return config.forceModel;
+  const c: PromptComplexity =
+    complexity === 'simple' || complexity === 'moderate' || complexity === 'complex'
+      ? complexity
+      : 'moderate';
+  return config.complexityOverrides?.[c] ?? COMPLEXITY_MODEL_MAP[c];
+}
+
+// ---------------------------------------------------------------------------
+// Prompt-level cost estimation
+// ---------------------------------------------------------------------------
+
+/** Cost estimate derived from a prompt string and a model id. */
+export interface CostEstimate {
+  /** Estimated input tokens (~4 chars per token). */
+  inputTokens: number;
+  /** Estimated output tokens (3× input for code-generation workloads). */
+  outputTokens: number;
+  /** Estimated dollar cost (input + output). */
+  costUsd: number;
+  /** The model id used for pricing. */
+  model: string;
+}
+
+/**
+ * Estimate the cost of running `prompt` on `model`.
+ * Input tokens ≈ prompt.length / 4; output ≈ 3× that.
+ * Falls back to Sonnet pricing if `model` is not in {@link MODEL_PRICING}.
+ */
+export function estimateCost(prompt: string, model: string): CostEstimate {
+  const inputTokens = Math.max(1, Math.ceil(prompt.length / 4));
+  const outputTokens = inputTokens * 3;
+  const safeModel: ClaudeModel =
+    model in MODEL_PRICING ? (model as ClaudeModel) : 'claude-sonnet-4-6';
+  const costUsd = estimateModelCost(safeModel, inputTokens, outputTokens);
+  return { inputTokens, outputTokens, costUsd, model };
+}
+
+// ---------------------------------------------------------------------------
+// Skill hot-loading
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the contents of SKILL.md files under `skillsDir` that are relevant to `prompt`.
+ * Relevance is determined by keyword overlap: words > 3 chars in the prompt that appear
+ * in the skill file name or content. Returns an empty array when `skillsDir` is unreadable.
+ */
+export function loadRelevantSkills(prompt: string, skillsDir: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(skillsDir);
+  } catch {
+    return [];
+  }
+
+  const words = new Set(
+    prompt
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 3)
+  );
+
+  const results: string[] = [];
+  for (const entry of entries) {
+    if (!entry.toUpperCase().includes('SKILL')) continue;
+    const filePath = join(skillsDir, entry);
+    let content: string;
+    try {
+      content = readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+    const contentLower = content.toLowerCase();
+    const entryLower = entry.toLowerCase();
+    const isRelevant = [...words].some(
+      word => entryLower.includes(word) || contentLower.includes(word)
+    );
+    if (isRelevant) results.push(content);
+  }
+  return results;
 }
 
 export default selectModel;
