@@ -33,7 +33,7 @@
 
 import { execSync, type ExecSyncOptions } from 'node:child_process';
 import { writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
 
@@ -123,6 +123,20 @@ export interface GitFileChange {
 export interface BranchDiffResult extends GitResult {
   /** Parsed file changes on the current branch relative to main (empty on failure). */
   files: GitFileChange[];
+}
+
+/** A structured record of a single prompt's FORGE commit, returned by {@link GitManager.getChangeLog}. */
+export interface PromptCommit {
+  /** Full 40-character commit hash. */
+  hash: string;
+  /** Prompt identifier extracted from the FORGE commit message. */
+  promptId: string;
+  /** Build phase extracted from the FORGE commit message. */
+  phase: string;
+  /** Execution status extracted from the FORGE commit message (e.g. PASS, FAIL). */
+  status: string;
+  /** Files touched by this commit (from `git diff-tree`). */
+  filesChanged: string[];
 }
 
 /** Construction options for {@link GitManager}. */
@@ -388,6 +402,102 @@ export class GitManager {
     const result = this.run(['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = result.success ? result.stdout.trim() || null : null;
     return { ...result, branch };
+  }
+
+  /**
+   * Stage all changes and commit with the structured FORGE message
+   * `FORGE-{project}-P{phase}-{promptId}-{status}`. The project is derived from the
+   * working-directory basename so the caller does not need to repeat it. Returns the
+   * resulting commit hash. Throws on failure so the executor can route the error into
+   * the pipeline error-recovery protocol rather than silently swallowing it.
+   */
+  async commitPromptChanges(promptId: string, phase: string, status: string): Promise<string> {
+    const project = basename(this.cwd);
+    const message = `FORGE-${project}-P${phase}-${promptId}-${status}`;
+    const commit = this.commitAll(message);
+    if (!commit.success && !commit.nothingToCommit) {
+      throw new Error(`commitPromptChanges failed: ${commit.error ?? commit.stderr}`);
+    }
+    const rev = this.run(['rev-parse', 'HEAD']);
+    if (!rev.success) throw new Error(`rev-parse HEAD failed: ${rev.error ?? rev.stderr}`);
+    return rev.stdout.trim();
+  }
+
+  /**
+   * Return the full `git show` output for `commitHash`. Useful for diffing exactly
+   * what a prompt introduced when diagnosing a regression. Throws on failure (unknown
+   * hash, detached HEAD with no objects, etc.).
+   */
+  async getPromptDiff(commitHash: string): Promise<string> {
+    const result = this.run(['show', commitHash]);
+    if (!result.success) {
+      throw new Error(`getPromptDiff failed for ${commitHash}: ${result.error ?? result.stderr}`);
+    }
+    return result.stdout;
+  }
+
+  /**
+   * Surgically revert a single prompt's commit via `git revert --no-edit`. This creates
+   * an inverse commit on the current branch and leaves all other commits intact — it does
+   * NOT reset or delete history. Throws on failure (merge conflict, ambiguous ref, etc.)
+   * so the executor can escalate to the Tier-2/3 recovery protocol.
+   */
+  async revertPrompt(commitHash: string): Promise<void> {
+    const result = this.run(['revert', '--no-edit', commitHash]);
+    if (!result.success) {
+      throw new Error(`revertPrompt failed for ${commitHash}: ${result.error ?? result.stderr}`);
+    }
+  }
+
+  /**
+   * List all FORGE-prefixed commits reachable since `since` (a commit hash/tag or an ISO
+   * date string like `2024-01-15`). Parses the structured message
+   * `FORGE-{project}-P{phase}-{promptId}-{status}` and resolves which files each commit
+   * changed via `git diff-tree`. Returns `[]` when git fails or no matching commits exist.
+   */
+  async getChangeLog(since: string): Promise<PromptCommit[]> {
+    const isDate = /^\d{4}[-/]\d{2}[-/]\d{2}/.test(since);
+    const rangeArgs: string[] = isDate
+      ? [`--after=${since}`, 'HEAD']
+      : [`${since}..HEAD`];
+
+    const logResult = this.run(['log', '--format=%H %s', ...rangeArgs, '--grep=^FORGE-']);
+    if (!logResult.success) return [];
+
+    const commits: PromptCommit[] = [];
+    for (const rawLine of logResult.stdout.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line.length === 0) continue;
+      const spaceIdx = line.indexOf(' ');
+      if (spaceIdx === -1) continue;
+      const hash = line.slice(0, spaceIdx);
+      const subject = line.slice(spaceIdx + 1);
+
+      // Parse: FORGE-{project}-P{phase}-{promptId}-{status}
+      // Locate the first occurrence of "-P" followed by a non-dash char to split project
+      // from the phase/promptId/status tail. This handles project names that contain dashes.
+      const forgePrefix = 'FORGE-';
+      if (!subject.startsWith(forgePrefix)) continue;
+      const afterForge = subject.slice(forgePrefix.length);
+      const pIdx = afterForge.search(/-P[^-]/);
+      if (pIdx === -1) continue;
+      const afterP = afterForge.slice(pIdx + 2); // skip '-P'
+      const firstDash = afterP.indexOf('-');
+      if (firstDash === -1) continue;
+      const phase = afterP.slice(0, firstDash);
+      const promptIdAndStatus = afterP.slice(firstDash + 1);
+      const lastDash = promptIdAndStatus.lastIndexOf('-');
+      const promptId = lastDash >= 0 ? promptIdAndStatus.slice(0, lastDash) : promptIdAndStatus;
+      const statusParsed = lastDash >= 0 ? promptIdAndStatus.slice(lastDash + 1) : '';
+
+      const filesResult = this.run(['diff-tree', '--no-commit-id', '-r', '--name-only', hash]);
+      const filesChanged = filesResult.success
+        ? filesResult.stdout.split(/\r?\n/).filter(f => f.trim().length > 0)
+        : [];
+
+      commits.push({ hash, promptId, phase, status: statusParsed, filesChanged });
+    }
+    return commits;
   }
 }
 
