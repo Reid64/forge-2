@@ -17,7 +17,16 @@
  *   4. Generate a Phase-5 SYNTHESIS cross_project_insight tagged with the build's stack
  *      fingerprint(s) — the headline learnings of this build, made transferable to similar stacks
  *      (this is distinct from the per-dimension insights the Pattern Extractor writes in step 1).
- *   5. Produce a human-readable Phase 5 SUMMARY REPORT consolidating all of the above.
+ *   5. Run instinct extraction on the completed build — derive reusable error→fix rules and
+ *      persist them as a 'prevention' cross_project_insights row.
+ *   6. Run session-end hook — persist final build metrics (token counts, cost, error counts) to
+ *      Supabase via the session lifecycle module.
+ *   7. Analyze recurring errors and generate governance rules for any with 3+ occurrences —
+ *      each rule is persisted as a 'best_practice' cross_project_insights row.
+ *   8. Extract skills from successful workarounds and save as SKILL.md files in the project's
+ *      `.forge/skills/` directory.
+ *   9. Update cross-project insights with new patterns discovered across steps 5-8.
+ *  10. Produce a human-readable Phase 5 SUMMARY REPORT consolidating all of the above.
  *
  * GOVERNANCE: Phase 5 only ever PROPOSES. It NEVER modifies a governance file (Iron Law 1 /
  * Contract 3), NEVER approves or activates a self-created agent (Contract 17 / Canonical Rule 3),
@@ -40,6 +49,12 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  extractInstincts,
+  extractSkills,
+} from '../analysis/instinct-extractor.js';
+import { onSessionEnd } from '../memory/session-hooks.js';
 import {
   extractPatterns,
   type ExtractPatternsInput,
@@ -62,11 +77,27 @@ import type { QueueEntry } from '../engine/queue-generator.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
-import type { BuildRun, CrossProjectInsight, JsonObject } from '../types/index.js';
+import type {
+  BuildRun,
+  CrossProjectInsight,
+  JsonObject,
+  Instinct,
+  SessionMetrics,
+  SessionError,
+} from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
 // ---------------------------------------------------------------------------
+
+/** A governance rule derived from a recurring error pattern (3+ occurrences). */
+export interface GovernanceRule {
+  errorSignature: string;
+  errorCategory: string;
+  occurrenceCount: number;
+  rule: string;
+  stored: boolean;
+}
 
 /** The Phase-5 synthesis insight generated in step 4. */
 export interface SynthesisInsight {
@@ -90,11 +121,21 @@ export interface Phase5Result {
   agents: AgentCreationResult;
   /** Step 4 — the synthesis cross_project_insight. */
   synthesis: SynthesisInsight;
-  /** Step 5 — the human-readable Phase 5 summary report (Markdown). */
+  /** Step 5 — instincts extracted from build errors and resolutions. */
+  instincts: Instinct[];
+  /** Step 6 — whether the session-end hook ran and persisted metrics. */
+  sessionEndRan: boolean;
+  /** Step 7 — governance rules generated from errors with 3+ occurrences. */
+  governanceRules: GovernanceRule[];
+  /** Step 8 — SKILL.md file paths written for successful workarounds. */
+  skillFiles: string[];
+  /** Step 9 — count of additional cross-project insights created for new patterns. */
+  additionalInsights: number;
+  /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
   reportPath: string | null;
-  /** Non-fatal observations aggregated across all five steps. */
+  /** Non-fatal observations aggregated across all ten steps. */
   warnings: string[];
   generatedAt: string;
 }
@@ -119,6 +160,10 @@ export interface Phase5Options {
   writeReport?: boolean;
   /** Directory for the report file (created if missing). Default 'reports'. */
   reportsDir?: string;
+  /** Project path for skill extraction and session-end hook. Default: build.project_path ?? '.' */
+  projectPath?: string;
+  /** Override SessionMetrics for the session-end hook (default: derived from build + patterns). */
+  sessionMetrics?: SessionMetrics;
   /** Fetch the build_run. Default `BuildMemory.builds.getBuild`. */
   fetchBuild?: (id: string) => Promise<BuildRun | null>;
   /** Run the Pattern Extractor. Default {@link extractPatterns}. */
@@ -138,6 +183,16 @@ export interface Phase5Options {
   ) => Promise<AgentCreationResult>;
   /** Create the synthesis cross_project_insight. Default `BuildMemory.insights.createInsight`. */
   createInsight?: (input: NewCrossProjectInsight) => Promise<CrossProjectInsight | null>;
+  /** Run instinct extraction. Default {@link extractInstincts}. */
+  runInstinctExtractor?: (buildRunId: string, client: SupabaseClient) => Promise<Instinct[]>;
+  /** Run session-end hook to persist metrics. Default {@link onSessionEnd}. */
+  runSessionEndHook?: (
+    path: string,
+    client: SupabaseClient,
+    metrics: SessionMetrics
+  ) => Promise<void>;
+  /** Extract skills from workarounds and write SKILL.md files. Default {@link extractSkills}. */
+  runSkillExtractor?: (buildRunId: string, projectPath: string) => Promise<string[]>;
   /** Progress reporter. Default logs to the console with a `[FORGE:phase5]` prefix. */
   log?: (message: string) => void;
 }
@@ -272,7 +327,42 @@ function buildSynthesisEvidence(
   return { description, evidence };
 }
 
-/** Assemble the human-readable Phase 5 summary report (step 5). */
+/** Derive a SessionMetrics object from available build and pattern data. */
+function deriveSessionMetrics(
+  buildRunId: string,
+  build: BuildRun | null,
+  patterns: PatternExtractionResult,
+): SessionMetrics {
+  const errorsEncountered: SessionError[] = patterns.patterns.error_patterns.map((ep) => ({
+    signature: ep.errorSignature,
+    category: ep.errorCategory,
+    message: ep.errorMessageSample,
+  }));
+  const patternsDiscovered = patterns.patterns.error_patterns
+    .slice(0, 10)
+    .map((ep) => `${ep.errorCategory}: ${ep.errorSignature} (×${ep.occurrenceCount})`);
+
+  const startedAt = build?.started_at ?? null;
+  const completedAt = build?.completed_at ?? null;
+  let durationMs = 0;
+  if (startedAt && completedAt) {
+    durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  }
+
+  return {
+    buildRunId,
+    promptsExecuted: patterns.patterns.analyzedPrompts,
+    passCount: build?.completed_prompts ?? patterns.patterns.analyzedPrompts,
+    failCount: build?.failed_prompts ?? 0,
+    errorsEncountered,
+    patternsDiscovered,
+    totalTokens: patterns.patterns.build_cost.totalTokens,
+    totalCostUsd: patterns.patterns.build_cost.totalCostUsd,
+    durationMs,
+  };
+}
+
+/** Assemble the human-readable Phase 5 summary report (step 10). */
 function buildSummaryReport(
   buildRunId: string,
   projectName: string,
@@ -280,6 +370,11 @@ function buildSummaryReport(
   templates: TemplateEvolutionResult,
   agents: AgentCreationResult,
   synthesis: SynthesisInsight,
+  instincts: Instinct[],
+  sessionEndRan: boolean,
+  governanceRules: GovernanceRule[],
+  skillFiles: string[],
+  additionalInsights: number,
   warnings: string[],
   generatedAt: string
 ): string {
@@ -342,6 +437,45 @@ function buildSummaryReport(
   lines.push(`- ${synthesis.stored ? 'Stored' : 'NOT stored'}: ${synthesis.description}`);
   lines.push('');
 
+  lines.push('## 5. Instinct Extraction');
+  lines.push(`- Instincts extracted: ${instincts.length}`);
+  if (instincts.length > 0) {
+    lines.push('- Top instincts (by confidence):');
+    for (const inst of instincts.slice(0, 5)) {
+      lines.push(
+        `  - [${inst.confidence.toFixed(2)}] ${inst.pattern} → ${inst.fix.slice(0, 80)}`
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## 6. Session-End Hook');
+  lines.push(`- Metrics persisted: ${sessionEndRan ? 'YES' : 'no (stateless or error)'}`);
+  lines.push('');
+
+  lines.push('## 7. Governance Rules from Recurring Errors');
+  lines.push(`- Rules generated: ${governanceRules.length}`);
+  if (governanceRules.length > 0) {
+    for (const rule of governanceRules.slice(0, 8)) {
+      lines.push(
+        `  - [${rule.errorCategory}] ×${rule.occurrenceCount} — ${rule.rule.slice(0, 100)}` +
+          `${rule.stored ? ' (stored)' : ' (NOT stored)'}`
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## 8. Skill Extraction');
+  lines.push(`- SKILL.md files written: ${skillFiles.length}`);
+  for (const f of skillFiles.slice(0, 10)) {
+    lines.push(`  - ${f}`);
+  }
+  lines.push('');
+
+  lines.push('## 9. Additional Cross-Project Insights');
+  lines.push(`- Insights created: ${additionalInsights}`);
+  lines.push('');
+
   if (warnings.length > 0) {
     lines.push('## Warnings');
     for (const w of warnings) lines.push(`- ${w}`);
@@ -369,7 +503,9 @@ function safeStamp(iso: string): string {
 
 /**
  * Run the full Phase 5 Recursive Learner sequence over a completed build (queue.yaml s6-p03):
- * pattern extraction → template evolution → agent creation → synthesis insight → summary report.
+ * pattern extraction → template evolution → agent creation → synthesis insight →
+ * instinct extraction → session-end hook → governance rules → skill extraction →
+ * additional insights → summary report.
  *
  * Always resolves (never rejects): each step is guarded and degrades to an empty result + a
  * warning (Contract 4); every collaborator is injectable. Only PROPOSES — never approves an
@@ -387,6 +523,9 @@ export async function runPhase5Learner(
   const runAgentCreator = options.runAgentCreator ?? createAgents;
   const createInsight =
     options.createInsight ?? ((i: NewCrossProjectInsight) => BuildMemory.insights.createInsight(i));
+  const runInstinctExtractor = options.runInstinctExtractor ?? extractInstincts;
+  const runSessionEndHook = options.runSessionEndHook ?? onSessionEnd;
+  const runSkillExtractor = options.runSkillExtractor ?? extractSkills;
   const warnings: string[] = [];
 
   // 0. Resolve the build (guarded) for project name + stack fingerprint context.
@@ -402,6 +541,7 @@ export async function runPhase5Learner(
   const projectName = options.projectName ?? build?.project_name ?? 'unknown';
   const stackFingerprint: JsonObject =
     options.stackFingerprint ?? build?.stack_fingerprint ?? {};
+  const projectPath = options.projectPath ?? build?.project_path ?? '.';
 
   log(`Phase 5 starting for build ${buildRunId} (project ${projectName}, store=${store})`);
 
@@ -471,7 +611,133 @@ export async function runPhase5Learner(
   }
   log(`step 4 (synthesis insight): ${synthesis.stored ? 'stored' : 'not stored'}`);
 
-  // 5. Produce the Phase 5 summary report.
+  // 5. Instinct extraction on the completed build (guarded).
+  let instincts: Instinct[] = [];
+  try {
+    const memoryClient = BuildMemory.getClient();
+    if (memoryClient) {
+      instincts = await runInstinctExtractor(buildRunId, memoryClient);
+    } else {
+      warnings.push('Instinct extraction skipped — Build Memory unreachable (stateless, Contract 4).');
+    }
+  } catch (error) {
+    warnings.push(`Instinct extraction failed (${describe(error)}).`);
+    log(`WARNING: instinct extractor degraded (${describe(error)})`);
+  }
+  log(`step 5 (instincts): ${instincts.length} instinct(s)`);
+
+  // 6. Session-end hook — persist final build metrics to Supabase (guarded).
+  let sessionEndRan = false;
+  if (store) {
+    try {
+      const memoryClient = BuildMemory.getClient();
+      if (memoryClient) {
+        const sessionMetrics =
+          options.sessionMetrics ?? deriveSessionMetrics(buildRunId, build, patterns);
+        await runSessionEndHook(projectPath, memoryClient, sessionMetrics);
+        sessionEndRan = true;
+      } else {
+        warnings.push('Session-end hook skipped — Build Memory unreachable (stateless, Contract 4).');
+      }
+    } catch (error) {
+      warnings.push(`Session-end hook failed (${describe(error)}).`);
+      log(`WARNING: session-end hook degraded (${describe(error)})`);
+    }
+  }
+  log(`step 6 (session-end hook): ${sessionEndRan ? 'ran' : 'skipped'}`);
+
+  // 7. Generate governance rules for recurring errors (3+ occurrences) (guarded).
+  const governanceRules: GovernanceRule[] = [];
+  try {
+    const recurringErrors = patterns.patterns.error_patterns.filter(
+      (ep) => ep.occurrenceCount >= 3
+    );
+    for (const ep of recurringErrors) {
+      const rule =
+        `When '${ep.errorSignature}' occurs in a ${ep.errorCategory} context ` +
+        `(seen ${ep.occurrenceCount}× in ${projectName}), apply a targeted fix immediately ` +
+        `and add a guard to prevent recurrence in future prompts.`;
+      const entry: GovernanceRule = {
+        errorSignature: ep.errorSignature,
+        errorCategory: ep.errorCategory,
+        occurrenceCount: ep.occurrenceCount,
+        rule,
+        stored: false,
+      };
+      if (store) {
+        try {
+          const created = await createInsight({
+            insight_type: 'prevention',
+            source_project: projectName,
+            source_build_id: buildRunId,
+            applicable_fingerprints: [stackFingerprint],
+            description: `Governance rule for recurring error: ${ep.errorSignature}`,
+            evidence: jsonClone({ errorCategory: ep.errorCategory, occurrenceCount: ep.occurrenceCount, rule }),
+          });
+          entry.stored = created !== null;
+        } catch (error) {
+          warnings.push(`Governance rule not stored for '${ep.errorSignature}' (${describe(error)}).`);
+        }
+      }
+      governanceRules.push(entry);
+    }
+  } catch (error) {
+    warnings.push(`Governance rule generation failed (${describe(error)}).`);
+    log(`WARNING: governance rule generation degraded (${describe(error)})`);
+  }
+  log(`step 7 (governance rules): ${governanceRules.length} rule(s) from recurring errors`);
+
+  // 8. Extract skills from successful workarounds and write SKILL.md files (guarded).
+  let skillFiles: string[] = [];
+  try {
+    skillFiles = await runSkillExtractor(buildRunId, projectPath);
+  } catch (error) {
+    warnings.push(`Skill extraction failed (${describe(error)}).`);
+    log(`WARNING: skill extractor degraded (${describe(error)})`);
+  }
+  log(`step 8 (skills): ${skillFiles.length} SKILL.md file(s) written`);
+
+  // 9. Update cross-project insights with new patterns from steps 5-8 (guarded).
+  let additionalInsights = 0;
+  if (store && (instincts.length > 0 || skillFiles.length > 0 || governanceRules.length > 0)) {
+    try {
+      const newPatternsDesc =
+        `Phase 5 new-learning summary for ${projectName} (build ${buildRunId}): ` +
+        `${instincts.length} instinct(s), ${skillFiles.length} skill file(s), ` +
+        `${governanceRules.length} governance rule(s) from recurring errors. ` +
+        `Session metrics ${sessionEndRan ? 'persisted' : 'not persisted'}.`;
+      const created = await createInsight({
+        insight_type: 'pattern',
+        source_project: projectName,
+        source_build_id: buildRunId,
+        applicable_fingerprints: [stackFingerprint],
+        description: newPatternsDesc,
+        evidence: jsonClone({
+          instinctCount: instincts.length,
+          topInstincts: instincts.slice(0, 5).map((i) => ({
+            pattern: i.pattern,
+            fix: i.fix,
+            confidence: i.confidence,
+          })),
+          skillFiles,
+          governanceRuleCount: governanceRules.length,
+          recurringErrorSignatures: governanceRules.map((r) => r.errorSignature),
+          sessionEndRan,
+        }),
+      });
+      if (created !== null) {
+        additionalInsights += 1;
+      } else {
+        warnings.push('Additional cross-project insight not persisted — Build Memory unreachable (stateless, Contract 4).');
+      }
+    } catch (error) {
+      warnings.push(`Additional cross-project insight not stored (${describe(error)}).`);
+      log(`WARNING: additional insight creation degraded (${describe(error)})`);
+    }
+  }
+  log(`step 9 (additional insights): ${additionalInsights} insight(s) stored`);
+
+  // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
     buildRunId,
@@ -480,6 +746,11 @@ export async function runPhase5Learner(
     templates,
     agents,
     synthesis,
+    instincts,
+    sessionEndRan,
+    governanceRules,
+    skillFiles,
+    additionalInsights,
     warnings,
     generatedAt
   );
@@ -502,7 +773,9 @@ export async function runPhase5Learner(
   log(
     `Phase 5 complete: ${patterns.patterns.error_patterns.length} error pattern(s), ` +
       `${templates.report.proposals.length} governance proposal(s), ` +
-      `${agents.storage.agentsStored} agent(s) stored.`
+      `${agents.storage.agentsStored} agent(s) stored, ` +
+      `${instincts.length} instinct(s), ${skillFiles.length} skill(s), ` +
+      `${governanceRules.length} governance rule(s).`
   );
 
   return {
@@ -513,6 +786,11 @@ export async function runPhase5Learner(
     templates,
     agents,
     synthesis,
+    instincts,
+    sessionEndRan,
+    governanceRules,
+    skillFiles,
+    additionalInsights,
     summaryReport,
     reportPath,
     warnings,
