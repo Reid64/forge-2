@@ -487,3 +487,35 @@ export interface SessionMetrics {
   totalCostUsd: number;
   durationMs: number;
 }
+
+// ---------------------------------------------------------------------------
+// incremental-tester
+// ---------------------------------------------------------------------------
+
+/** The result for one test file (or one named check in a smoke suite). */
+export interface TestFileResult {
+  /** Absolute path of the test file, or a synthetic label like `compile:tsc --noEmit`. */
+  file: string;
+  passed: boolean;
+  /** Wall-clock time in milliseconds. */
+  duration: number;
+  /** Combined stdout + stderr from the test runner. */
+  output: string;
+  /** Human-readable failure reason, or null on pass. */
+  error: string | null;
+}
+
+/** The aggregate result returned by {@link runIncrementalTests} and {@link runSmokeTests}. */
+export interface TestResult {
+  /** False iff at least one file/check failed. */
+  passed: boolean;
+  totalFiles: number;
+  passedFiles: number;
+  failedFiles: number;
+  /** Files/checks that were not evaluated (no matching test file found). */
+  skippedFiles: number;
+  results: TestFileResult[];
+  /** Total wall-clock time in milliseconds. */
+  duration: number;
+  generatedAt: string;
+}
