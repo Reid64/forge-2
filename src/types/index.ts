@@ -361,6 +361,38 @@ export interface ScheduledTask {
 }
 
 // ---------------------------------------------------------------------------
+// hook-manager (lifecycle hook system)
+// ---------------------------------------------------------------------------
+
+export type HookEvent =
+  | 'pre_tool_use'
+  | 'post_tool_use'
+  | 'session_start'
+  | 'session_end'
+  | 'pre_compact'
+  | 'pre_file_write'
+  | 'post_file_write'
+  | 'pre_build'
+  | 'post_build'
+  | 'pre_prompt'
+  | 'post_prompt';
+
+export interface Hook {
+  id: string;
+  event: HookEvent;
+  script: string;
+  enabled: boolean;
+  priority: number;
+  description: string;
+}
+
+export interface HookResult {
+  action: 'allow' | 'deny' | 'modify';
+  reason?: string;
+  additionalContext?: string;
+}
+
+// ---------------------------------------------------------------------------
 // agent-shield (AgentShield security scanning)
 // ---------------------------------------------------------------------------
 
