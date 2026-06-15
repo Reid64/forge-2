@@ -16,8 +16,13 @@
  * introduces no import cycle.
  */
 
+import { readFile, writeFile } from 'fs/promises';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { z } from 'zod';
 import { getLogger } from './forge-logger.js';
+
+const execAsync = promisify(exec);
 
 export { z };
 
@@ -183,3 +188,309 @@ export const OpenAIChatResponseSchema = z
       .optional(),
   })
   .passthrough();
+
+// ---------------------------------------------------------------------------
+// Live schema drift detection
+// ---------------------------------------------------------------------------
+
+export interface LiveSchemaColumn {
+  columnName: string;
+  dataType: string;
+  isNullable: boolean;
+  columnDefault: string | null;
+}
+
+export interface LiveSchemaTable {
+  tableName: string;
+  columns: LiveSchemaColumn[];
+}
+
+export interface LiveSchemaEnum {
+  typeName: string;
+  values: string[];
+}
+
+export interface LiveSchema {
+  tables: LiveSchemaTable[];
+  enums: LiveSchemaEnum[];
+}
+
+export interface ExpectedSchemaColumn {
+  columnName: string;
+  type: string;
+}
+
+export interface ExpectedSchemaTable {
+  tableName: string;
+  columns: ExpectedSchemaColumn[];
+}
+
+export interface ExpectedSchema {
+  tables: ExpectedSchemaTable[];
+}
+
+export type SchemaDriftSeverity = 'error' | 'warning' | 'info';
+
+export type SchemaDriftIssueType =
+  | 'missing_table'
+  | 'extra_table'
+  | 'missing_column'
+  | 'extra_column'
+  | 'type_mismatch';
+
+export interface SchemaDriftIssue {
+  severity: SchemaDriftSeverity;
+  issueType: SchemaDriftIssueType;
+  table: string;
+  column?: string;
+  message: string;
+}
+
+export interface SchemaDriftReport {
+  hasDrift: boolean;
+  issues: SchemaDriftIssue[];
+  checkedAt: string;
+}
+
+// Internal raw shapes returned by PostgREST queries
+
+interface RawColumnRow {
+  table_name: string;
+  column_name: string;
+  data_type: string;
+  is_nullable: string;
+  column_default: string | null;
+}
+
+interface RawEnumRow {
+  typname: string;
+  enumlabels: string[];
+}
+
+async function fetchLiveSchema(supabaseUrl: string, serviceKey: string): Promise<LiveSchema> {
+  const baseHeaders: Record<string, string> = {
+    Authorization: `Bearer ${serviceKey}`,
+    apikey: serviceKey,
+    'Content-Type': 'application/json',
+  };
+
+  const columnsRes = await fetch(
+    `${supabaseUrl}/rest/v1/columns?table_schema=eq.public` +
+      `&select=table_name,column_name,data_type,is_nullable,column_default` +
+      `&order=table_name,ordinal_position`,
+    { headers: { ...baseHeaders, 'Accept-Profile': 'information_schema' } }
+  );
+
+  if (!columnsRes.ok) {
+    throw new Error(`Failed to fetch live schema columns: ${columnsRes.status}`);
+  }
+
+  const rawColumns = (await columnsRes.json()) as RawColumnRow[];
+
+  const tableMap = new Map<string, LiveSchemaColumn[]>();
+  for (const row of rawColumns) {
+    const cols = tableMap.get(row.table_name) ?? [];
+    cols.push({
+      columnName: row.column_name,
+      dataType: row.data_type,
+      isNullable: row.is_nullable === 'YES',
+      columnDefault: row.column_default,
+    });
+    tableMap.set(row.table_name, cols);
+  }
+
+  const tables: LiveSchemaTable[] = Array.from(tableMap.entries()).map(
+    ([tableName, columns]) => ({ tableName, columns })
+  );
+
+  let enums: LiveSchemaEnum[] = [];
+  try {
+    const enumsRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_custom_enums`, {
+      method: 'POST',
+      headers: baseHeaders,
+      body: '{}',
+    });
+    if (enumsRes.ok) {
+      const rawEnums = (await enumsRes.json()) as RawEnumRow[];
+      enums = rawEnums.map((r) => ({ typeName: r.typname, values: r.enumlabels }));
+    }
+  } catch {
+    // RPC not available; enum data omitted
+  }
+
+  return { tables, enums };
+}
+
+async function parseTypescriptTypes(typesPath: string): Promise<ExpectedSchema> {
+  const source = await readFile(typesPath, 'utf-8');
+  const tables: ExpectedSchemaTable[] = [];
+
+  // Walk lines with a depth counter to locate the Tables: { ... } block, then each
+  // table's Row: { ... } block within it.  Brace counts in string/comment content
+  // are tolerated because Supabase-generated files use simple scalar types.
+  const lines = source.split('\n');
+  let depth = 0;
+  let inTables = false;
+  let tablesDepth = 0;
+  let currentTable: { name: string; columns: ExpectedSchemaColumn[] } | null = null;
+  let inRow = false;
+  let rowExitDepth = 0;
+
+  for (const line of lines) {
+    const opens = (line.match(/\{/g) ?? []).length;
+    const closes = (line.match(/\}/g) ?? []).length;
+
+    if (!inTables) {
+      depth += opens - closes;
+      if (/\bTables\s*:\s*\{/.test(line)) {
+        inTables = true;
+        tablesDepth = depth;
+      }
+      continue;
+    }
+
+    depth += opens - closes;
+
+    if (depth < tablesDepth) {
+      inTables = false;
+      if (currentTable !== null) {
+        tables.push({ tableName: currentTable.name, columns: currentTable.columns });
+        currentTable = null;
+      }
+      continue;
+    }
+
+    if (inRow) {
+      if (depth < rowExitDepth) {
+        inRow = false;
+        if (currentTable !== null) {
+          tables.push({ tableName: currentTable.name, columns: currentTable.columns });
+          currentTable = null;
+        }
+      } else {
+        const colMatch = /^\s+(\w+)\??:\s*(.+?)[,;]?\s*$/.exec(line);
+        if (colMatch !== null && colMatch[1] !== undefined && colMatch[2] !== undefined) {
+          const colType = colMatch[2].trim();
+          if (colType.length > 0 && !colType.startsWith('//')) {
+            currentTable?.columns.push({ columnName: colMatch[1], type: colType });
+          }
+        }
+      }
+      continue;
+    }
+
+    // Detect a new table name one level inside the Tables block
+    if (depth === tablesDepth + 1 && opens > 0) {
+      const tableMatch = /^\s+(\w+)\s*:\s*\{/.exec(line);
+      if (tableMatch !== null && tableMatch[1] !== undefined) {
+        currentTable = { name: tableMatch[1], columns: [] };
+      }
+    }
+
+    // Enter the Row: { block
+    if (currentTable !== null && /\bRow\s*:\s*\{/.test(line)) {
+      inRow = true;
+      rowExitDepth = depth;
+    }
+  }
+
+  return { tables };
+}
+
+export async function detectSchemaDrift(
+  supabaseUrl: string,
+  serviceKey: string,
+  typesPath: string
+): Promise<SchemaDriftReport> {
+  const [live, expected] = await Promise.all([
+    fetchLiveSchema(supabaseUrl, serviceKey),
+    parseTypescriptTypes(typesPath),
+  ]);
+
+  const issues: SchemaDriftIssue[] = [];
+
+  const liveTableMap = new Map(live.tables.map((t) => [t.tableName, t]));
+  const expectedTableMap = new Map(expected.tables.map((t) => [t.tableName, t]));
+
+  for (const [tableName] of liveTableMap) {
+    if (!expectedTableMap.has(tableName)) {
+      issues.push({
+        severity: 'error',
+        issueType: 'missing_table',
+        table: tableName,
+        message: `Table "${tableName}" exists in the live DB but has no TypeScript type definition.`,
+      });
+    }
+  }
+
+  for (const [tableName] of expectedTableMap) {
+    if (!liveTableMap.has(tableName)) {
+      issues.push({
+        severity: 'warning',
+        issueType: 'extra_table',
+        table: tableName,
+        message: `Table "${tableName}" is defined in TypeScript types but does not exist in the live DB.`,
+      });
+    }
+  }
+
+  for (const [tableName, liveTable] of liveTableMap) {
+    const expectedTable = expectedTableMap.get(tableName);
+    if (expectedTable === undefined) continue;
+
+    const liveColSet = new Set(liveTable.columns.map((c) => c.columnName));
+    const expectedColSet = new Set(expectedTable.columns.map((c) => c.columnName));
+
+    for (const colName of liveColSet) {
+      if (!expectedColSet.has(colName)) {
+        issues.push({
+          severity: 'error',
+          issueType: 'missing_column',
+          table: tableName,
+          column: colName,
+          message: `Column "${tableName}.${colName}" exists in the live DB but is missing from TypeScript types.`,
+        });
+      }
+    }
+
+    for (const colName of expectedColSet) {
+      if (!liveColSet.has(colName)) {
+        issues.push({
+          severity: 'warning',
+          issueType: 'extra_column',
+          table: tableName,
+          column: colName,
+          message: `Column "${tableName}.${colName}" is in TypeScript types but does not exist in the live DB.`,
+        });
+      }
+    }
+  }
+
+  return {
+    hasDrift: issues.length > 0,
+    issues,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+export async function autoRegenerateTypes(projectPath: string): Promise<void> {
+  let projectRef = '';
+  try {
+    const configSource = await readFile(`${projectPath}/supabase/config.toml`, 'utf-8');
+    const refMatch = /project_id\s*=\s*"([^"]+)"/.exec(configSource);
+    projectRef = refMatch?.[1] ?? '';
+  } catch {
+    // config.toml not found; fall through to error below
+  }
+
+  if (projectRef.length === 0) {
+    throw new Error('Cannot determine Supabase project ref from supabase/config.toml');
+  }
+
+  const { stdout } = await execAsync(
+    `npx supabase gen types typescript --project-id ${projectRef}`,
+    { cwd: projectPath }
+  );
+
+  await writeFile(`${projectPath}/src/types/database.ts`, stdout, 'utf-8');
+}
