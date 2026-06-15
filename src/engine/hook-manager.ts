@@ -23,6 +23,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
+import { checkGovernanceCompliance } from './governance-gate.js';
 import type { Hook, HookEvent, HookResult } from '../types/index.js';
 
 const log = logLine('hook-manager');
@@ -67,16 +68,24 @@ const BUILTIN_HOOKS: Hook[] = [
     priority: 0,
     description: 'Verifies required governance docs exist and are readable before any build starts',
   },
+  {
+    id: 'governance:pre_file_write:governance_gate',
+    event: 'pre_file_write',
+    script: '__builtin__',
+    enabled: true,
+    priority: 5,
+    description: 'Runs governance compliance checks before every file write (Iron Laws 1, 4, 8 + org-scoping)',
+  },
 ];
 
 // ---------------------------------------------------------------------------
 // Built-in hook implementations
 // ---------------------------------------------------------------------------
 
-function runBuiltinHook(
+async function runBuiltinHook(
   hook: Hook,
   context: Record<string, unknown>,
-): HookResult {
+): Promise<HookResult> {
   switch (hook.id) {
     case 'builtin:pre_file_write:middleware_guard': {
       const filePath = String(context['filePath'] ?? context['file'] ?? '');
@@ -144,6 +153,21 @@ function runBuiltinHook(
         };
       }
       log('[pre_build] governance_check passed — all governance docs present');
+      return { action: 'allow' };
+    }
+
+    case 'governance:pre_file_write:governance_gate': {
+      const filePath = String(context['filePath'] ?? context['file'] ?? '');
+      const content = String(context['content'] ?? '');
+      const projectPath = String(context['projectPath'] ?? process.cwd());
+      const result = await checkGovernanceCompliance(filePath, content, projectPath);
+      if (!result.allowed) {
+        return {
+          action: 'deny',
+          reason: result.violations.join(' | '),
+          additionalContext: result.suggestions.join(' | '),
+        };
+      }
       return { action: 'allow' };
     }
 
@@ -239,7 +263,7 @@ export class HookManager {
 
       let result: HookResult;
       if (hook.script === '__builtin__') {
-        result = runBuiltinHook(hook, context);
+        result = await runBuiltinHook(hook, context);
       } else {
         result = await runScriptHook(hook, context);
       }

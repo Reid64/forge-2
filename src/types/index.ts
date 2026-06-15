@@ -443,6 +443,20 @@ export interface Instinct {
 }
 
 // ---------------------------------------------------------------------------
+// governance-gate (pre-commit governance enforcement)
+// ---------------------------------------------------------------------------
+
+/** Result of a governance compliance check on a single file write. */
+export interface GovernanceCheckResult {
+  /** Whether the write is permitted. */
+  allowed: boolean;
+  /** Violations that caused a denial (empty when allowed). */
+  violations: string[];
+  /** Actionable suggestions for fixing the violations. */
+  suggestions: string[];
+}
+
+// ---------------------------------------------------------------------------
 // session-hooks (session lifecycle memory persistence)
 // ---------------------------------------------------------------------------
 
