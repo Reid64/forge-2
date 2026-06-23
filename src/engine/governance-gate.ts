@@ -18,8 +18,7 @@ import { join } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
 import { verifySixLaws } from '../analysis/six-laws-verifier.js';
-import type { GovernanceCheckResult, Hook } from '../types/index.js';
-import type { SixLawsResult } from '../analysis/six-laws-verifier.js';
+import type { GovernanceCheckResult, Hook, SixLawsResult } from '../types/index.js';
 
 const log = logLine('governance-gate');
 

@@ -584,6 +584,41 @@ export interface RepairResult {
 }
 
 // ---------------------------------------------------------------------------
+// six-laws-verifier (re-exported for external consumers)
+// ---------------------------------------------------------------------------
+
+/** The five automated laws, in order. */
+export type LawName = 'SCHEMA' | 'API' | 'UI' | 'DATA' | 'WIRING';
+
+/** A single observation made while verifying a law. */
+export interface LawFinding {
+  severity: 'pass' | 'warn' | 'fail';
+  subject: string;
+  detail: string;
+}
+
+/** The result of verifying one law. */
+export interface LawResult {
+  law: 1 | 2 | 3 | 4 | 5;
+  name: LawName;
+  passed: boolean;
+  skipped: boolean;
+  detail: string;
+  findings: LawFinding[];
+  durationMs: number;
+}
+
+/** The full Six Laws verification result (Contract 19 output). */
+export interface SixLawsResult {
+  passed: boolean;
+  laws: LawResult[];
+  law6: { name: 'VERIFICATION'; automated: false; detail: string };
+  report: string;
+  baseUrl: string;
+  generatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // incremental-tester
 // ---------------------------------------------------------------------------
 
