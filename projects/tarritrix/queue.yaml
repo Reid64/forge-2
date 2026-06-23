@@ -1,0 +1,482 @@
+project: tarritrix
+version: "2.0"
+baseline_tag: baseline-pre-forge2
+rollback_command: "git reset --hard baseline-pre-forge2"
+working_directory: "C:\\Users\\manag\\Documents\\Tarritrix"
+commit_prefix: "FORGE-TARRITRIX"
+
+phases:
+  - name: "Foundation"
+    phase_number: 0
+    tasks:
+      - id: "P0-T1"
+        name: "Governance Synchronization"
+        prompt: |
+          Read ALL governance documents: MASTER_BUILD_SPEC.md, SCHEMA_REGISTRY.md, BEHAVIORAL_CONTRACTS.md, AGENTS.md, STATE_OF_THE_BUILD.md, BLUEPRINT.md.
+
+          Current state: Build passes clean (exit 0), tsc --noEmit passes (zero errors). HEAD is b2dd1fb on master. Governance docs on disk are behind the last active governance session. 7+ commits exist after the last governance sync.
+
+          MISSION: Synchronize all governance documents so they accurately reflect the current codebase state. Documentation-only commit — no code changes.
+
+          ACTIONS:
+          1. Run: git log --format="%H %s" -15
+          2. Update STATE_OF_THE_BUILD.md: add session entries for undocumented commits, update last-updated timestamp, build state summary, ACTIVE BUILD DAG, VERIFIED CURRENT STATE, TEST STATUS table.
+          3. Reconcile SCHEMA_REGISTRY.md against migration files — ensure table count and migration list match reality.
+          4. Verify BLUEPRINT.md Part 11+ additions match committed code.
+          5. Verify BEHAVIORAL_CONTRACTS.md contract count matches verification scripts.
+          6. Verify AGENTS.md agent list and operational boundaries match committed routes.
+          7. Verify MASTER_BUILD_SPEC.md Phase 1 scope matches committed features.
+          8. Run: pnpm verify:fast — must pass.
+          9. Update STATE_OF_THE_BUILD.md with this session entry.
+        gate:
+          - "pnpm verify:fast exits 0"
+          - "governance-lint passes"
+          - "All 6 docs have consistent cross-references"
+        commit_message: "governance-sync: synchronize all 6 governance docs with codebase reality"
+
+      - id: "P0-T2"
+        name: "Dependency Remediation"
+        prompt: |
+          Read MASTER_BUILD_SPEC.md and STATE_OF_THE_BUILD.md.
+
+          Current dependency state: 9 vulnerabilities (1 critical esbuild via tsx, 2 high, 5 moderate, 1 low). Outdated: next 16.2.6->16.2.9, react 19.2.3->19.2.7, radix-ui minor bumps, tailwindcss 4.3.0->4.3.1.
+
+          MISSION: Remediate all dependency vulnerabilities and update outdated packages without breaking the build.
+
+          ACTIONS:
+          1. Run: pnpm audit — document every vulnerability.
+          2. Run: pnpm update && pnpm audit fix
+          3. Update next.config to fix Sentry deprecation warnings: disableLogger -> webpack.treeshake.removeDebugLogging, automaticVercelMonitors -> webpack.automaticVercelMonitors, reactComponentAnnotation -> webpack.reactComponentAnnotation.
+          4. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast — all must pass.
+          5. Run: pnpm audit — must return 0 vulnerabilities (or only unfixable low).
+          6. Update STATE_OF_THE_BUILD.md with session entry documenting changes.
+        gate:
+          - "pnpm audit returns 0 vulnerabilities or only unfixable low"
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0"
+          - "pnpm verify:fast passes"
+        commit_message: "dependency-remediation: fix 9 vulnerabilities, update outdated packages"
+
+      - id: "P0-T3"
+        name: "Dead Code Removal"
+        prompt: |
+          Read STATE_OF_THE_BUILD.md.
+
+          Dead code audit found 10 potentially unused exports: PortalLoginPage, AgentsPage, ClientsPage, CompliancePage, SettingsPage, ActivityFeed, LLMCostChart, NextBestActionsPanel, PublishingVelocityChart, SignalsPanel.
+
+          NOTE: Do NOT delete dashboard page.tsx files referenced by Next.js routing — these are auto-discovered by the framework even without explicit imports. Only delete truly orphaned component files.
+
+          MISSION: Remove confirmed dead code. Verify no regressions.
+
+          ACTIONS:
+          1. Run: npx knip --reporter compact — cross-reference against identified exports.
+          2. For each file knip confirms unused AND that is NOT a Next.js page.tsx route file: delete it, remove any imports, run tsc --noEmit after each deletion.
+          3. Run: npx knip --fix --include files,exports,types — review changes, revert any that break compilation.
+          4. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          5. Update STATE_OF_THE_BUILD.md documenting files removed, dead code count before/after.
+        gate:
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0"
+          - "pnpm verify:fast passes"
+          - "knip reports zero unused exports or only documented false positives"
+        commit_message: "dead-code-removal: remove orphaned components and unused exports"
+
+  - name: "Backend Hardening"
+    phase_number: 1
+    tasks:
+      - id: "P1-T4"
+        name: "B1 Hydration Mismatch Fix"
+        prompt: |
+          Read STATE_OF_THE_BUILD.md blocker B1. Open since May 2026.
+          Symptom: Top portion of marketing site disappears or header masks content on changes affecting Hero/Nav region.
+          Root cause: UNDIAGNOSED.
+          Evidence: 11 of 12 marketing components in src/app/_components/marketing/ are 'use client'. Zero suppressHydrationWarning usage.
+
+          MISSION: Diagnose and fix the B1 hydration mismatch. Root-cause fix, not a patch.
+
+          ACTIONS:
+          1. Read every marketing component: Get-ChildItem -Path "src\app\_components\marketing" -Include "*.tsx" -Recurse | ForEach-Object { Get-Content $_.FullName }
+          2. Read src/app/page.tsx and src/app/layout.tsx.
+          3. Look for: server/client rendering mismatches (Date, Math.random, window refs), CSS layout shifts (position fixed/absolute on nav), missing key props, conditional rendering on typeof window, dynamic imports without loading states.
+          4. Apply the definitive fix. Do NOT use suppressHydrationWarning.
+          5. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          6. Update STATE_OF_THE_BUILD.md: change B1 from OPEN to CLOSED, document root cause and fix.
+
+          ON FAILURE: If root cause cannot be identified from code inspection alone, document findings and proceed. B1 will be revisited in Prompt 16.
+        gate:
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0"
+          - "pnpm verify:fast passes"
+        commit_message: "hydration-fix: diagnose and fix B1 hydration mismatch"
+
+      - id: "P1-T5"
+        name: "LLM Call INSERT Ordering Fix"
+        prompt: |
+          Read STATE_OF_THE_BUILD.md KNOWN GAPS: LLM CALL INSERT ORDERING BUG.
+          Issue: A-02 inserts llm_calls rows with agent_event_id referencing agent_events rows that don't exist yet. FK constraint rejects, causing silent telemetry data loss.
+
+          MISSION: Fix INSERT ordering so agent_events is created before llm_calls references it.
+
+          ACTIONS:
+          1. Read: src/app/api/agents/a-02/trigger/route.ts — find where agent_events and llm_calls are inserted.
+          2. Read: src/lib/llm/cost-guard.ts, src/lib/llm/router.ts, src/lib/llm/index.ts (if they exist).
+          3. Restructure so agent_events row is inserted and committed FIRST, agent_event_id passed to llm_calls inserts. Wrap with Contract 69 error handling.
+          4. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          5. Update STATE_OF_THE_BUILD.md: move bug from KNOWN GAPS to resolved.
+        gate:
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0"
+          - "pnpm verify:fast passes"
+        commit_message: "llm-insert-ordering: fix agent_event_id FK violation in llm_calls"
+
+      - id: "P1-T6"
+        name: "Agent Trigger Resource Ownership"
+        prompt: |
+          Read STATE_OF_THE_BUILD.md KNOWN GAPS: AGENT TRIGGER RESOURCE OWNERSHIP.
+          2 agent trigger routes (/api/agents/a-02/trigger, /api/agents/a-07/trigger) accept client_id without verifying operator owns that client.
+
+          MISSION: Add Contract 67 ownership verification to both routes.
+
+          ACTIONS:
+          1. Read Contract 67 pattern from src/app/api/operator/clients/[id]/route.ts.
+          2. Read both trigger routes.
+          3. Add ownership verification using getOperatorContext() (Contract 70), getUserActiveRole() + hasPermission() (Contract 71).
+          4. Add integration tests covering unauthorized client_id scenarios.
+          5. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          6. Update STATE_OF_THE_BUILD.md: move gap to resolved.
+        gate:
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0"
+          - "pnpm verify:fast passes"
+          - "Both routes reject unauthorized client_id with 403"
+        commit_message: "agent-trigger-ownership: add Contract 67 ownership check to a-02/a-07 triggers"
+
+  - name: "Dashboard UI Rebuild"
+    phase_number: 2
+    tasks:
+      - id: "P2-T7"
+        name: "Dashboard Scaffold + Layout"
+        prompt: |
+          Read MASTER_BUILD_SPEC.md (locked color palette, typography), docs/architecture/COMMAND_CENTER_NORTH_STAR_AND_V1_SPEC.md.
+
+          Dashboard currently has 36 .tsx files split between two competing component architectures. Strategy: delete all dashboard UI and rebuild from north star spec on existing API routes.
+
+          CRITICAL PRESERVATIONS:
+          - Do NOT delete any file under src/app/api/
+          - Do NOT modify any file outside src/app/dashboard/
+          - Preserve React Query (QueryProvider) integration in layout
+
+          MISSION: Delete all dashboard UI components, create clean scaffold from Command Center north star spec.
+
+          ACTIONS:
+          1. Read docs/architecture/COMMAND_CENTER_NORTH_STAR_AND_V1_SPEC.md
+          2. Create backup branch: git checkout -b backup/dashboard-pre-rebuild && git checkout master
+          3. Delete all dashboard .tsx files EXCEPT layout.tsx: Get-ChildItem -Path "src\app\dashboard" -Recurse -Include "*.tsx" | Where-Object { $_.Name -ne "layout.tsx" } | Remove-Item -Force
+          4. Read existing layout.tsx. Preserve QueryProvider and auth patterns.
+          5. Rebuild layout.tsx with: sidebar (#0F1729), main content (#1A2238), logo, navigation (Dashboard, Clients, Users, Agents, Billing, Compliance, Settings, Pages), auth check (Contract 70+71).
+          6. Create src/app/dashboard/page.tsx: Command Center with placeholder zones, 30s React Query polling.
+          7. Create src/app/dashboard/_components/Sidebar.tsx: nav links, icons, active state (#FF6B35), role badge.
+          8. Create stub page.tsx for ALL dashboard routes: clients, clients/new, clients/[id], clients/[id]/flagged, clients/[id]/pages/[pageId], agents, billing, compliance, settings, pages, users. Each: server component, auth check, title + "Coming in next build phase" in correct palette.
+          9. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          10. Update STATE_OF_THE_BUILD.md.
+        gate:
+          - "tsc --noEmit passes"
+          - "pnpm run build exits 0 with all dashboard routes present"
+          - "pnpm verify:fast passes"
+          - "Zero 404s on any dashboard route"
+        commit_message: "dashboard-scaffold: delete legacy UI, create clean scaffold from north star spec"
+        playwright_smoke: true
+
+      - id: "P2-T8"
+        name: "KPI Strip + Status Bar"
+        prompt: |
+          Read MASTER_BUILD_SPEC.md, docs/architecture/COMMAND_CENTER_NORTH_STAR_AND_V1_SPEC.md.
+          Dashboard scaffold complete. API route /api/dashboard/stats exists.
+
+          MISSION: Build Operator KPI strip and status bar.
+
+          ACTIONS:
+          1. Read src/app/api/dashboard/stats/route.ts for data shape.
+          2. Create src/app/dashboard/_components/KpiStrip.tsx: 'use client', React Query polling /api/dashboard/stats (refetchInterval: 30000), metric cards (Total Clients, Total Pages, Pages Published, Pending Review, Active Agents, System Health), card styling (#243049 bg, #334155 border, #F5F1E8 text, #06B6D4 data), loading skeleton, error state.
+          3. Create src/app/dashboard/_components/StatusBar.tsx: health indicator, last refresh timestamp, polling indicator, role badge.
+          4. Wire into dashboard page.tsx at top of content area.
+          5. Verify Six Laws: SCHEMA (real tables), API (real data), UI (real values), DATA (zero hardcoded), WIRING (polling active), VERIFICATION (visual check).
+          6. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          7. Update STATE_OF_THE_BUILD.md: Section 23 Step 5 COMPLETE.
+        gate:
+          - "Six Laws all pass"
+          - "tsc, build, verify:fast pass"
+          - "KPI strip shows real data"
+          - "30-second polling active"
+        commit_message: "kpi-strip: operator KPI strip with real-time 30s polling"
+
+      - id: "P2-T9"
+        name: "Charts Zone"
+        prompt: |
+          Read docs/architecture/COMMAND_CENTER_NORTH_STAR_AND_V1_SPEC.md. API route /api/dashboard/charts exists.
+
+          MISSION: Build charts zone with LLM spend, publishing velocity, conversion funnel.
+
+          ACTIONS:
+          1. Read src/app/api/dashboard/charts/route.ts for data shape.
+          2. Create chart components using recharts or SVG: LlmSpendChart.tsx (area chart, cost over time), PublishingVelocity.tsx (bar chart, pages per day/week), ConversionFunnel.tsx (funnel visualization). All 'use client', React Query, dark palette (grid #334155, data #06B6D4/#10B981/#FF6B35), responsive, loading skeletons, empty states.
+          3. Wire into dashboard page.tsx below KPI strip. CSS grid (2 per row desktop, 1 mobile).
+          4. Verify Six Laws.
+          5. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          6. Update STATE_OF_THE_BUILD.md: Section 23 Step 6 COMPLETE.
+        gate:
+          - "Six Laws pass"
+          - "All verification passes"
+          - "Charts render with real API data or clean empty states"
+        commit_message: "charts-zone: LLM spend, publishing velocity, conversion funnel"
+
+      - id: "P2-T10"
+        name: "Signals + Activity Feed"
+        prompt: |
+          Read docs/architecture/COMMAND_CENTER_NORTH_STAR_AND_V1_SPEC.md.
+          API routes: /api/dashboard/signals, /api/dashboard/signals/[id]/dismiss, /api/dashboard/activity-feed.
+
+          MISSION: Build signals panel and activity feed.
+
+          ACTIONS:
+          1. Read all 3 API routes.
+          2. Create SignalsPanel.tsx: active signals/warnings, severity colors (#EF4444/#F59E0B/#06B6D4), dismiss button (POST), 30s polling.
+          3. Create ActivityFeed.tsx: chronological feed, timestamps, action type icons, polling.
+          4. Wire into dashboard page.tsx. Side-by-side (signals left, activity right on desktop).
+          5. Verify Six Laws.
+          6. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+          7. Update STATE_OF_THE_BUILD.md: Section 23 Step 7 COMPLETE. Mark Section 23 FULLY COMPLETE.
+        gate:
+          - "Six Laws pass"
+          - "Signal dismiss persists to database"
+          - "Activity feed shows real agent events"
+          - "Section 23 fully complete"
+        commit_message: "signals-activity: signals panel with dismiss + activity feed — Section 23 COMPLETE"
+
+      - id: "P2-T11"
+        name: "Clients List + Detail"
+        prompt: |
+          API routes: /api/operator/clients (GET), /api/operator/clients/[id] (GET, PUT).
+
+          MISSION: Rebuild client list and detail views.
+
+          ACTIONS:
+          1. Read both API routes.
+          2. Build clients/page.tsx: server component, auth, table (Business Name, Tier, Status, Pages Published, Last Activity), search/filter, click -> /dashboard/clients/[id], "Add Client" -> /dashboard/clients/new.
+          3. Build clients/[id]/page.tsx: server component, auth + Contract 67 ownership, tabbed interface (Overview, Pages, Flagged, GSC, Settings), real data.
+          4. Verify Six Laws.
+          5. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "Client list shows real data"
+          - "Client detail loads for valid client_id"
+          - "Contract 67 ownership check on detail"
+          - "All verification passes"
+        commit_message: "clients-views: client list with search + tabbed detail view"
+
+      - id: "P2-T12"
+        name: "Onboarding Wizard"
+        prompt: |
+          API route: /api/operator/onboard-client (POST). Read BLUEPRINT.md Section 4.1 for 9-step spec. Commit b2dd1fb added nationwide service area model.
+
+          MISSION: Rebuild onboarding wizard at /dashboard/clients/new.
+
+          ACTIONS:
+          1. Read src/app/api/operator/onboard-client/route.ts.
+          2. Read BLUEPRINT.md onboarding section.
+          3. Build clients/new/page.tsx (server wrapper) + _components/OnboardingWizard.tsx ('use client' multi-step form).
+          4. Steps: Business Info, Contact, Service Area (with nationwide toggle), Services, Tier Selection, Billing, Integration, Review, Submit.
+          5. Form validation per step, progress indicator, submit to API, success redirect, error handling.
+          6. Verify Six Laws.
+          7. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "Form submits successfully to API"
+          - "All 9 steps navigate correctly"
+          - "Nationwide toggle functional"
+          - "All verification passes"
+        commit_message: "onboarding-wizard: 9-step form with nationwide service area model"
+
+      - id: "P2-T13"
+        name: "Users/RBAC Management UI"
+        prompt: |
+          API routes: /api/operator/users (GET), /api/operator/users/grant (POST), /api/operator/users/change-role (POST), /api/operator/users/revoke (POST). Read ROLE_HIERARCHY_ARCHITECTURE_SPEC.md.
+
+          MISSION: Rebuild /dashboard/users role management UI.
+
+          ACTIONS:
+          1. Read all 4 API routes.
+          2. Build users/page.tsx: server component, auth + permission check (view_all_roles).
+          3. Build UsersTable.tsx: role badges (master_admin=#EF4444, senior_admin=#06B6D4, va=#10B981).
+          4. Build GrantRoleModal.tsx: user search, role selector, submit.
+          5. Build ChangeRoleModal.tsx: current role display, new role selector, reason field.
+          6. Build RevokeModal.tsx: "Type REVOKE to confirm", reason field (min 10 chars).
+          7. All must enforce Contract 71 (RBAC) and Contract 72 (three-attribute audit attribution).
+          8. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "RBAC operations work end-to-end"
+          - "Contract 71/72 verification scripts pass"
+          - "Cannot revoke last master_admin"
+          - "All verification passes"
+        commit_message: "rbac-ui: users table + grant/change/revoke role modals"
+
+      - id: "P2-T14"
+        name: "Flagged Pages Review"
+        prompt: |
+          API routes: /api/operator/clients/[id]/flagged (GET), .../approve (POST), .../reject (POST).
+
+          MISSION: Rebuild flagged page review workflow.
+
+          ACTIONS:
+          1. Read all 3 API routes.
+          2. Build clients/[id]/flagged/page.tsx: flagged page list, validation failure reasons, approve/reject buttons, page content preview, Contract 67 ownership.
+          3. Build clients/[id]/pages/[pageId]/page.tsx: full page content, validation results, quality scores, action buttons.
+          4. Verify Six Laws.
+          5. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "Approve/reject persist to database"
+          - "Page status transitions correctly"
+          - "All verification passes"
+        commit_message: "flagged-pages: review workflow with approve/reject"
+
+      - id: "P2-T15"
+        name: "Remaining Dashboard Pages"
+        prompt: |
+          Remaining stub pages: agents, billing, compliance, settings, pages (top-level).
+
+          MISSION: Build minimal but functional versions.
+
+          ACTIONS:
+          1. Determine which have backing APIs: /api/agents/* -> agent status, /api/operator/initiate-checkout -> billing, no compliance API, no settings API, /api/operator/clients/[id]/pages/[pageId] -> pages.
+          2. Build agents/page.tsx: agent status if API exists, otherwise "Agent monitoring coming in Phase 2".
+          3. Build billing/page.tsx: Stripe subscription status, billing portal link.
+          4. Build compliance/page.tsx: TCPA disclosure status, DSAR link, sub-processor list.
+          5. Build settings/page.tsx: platform configuration from platform_config.
+          6. Build pages/page.tsx: cross-client page listing with status filters.
+          7. Each: auth check, correct palette, real data where API exists, clean "Phase 2" messaging where not.
+          8. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "Zero 404s on any /dashboard/* route"
+          - "All pages render with correct palette"
+          - "All verification passes"
+        commit_message: "stub-pages: agents, billing, compliance, settings, pages — all dashboard routes functional"
+
+  - name: "Integration and Polish"
+    phase_number: 3
+    tasks:
+      - id: "P3-T16"
+        name: "Marketing Site Polish + Favicon"
+        prompt: |
+          MISSION: Verify B1 fix holds (from Prompt 4), fix favicon rendering, address Next.js middleware->proxy deprecation.
+
+          ACTIONS:
+          1. If B1 was not fixed in Prompt 4, diagnose now with full component analysis.
+          2. Read current favicon setup: Get-ChildItem "public" -Include "favicon*","apple-touch*","*.ico" -Recurse. Rebuild as clean SVG with proper sizes (16x16, 32x32, 180x180).
+          3. Assess middleware deprecation: Next.js 16 warns about middleware->proxy. If simple rename without breaking auth, update. If semantics differ, leave as-is and document warning.
+          4. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "tsc, build, verify:fast pass"
+        commit_message: "marketing-polish: favicon rebuild + middleware deprecation assessment"
+
+      - id: "P3-T17"
+        name: "Client Portal Verification"
+        prompt: |
+          MISSION: Verify client portal still functions after dashboard rebuild. MonthlyGrowthTimeline (90-Day Growth Timeline) must be visually identical.
+
+          ACTIONS:
+          1. Verify portal components exist: Get-ChildItem "src\app\portal" -Recurse -Include "*.tsx"
+          2. Verify MonthlyGrowthTimeline.tsx exists and is unchanged.
+          3. Verify portal API routes: Get-ChildItem "src\app\api\portal" -Recurse -Include "route.ts"
+          4. Run portal Playwright tests if they exist.
+          5. Run: pnpm tsc --noEmit && pnpm run build
+          6. Update STATE_OF_THE_BUILD.md: portal VERIFIED post-rebuild.
+        gate:
+          - "All portal routes functional"
+          - "MonthlyGrowthTimeline preserved"
+          - "tsc and build pass"
+        commit_message: "portal-verification: client portal verified post-dashboard-rebuild"
+
+      - id: "P3-T18"
+        name: "Governance Final Sync"
+        prompt: |
+          MISSION: Final synchronization of all 6 governance docs to reflect complete FORGE 2.0 refactor.
+
+          ACTIONS:
+          1. Update STATE_OF_THE_BUILD.md: comprehensive FORGE 2.0 session log, ACTIVE BUILD DAG, VERIFIED CURRENT STATE, TEST STATUS, close resolved KNOWN GAPS and OPEN BLOCKERS, Section 23 COMPLETE.
+          2. Update MASTER_BUILD_SPEC.md: mark completed Phase 1 surfaces.
+          3. Verify SCHEMA_REGISTRY.md table count, BEHAVIORAL_CONTRACTS.md contract count, BLUEPRINT.md Surface 3 description.
+          4. Run: pnpm verify:fast
+          5. Run: npx tsx scripts/governance-lint.ts
+        gate:
+          - "verify:fast passes"
+          - "governance-lint passes"
+          - "All 6 docs synchronized"
+        commit_message: "governance-sync: final synchronization post-FORGE-2.0 refactor"
+
+      - id: "P3-T19"
+        name: "Test Suite Update"
+        prompt: |
+          MISSION: Update Playwright E2E tests for rebuilt dashboard.
+
+          ACTIONS:
+          1. Inventory existing tests: Get-ChildItem "tests" -Recurse -Include "*.spec.ts","*.test.ts"
+          2. Create/update tests/e2e/dashboard.spec.ts: dashboard loads with auth, KPI strip shows data, sidebar nav works, client list loads, onboarding wizard renders.
+          3. Run: pnpm vitest run
+          4. Run: npx playwright test --reporter=line (if configured)
+        gate:
+          - "vitest passes"
+          - "Playwright passes or is documented as skipped"
+        commit_message: "test-suite: updated E2E tests for rebuilt dashboard"
+
+  - name: "Sentinel Verification"
+    phase_number: 4
+    tasks:
+      - id: "P4-T20"
+        name: "AgentShield Security Scan"
+        prompt: |
+          MISSION: Run AgentShield security scan. Grade B+ required.
+
+          ACTIONS:
+          1. Run: npx ecc-agentshield scan --format json 2>&1 | Out-File "agentshield-results.json" -Encoding utf8
+          2. Run: npx ecc-agentshield scan
+          3. If grade below B+: remediate findings (secrets > injection > insecure defaults > missing headers), re-scan until B+.
+          4. Run: pnpm tsc --noEmit && pnpm run build && pnpm verify:fast
+        gate:
+          - "AgentShield grade B+ or above"
+          - "Zero critical findings remaining"
+          - "All verification passes"
+        commit_message: "security-scan: AgentShield grade [GRADE]"
+
+      - id: "P4-T21"
+        name: "Full Verification Pipeline"
+        prompt: |
+          MISSION: Run complete verify:ci pipeline. Every gate must pass.
+
+          ACTIONS:
+          1. Run: pnpm verify:fast
+          2. Run: pnpm run build
+          3. Run: npx playwright test --project=chromium --reporter=line (if configured)
+          4. Run: npx tsx scripts/verify-schema.ts (if configured)
+          5. Document full verification report with pass/fail for every script.
+        gate:
+          - "Every verification script exits 0"
+          - "Build exits 0"
+          - "Zero critical issues"
+        commit_message: "full-verification: all gates pass"
+
+      - id: "P4-T22"
+        name: "Production Deployment + Release Tag"
+        prompt: |
+          MISSION: Deploy to Vercel production. Create release tag.
+
+          ACTIONS:
+          1. Run: git push origin master
+          2. Run: npx vercel --prod --yes 2>&1
+          3. Verify tarritrix.com returns 200, /dashboard redirects to /login, /portal/login renders.
+          4. Create tag: $date = Get-Date -Format "yyyy-MM-dd"; git tag -a "refactor-complete-$date" -m "FORGE 2.0 refactor complete: 22 prompts, full dashboard rebuild, all gates pass"; git push origin "refactor-complete-$date"
+          5. Final STATE_OF_THE_BUILD.md update: FORGE 2.0 REFACTOR COMPLETE.
+          6. Run: git add -A && git commit -m "FORGE-TARRITRIX-P4-T22: FORGE 2.0 refactor complete" && git push origin master
+        gate:
+          - "Vercel deployment READY"
+          - "tarritrix.com returns 200"
+          - "Git tag pushed to origin"
+          - "STATE_OF_THE_BUILD.md reflects completion"
+        commit_message: "production-deploy: FORGE 2.0 refactor complete — QUEUE COMPLETE"

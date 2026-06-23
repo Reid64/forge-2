@@ -129,7 +129,10 @@ export function runClaude(
   const cwd = options.cwd ?? process.cwd();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const useShell = options.shell ?? process.platform === 'win32';
-  const env = options.env ?? process.env;
+  // Strip ANTHROPIC_API_KEY so claude -p uses Max subscription, not paid API
+  const rawEnv = options.env ?? process.env;
+  const env = { ...rawEnv };
+  delete env['ANTHROPIC_API_KEY'];
   const estimate = options.estimateTokens ?? defaultEstimateTokens;
 
   return new Promise<ClaudeRunResult>((resolve) => {
@@ -257,3 +260,4 @@ export function runClaude(
 }
 
 export default runClaude;
+

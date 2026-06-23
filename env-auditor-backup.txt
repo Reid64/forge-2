@@ -109,8 +109,22 @@ interface EnvRequirement {
  * self-build resolves to its own Build Memory credentials).
  */
 const SERVICE_ENV_REQUIREMENTS: Readonly<Record<string, ReadonlyArray<EnvRequirement>>> = {
-  // supabase: REMOVED - Build Memory degrades to stateless mode
-  // anthropic: REMOVED — FORGE uses claude -p (Max subscription)
+  supabase: [
+    {
+      label: 'Supabase URL',
+      keys: ['FORGE_SUPABASE_URL', 'SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'],
+    },
+    {
+      label: 'Supabase service/anon key',
+      keys: [
+        'FORGE_SUPABASE_SERVICE_KEY',
+        'SUPABASE_SERVICE_ROLE_KEY',
+        'SUPABASE_ANON_KEY',
+        'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+      ],
+    },
+  ],
+  anthropic: [{ label: 'Anthropic API key', keys: ['ANTHROPIC_API_KEY'] }],
   openai: [{ label: 'OpenAI API key', keys: ['OPENAI_API_KEY'] }],
   stripe: [{ label: 'Stripe secret key', keys: ['STRIPE_SECRET_KEY'] }],
   twilio: [

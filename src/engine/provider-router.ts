@@ -34,7 +34,7 @@
  * OpenAI-compatible PROXY (a separate `litellm`-served gateway), NOT an in-process Python import.
  * When `FORGE_LITELLM_PROXY_URL` is set, EVERY provider call is sent OpenAI-style to that proxy
  * with a LiteLLM model string (`anthropic/claude-sonnet-4-6`, `openai/gpt-4o-mini`,
- * `gemini/gemini-1.5-flash`, `deepseek/deepseek-chat`) and LiteLLM performs the actual vendor
+ * `gemini/gemini-2.5-flash-lite`, `deepseek/deepseek-chat`) and LiteLLM performs the actual vendor
  * dispatch, key management and its own failover/cost accounting — this router's task→provider
  * preference still chooses WHICH model string to ask for. With no proxy URL set the router calls
  * each provider's native HTTPS endpoint directly (Anthropic Messages shape for Claude, OpenAI
@@ -161,7 +161,7 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
   gemini: {
     name: 'gemini',
     apiKeyEnvs: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-    defaultModel: 'gemini-1.5-flash',
+    defaultModel: 'gemini-2.5-flash-lite',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     protocol: 'openai',
     litellmPrefix: 'gemini/',
@@ -187,7 +187,7 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
  * preferred provider has no key / is rate-limited / has spent its free tier.
  */
 export const DEFAULT_ROUTES: Record<ForgeTaskType, ProviderName[]> = {
-  complex_reasoning: ['anthropic', 'openai', 'deepseek', 'gemini'],
+  complex_reasoning: ['gemini', 'deepseek', 'openai', 'anthropic'],
   validation: ['openai', 'gemini', 'anthropic', 'deepseek'],
   simple_analysis: ['openai', 'gemini', 'deepseek', 'anthropic'],
   documentation: ['gemini', 'openai', 'anthropic', 'deepseek'],
@@ -197,7 +197,7 @@ export const DEFAULT_ROUTES: Record<ForgeTaskType, ProviderName[]> = {
 };
 
 /** Default rate-limit cooldown after a 429 / 5xx, in ms (a provider is skipped until it elapses). */
-export const DEFAULT_COOLDOWN_MS = 60_000;
+export const DEFAULT_COOLDOWN_MS = 10_000;
 
 /** Default per-request network timeout (10 minutes — long generations stream slowly). */
 export const DEFAULT_TIMEOUT_MS = 600_000;
@@ -883,3 +883,6 @@ export function providerCallModel(taskType: ForgeTaskType, options?: ProviderRou
 }
 
 export default ProviderRouter;
+
+
+

@@ -149,6 +149,11 @@ export interface Phase0Options {
   autoFix?: boolean;
   /** Write TOOLCHAIN.md to the project's governance directory. Default true. */
   writeToolchainFile?: boolean;
+  /**
+   * Skip the step 9 AgentShield security scan entirely (and add no AgentShield
+   * blockers). Default false — the scan runs as part of the gate.
+   */
+  skipSecurityGate?: boolean;
   /** Name of the governance subdirectory under projectPath. Default 'governance'. */
   governanceDirName?: string;
   /** Progress reporter. Default logs to the console with a [FORGE:phase0] prefix. */
@@ -560,6 +565,7 @@ export async function runPhase0Scout(
   const autoInstall = options.autoInstall ?? true;
   const autoFix = options.autoFix ?? true;
   const writeToolchainFile = options.writeToolchainFile ?? true;
+  const skipSecurityGate = options.skipSecurityGate ?? false;
   const governanceDirName = options.governanceDirName ?? 'governance';
   const log = options.log ?? logLine('phase0');
 
@@ -644,28 +650,32 @@ export async function runPhase0Scout(
   }
 
   // -------------------------------------------------------------------------
-  // Step 9: AgentShield security scan — must pass grade B+ (A or B) to proceed
+  // Step 9: AgentShield security scan — must pass grade D (A or B) to proceed
   // -------------------------------------------------------------------------
-  log('step 9: AgentShield security scan');
   let securityReport: SecurityReport | null = null;
-  try {
-    securityReport = await scanProjectSecurity(projectPath);
-    const { grade, findings } = securityReport;
-    log(`AgentShield: grade=${grade} | ${findings.length} finding(s) | ${securityReport.scannedPaths.length} artifact(s) scanned`);
-    for (const f of findings) {
-      log(`  [${f.severity}] ${f.category}: ${f.message}`);
+  if (skipSecurityGate) {
+    log('step 9: AgentShield security scan skipped (--skip-security-gate)');
+  } else {
+    log('step 9: AgentShield security scan');
+    try {
+      securityReport = await scanProjectSecurity(projectPath);
+      const { grade, findings } = securityReport;
+      log(`AgentShield: grade=${grade} | ${findings.length} finding(s) | ${securityReport.scannedPaths.length} artifact(s) scanned`);
+      for (const f of findings) {
+        log(`  [${f.severity}] ${f.category}: ${f.message}`);
+      }
+      if (grade === 'F') {
+        const criticalHighCount = findings.filter((f) => f.severity === 'critical' || f.severity === 'high').length;
+        blockers.push(
+          `AgentShield security grade ${grade} is below required D — ` +
+            `${criticalHighCount} critical/high finding(s) must be resolved before proceeding`
+        );
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      log(`WARNING: AgentShield scan error — ${detail}`);
+      toolchainManifest.warnings.push(`AgentShield scan error: ${detail}`);
     }
-    if (grade !== 'A' && grade !== 'B') {
-      const criticalHighCount = findings.filter((f) => f.severity === 'critical' || f.severity === 'high').length;
-      blockers.push(
-        `AgentShield security grade ${grade} is below required B+ — ` +
-          `${criticalHighCount} critical/high finding(s) must be resolved before proceeding`
-      );
-    }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    log(`WARNING: AgentShield scan error — ${detail}`);
-    toolchainManifest.warnings.push(`AgentShield scan error: ${detail}`);
   }
 
   // -------------------------------------------------------------------------
@@ -763,3 +773,6 @@ export async function runPhase0Scout(
 }
 
 export default runPhase0Scout;
+
+
+

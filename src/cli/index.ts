@@ -35,12 +35,13 @@
  * to stop and review the PRD/Architecture before committing to a full build.
  */
 
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { join, basename, resolve } from 'node:path';
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import { dump as dumpYaml } from 'js-yaml';
 
 import { loadConfig, describeConfig, type ForgeConfig } from './config.js';
 
@@ -48,10 +49,10 @@ import { runPhase0Scout, type Phase0Result } from '../phases/phase0-scout.js';
 import { runPhase1aPrd } from '../phases/phase1a-prd.js';
 import { runPhase1bArchitect, type ArchitectureDesign } from '../phases/phase1b-architect.js';
 import { runPhase2Governance } from '../phases/phase2-governance.js';
-import { generateQueue } from '../engine/queue-generator.js';
+import { generateQueue, type QueueEntry } from '../engine/queue-generator.js';
 import { runPhase3Executor, type Phase3Result } from '../phases/phase3-executor.js';
 import { runPhase5Learner } from '../phases/phase5-learner.js';
-import { runProjectAutopsy, renderAutopsyReportMarkdown } from '../tools/project-autopsy.js';
+import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
@@ -183,7 +184,7 @@ function asStackFingerprint(json: JsonObject | null | undefined): StackFingerpri
 /** Run Phase 0 with a spinner; return the result. Side effects per `options`. */
 async function runScout(
   projectPath: string,
-  options: { autoInstall?: boolean; autoFix?: boolean; writeToolchainFile?: boolean } = {}
+  options: { autoInstall?: boolean; autoFix?: boolean; writeToolchainFile?: boolean; skipSecurityGate?: boolean } = {}
 ): Promise<Phase0Result> {
   return withSpinner('Phase 0 — Toolchain Scout', (log) =>
     runPhase0Scout(projectPath, { ...options, log })
@@ -220,10 +221,10 @@ async function cmdScout(pathArg: string): Promise<void> {
 }
 
 /** `forge design <path> --idea` — Phase 0 + 1 (PRD + Architecture), stops at Gate 2. */
-async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string }): Promise<ArchitectureDesign | null> {
+async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string; skipSecurityGate?: boolean }): Promise<ArchitectureDesign | null> {
   const projectPath = resolveProjectPath(pathArg);
 
-  const scout = await runScout(projectPath);
+  const scout = await runScout(projectPath, { skipSecurityGate: opts.skipSecurityGate });
   reportScout(scout);
   if (!scout.passed) {
     fail('Phase 0 did not pass — resolve the blockers above before designing.');
@@ -268,15 +269,102 @@ async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string })
   return design;
 }
 
+/**
+ * Governance/spec files FORGE auto-injects into the build idea when present in the
+ * target project. These carry decisions a fresh PRD should HONOR rather than
+ * re-derive (the blueprint, the data schema, the API registry, the live build state).
+ */
+const AUTO_GOVERNANCE_FILES: readonly string[] = [
+  'BLUEPRINT.md',
+  'DIALSTARS_BLUEPRINT.md',
+  'SCHEMA.md',
+  'API_REGISTRY.md',
+  'STATE_OF_THE_BUILD.md',
+];
+
+/**
+ * Collect any governance/spec documents present in the target project — the
+ * {@link AUTO_GOVERNANCE_FILES} at the project root plus every `.md` file under
+ * `reports/` — so the build can prepend them to the raw idea. Returns the
+ * concatenated Markdown (each doc under a labelled marker) and the list of source
+ * paths. Guarded: a missing/unreadable file (or no `reports/` dir) is skipped, never
+ * fatal; an empty project yields `{ text: '', sources: [] }`.
+ */
+async function gatherGovernanceContext(
+  projectPath: string
+): Promise<{ text: string; sources: string[] }> {
+  const sources: string[] = [];
+  const sections: string[] = [];
+
+  const tryRead = async (relPath: string): Promise<void> => {
+    try {
+      const content = await readFile(join(projectPath, relPath), 'utf8');
+      if (content.trim() === '') return;
+      sources.push(relPath);
+      sections.push(`<!-- FORGE auto-context: ${relPath} -->\n${content.trim()}`);
+    } catch {
+      // missing/unreadable — skip silently (best-effort).
+    }
+  };
+
+  for (const name of AUTO_GOVERNANCE_FILES) await tryRead(name);
+
+  // Every .md file in reports/ (e.g. an autopsy report, an audit, a design note).
+  try {
+    const entries = await readdir(join(projectPath, 'reports'), { withFileTypes: true });
+    const mdFiles = entries
+      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.md'))
+      .map((e) => e.name)
+      .sort();
+    for (const name of mdFiles) await tryRead(join('reports', name));
+  } catch {
+    // no reports/ directory — skip.
+  }
+
+  return { text: sections.join('\n\n'), sources };
+}
+
 /** `forge build <path>` — the full autonomous pipeline (Phase 0 → 5). */
 async function cmdBuild(
   pathArg: string,
-  opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean }
+  opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean }
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
   console.log(chalk.bold(`\nBuilding ${projectName} at ${projectPath}`));
   if (opts.dryRun) console.log(chalk.cyan('  DRY RUN — no claude/git/Sentinel execution; plan + cost only.'));
+
+  // Auto-governance: when building from a raw --idea, prepend any spec/governance docs
+  // found in the target project (BLUEPRINT/SCHEMA/API_REGISTRY/state + reports/*.md) so
+  // Phase 1A's PRD honors existing decisions rather than re-deriving them. (When --prd is
+  // supplied Phase 1A is skipped entirely, so there is nothing to augment.)
+  if (opts.idea) {
+    const gov = await gatherGovernanceContext(projectPath);
+    if (gov.sources.length > 0) {
+      console.log(
+        chalk.dim(`  auto-context: prepending ${gov.sources.length} governance doc(s) — ${gov.sources.join(', ')}`)
+      );
+      opts = { ...opts, idea: `${gov.text}\n\n---\n\n# Product idea\n\n${opts.idea}` };
+    }
+  }
+
+  if (opts.skipDesign) {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const bp = join(projectPath, 'DIALSTARS_BLUEPRINT.md');
+    const sp = join(projectPath, 'SCHEMA.md');
+    const doc = existsSync(bp) ? bp : existsSync(sp) ? sp : null;
+    if (!doc) { fail('--skip-design requires DIALSTARS_BLUEPRINT.md or SCHEMA.md'); return; }
+    const prd = readFileSync(doc, 'utf8');
+    const sr = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
+    const fd = { projectName, database: { tables: [], indexes: [], rlsPolicies: [], seeds: [], migrations: [], markdown: prd }, api: { routes: [], markdown: '' }, frontend: { pages: [], components: [], layouts: [], designTokens: [], responsiveStrategy: '', markdown: '' }, interactionMaps: { maps: [], markdown: '' }, auth: { flows: [], roles: [], permissions: [], middleware: [], markdown: '' }, agents: { agents: [], markdown: '' }, infra: { environments: [], markdown: '' }, testing: { specs: [], markdown: '' }, crossValidation: [], constrained: false, designSystemGenerated: false, designSystemPath: null, architecturePath: null, model: 'existing-docs', tokensInput: 0, tokensOutput: 0, usedFallback: false, fallbackArtifacts: [], warnings: [], gate: { name: 'Gate 2', status: 'awaiting_human_approval' as const, detail: 'existing docs' }, generatedAt: new Date().toISOString() };
+    const gov = await withSpinner('Phase 2 - Governance', (log) => runPhase2Governance(projectPath, fd as unknown as ArchitectureDesign, { stackFingerprint: sr.stackFingerprint, log }));
+    printWarnings(gov.warnings);
+    const q = await withSpinner('Phase 2 - Queue', (log) => generateQueue(projectPath, fd as unknown as ArchitectureDesign, { projectName, log }));
+    printWarnings(q.warnings);
+    const exec = await withSpinner('Phase 3 - Build Executor', (log) => runPhase3Executor({ projectPath, projectName, stackFingerprint: sr.stackFingerprint, toolchainManifest: sr.toolchainManifest as unknown as JsonObject, autonomousRecoveryMode: opts.autonomousRecovery ?? false, dryRun: opts.dryRun ?? false, log }));
+    reportExecution(exec);
+    return;
+  }
 
   // Phase 0 + 1 (design). Reuses cmdDesign so the gates + reporting are identical.
   const design = await cmdDesign(pathArg, opts);
@@ -563,11 +651,124 @@ function printAgentLine(a: SelfCreatedAgent): void {
   console.log(chalk.dim(`      ${a.purpose}`));
 }
 
-/** `forge resurrect <path>` — Project Autopsy on a failed project (F10). */
-async function cmdResurrect(pathArg: string): Promise<void> {
+/** An empty {@link ContextInjection} — resurrection prompts carry their context inline. */
+function emptyInjection(): { schemaSections: string[]; behavioralSections: string[]; interactionMaps: string[] } {
+  return { schemaSections: [], behavioralSections: [], interactionMaps: [] };
+}
+
+/**
+ * Build a Phase 3 build queue DIRECTLY from an autopsy report. The resurrect path
+ * SKIPS Phase 1A (PRD) and 1B (Architecture) — it reconstructs straight from the
+ * report's preserve/redesign brief into a short, dependency-ordered queue:
+ *   1. (optional) a schema prompt that PRESERVES the salvageable tables,
+ *   2. one feature prompt per missing feature the autopsy found (capped),
+ *   3. a final integration prompt that repairs broken integrations + wires it together.
+ * Each prompt carries the full resurrection brief inline (no governance package exists,
+ * since Phase 2 is skipped too), so `governance_refs` is empty.
+ */
+function buildResurrectionQueue(report: AutopsyReport): QueueEntry[] {
+  const entries: QueueEntry[] = [];
+  const recon = report.reconstructionInputs;
+  let prevId: string | null = null;
+
+  const tables = recon.preserve.schemaTables;
+  if (tables.length > 0) {
+    const id = 'resurrect-000-schema';
+    entries.push({
+      id,
+      name: 'Preserve salvaged schema',
+      prompt_type: 'schema',
+      dependencies: [],
+      governance_refs: [],
+      estimated_tokens: Math.max(2000, tables.length * 300 + 2000),
+      context_injection: emptyInjection(),
+      description:
+        'RESURRECTION — preserve the salvageable data model from the failed project.\n' +
+        `Recreate/confirm these tables exactly (do NOT redesign them): ${tables.join(', ')}.\n\n` +
+        recon.idea,
+    });
+    prevId = id;
+  }
+
+  const missing = recon.redesign.missingFeatures.slice(0, 12);
+  missing.forEach((feature, i) => {
+    const id = `resurrect-${String(i + 1).padStart(3, '0')}-feature`;
+    entries.push({
+      id,
+      name: `Rebuild feature: ${feature}`.slice(0, 80),
+      prompt_type: 'feature',
+      dependencies: prevId ? [prevId] : [],
+      governance_refs: [],
+      estimated_tokens: 6000,
+      context_injection: emptyInjection(),
+      description:
+        `RESURRECTION — implement the missing feature "${feature}" identified by the autopsy.\n` +
+        `Preserve where relevant — routes: ${recon.preserve.routes.join(', ') || '—'}; ` +
+        `components: ${recon.preserve.components.slice(0, 40).join(', ') || '—'}.\n\n` +
+        recon.idea,
+    });
+    prevId = id;
+  });
+
+  const finalId = `resurrect-${String(missing.length + 1).padStart(3, '0')}-integrate`;
+  entries.push({
+    id: finalId,
+    name: 'Integrate + repair broken integrations',
+    prompt_type: 'feature',
+    dependencies: prevId ? [prevId] : [],
+    governance_refs: [],
+    estimated_tokens: 6000,
+    context_injection: emptyInjection(),
+    description:
+      'RESURRECTION — final integration pass.\n' +
+      `Repair these broken integrations: ${recon.redesign.brokenIntegrations.join('; ') || '(none detected)'}.\n` +
+      'Ensure the preserved schema, routes, and components work end-to-end.\n\n' +
+      recon.idea,
+  });
+
+  return entries;
+}
+
+/** Find the most recent `AUTOPSY_*.md` in a project's `reports/` dir, or null. */
+async function findLatestAutopsyReport(reportsDir: string): Promise<string | null> {
+  try {
+    const entries = await readdir(reportsDir, { withFileTypes: true });
+    const reports = entries
+      .filter((e) => e.isFile() && /^AUTOPSY_.*\.md$/i.test(e.name))
+      .map((e) => e.name)
+      .sort();
+    const latest = reports[reports.length - 1];
+    return latest ? join(reportsDir, latest) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `forge resurrect <path>` — autopsy a failed project, then rebuild it (F10).
+ *
+ * Unlike `forge build`, resurrection SKIPS Phase 1A/1B entirely and generates the
+ * Phase 3 build queue directly from the autopsy report found in the project's
+ * `reports/` directory, then executes it.
+ */
+async function cmdResurrect(pathArg: string, opts: { autonomousRecovery?: boolean }): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
-  console.log(chalk.bold(`\nAutopsy of ${projectPath}`));
-  const report = await withSpinner('Project Autopsy', (log) => runProjectAutopsy(projectPath, { log }));
+  const projectName = basename(projectPath) || 'project';
+  console.log(chalk.bold(`\nResurrecting ${projectName} at ${projectPath}`));
+
+  // Phase 0 — environment gate. Resurrection skips the AgentShield security scan
+  // (the dead project's leftover config is not the resurrection's concern).
+  const scout = await runScout(projectPath, { skipSecurityGate: true });
+  reportScout(scout);
+  if (!scout.passed) {
+    fail('Phase 0 did not pass — resolve the blockers above before resurrecting.');
+    return;
+  }
+
+  // Autopsy: produce the forensic report and persist it under reports/.
+  const report = await withSpinner('Project Autopsy', (log) =>
+    runProjectAutopsy(projectPath, { stackFingerprint: scout.stackFingerprint, log })
+  );
 
   const s = report.salvageAssessment;
   console.log(
@@ -579,7 +780,7 @@ async function cmdResurrect(pathArg: string): Promise<void> {
   console.log(chalk.dim(`  intent: ${report.intent.inferredPurpose}`));
   console.log(chalk.dim(`  diagnosis: ${report.diagnosis.summary}`));
 
-  // Persist the full Markdown report so the operator can act on it.
+  // Persist the full Markdown report so the operator can act on it (and so it lands in reports/).
   const reportsDir = join(projectPath, 'reports');
   const stamp = report.generatedAt.replace(/[:.]/g, '-');
   const reportPath = join(reportsDir, `AUTOPSY_${stamp}.md`);
@@ -592,7 +793,52 @@ async function cmdResurrect(pathArg: string): Promise<void> {
     console.log(chalk.yellow(`  (could not write the autopsy report: ${detail})`));
   }
   printWarnings(report.warnings);
-  console.log(chalk.dim('\n  To resurrect: feed this report into `forge build <path> --idea` (the report\'s reconstruction brief).'));
+
+  // Confirm an autopsy report is present in reports/ — the source of the resurrection.
+  const foundReport = await findLatestAutopsyReport(reportsDir);
+  if (foundReport) console.log(chalk.dim(`  resurrecting from autopsy report: ${foundReport}`));
+
+  // Skip Phase 1A (PRD) and 1B (Architecture): build the Phase 3 queue DIRECTLY from
+  // the autopsy report's preserve/redesign brief, then execute it.
+  console.log(chalk.yellow('  skipping Phase 1A/1B — building the queue directly from the autopsy report.'));
+  const entries = buildResurrectionQueue(report);
+  const queuePath = join(projectPath, 'resurrect-queue.yaml');
+  try {
+    await writeFile(queuePath, dumpYaml(entries, { lineWidth: 120 }), 'utf8');
+    console.log(chalk.dim(`  resurrection queue: ${entries.length} prompt(s) → ${queuePath}`));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    fail(`Could not write the resurrection queue: ${detail}`);
+    return;
+  }
+
+  // Phase 3 — Build Executor straight from the resurrection queue.
+  const exec = await withSpinner('Phase 3 — Build Executor (resurrect)', (log) =>
+    runPhase3Executor({
+      projectPath,
+      projectName,
+      stackFingerprint: scout.stackFingerprint,
+      toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
+      queuePath,
+      autonomousRecoveryMode: opts.autonomousRecovery ?? false,
+      log,
+    })
+  );
+  reportExecution(exec);
+
+  if (exec.status === 'halted' || exec.status === 'failed') {
+    fail(`Resurrection ${exec.status}${exec.haltReason ? ` — ${exec.haltReason}` : ''}.`);
+    return;
+  }
+
+  // Phase 5 — Recursive Learner (best-effort; never blocks).
+  if (exec.buildRunId) {
+    const learn = await withSpinner('Phase 5 — Recursive Learner', (log) =>
+      runPhase5Learner(exec.buildRunId as string, { log })
+    );
+    printWarnings(learn.warnings);
+  }
+  console.log(chalk.green('\n✔ Resurrection complete.'));
 }
 
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
@@ -771,6 +1017,15 @@ async function cmdRepair(
   console.log(chalk.bold(`\nRepairing ${projectName} at ${projectPath}`));
   if (opts.generateOnly) console.log(chalk.cyan('  GENERATE ONLY — repair queue will be written but not executed.'));
 
+  // Phase 0 — environment pre-flight (advisory for repair; skip the AgentShield security
+  // gate — a broken repo's leftover config must not block its own repair). Blockers are
+  // surfaced but never halt: repair's whole purpose is fixing an unhealthy project.
+  const scout = await runScout(projectPath, { skipSecurityGate: true });
+  if (!scout.passed) {
+    console.log(chalk.yellow(`  Phase 0 found ${scout.blockers.length} blocker(s) — continuing with repair anyway:`));
+    for (const b of scout.blockers) console.log(chalk.dim(`    • ${b}`));
+  }
+
   const maxClusters = opts.maxClusters ? Number.parseInt(opts.maxClusters, 10) : undefined;
   if (opts.maxClusters !== undefined && (Number.isNaN(maxClusters) || (maxClusters ?? 0) < 1)) {
     fail('--max-clusters must be a positive integer.');
@@ -850,7 +1105,8 @@ async function main(): Promise<void> {
     .option('--prd <path>', 'use an existing PRD file instead of generating one')
     .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14)', false)
     .option('--dry-run', 'simulate the build (plan + cost, no execution)', false)
-    .action((pathArg: string, opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean }) =>
+    .option('--skip-design', 'skip Phase 1A+1B and use existing governance docs', false)
+    .action((pathArg: string, opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipDesign?: boolean; skipSecurityGate?: boolean }) =>
       cmdBuild(pathArg, opts)
     );
 
@@ -907,9 +1163,10 @@ async function main(): Promise<void> {
 
   program
     .command('resurrect')
-    .description('Run Project Autopsy on a failed/abandoned project (F10)')
+    .description('Autopsy a failed project and rebuild it straight from the report (skips Phase 1A/1B)')
     .argument('<path>', 'target project directory')
-    .action((pathArg: string) => cmdResurrect(pathArg));
+    .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14) during the rebuild', false)
+    .action((pathArg: string, opts: { autonomousRecovery?: boolean }) => cmdResurrect(pathArg, opts));
 
   program
     .command('estimate')
@@ -992,3 +1249,5 @@ main().catch((error: unknown) => {
   console.error(chalk.red(detail));
   process.exitCode = 1;
 });
+
+

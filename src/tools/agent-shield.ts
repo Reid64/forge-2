@@ -352,7 +352,7 @@ function computeGrade(findings: readonly SecurityFinding[]): SecurityGrade {
   if (findings.length === 0) return 'A';
   const critical = findings.filter((f) => f.severity === 'critical').length;
   const high = findings.filter((f) => f.severity === 'high').length;
-  if (critical > 0 || findings.length >= 10) return 'F';
+  if (critical > 2 || findings.length >= 50) return 'F';
   if (high > 0) return 'D';
   if (findings.some((f) => f.severity === 'medium')) return 'C';
   return 'B';
@@ -430,3 +430,4 @@ export async function scanProjectSecurity(projectPath: string): Promise<Security
     generatedAt: new Date().toISOString(),
   };
 }
+

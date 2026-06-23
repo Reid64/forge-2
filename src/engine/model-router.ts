@@ -55,7 +55,7 @@ import { logLine } from '../tools/forge-logger.js';
 
 /** The Claude models FORGE routes build prompts to (most → least capable). */
 export type ClaudeModel =
-  | 'claude-opus-4-6'
+  | 'claude-sonnet-4-6'
   | 'claude-sonnet-4-6'
   | 'claude-haiku-4-5-20251001';
 
@@ -129,7 +129,7 @@ export const DEFAULT_TYPE_TIER: Record<PromptType, ModelTier> = {
 
 /** Work tier → Claude model (the spec's three-tier mapping). */
 export const DEFAULT_TIER_MODEL: Record<ModelTier, ClaudeModel> = {
-  architecture: 'claude-opus-4-6',
+  architecture: 'claude-sonnet-4-6' /* was opus */,
   standard: 'claude-sonnet-4-6',
   simple: 'claude-haiku-4-5-20251001',
 };
@@ -140,7 +140,7 @@ export const DEFAULT_TIER_MODEL: Record<ModelTier, ClaudeModel> = {
  * class. Coarse + overridable — an estimate, not an invoice (Iron Law 3 / module note).
  */
 export const MODEL_PRICING: Record<ClaudeModel, ModelPricing> = {
-  'claude-opus-4-6': { inputPerMTok: 15, outputPerMTok: 75 },
+  // opus pricing removed - all tiers use sonnet
   'claude-sonnet-4-6': { inputPerMTok: 3, outputPerMTok: 15 },
   'claude-haiku-4-5-20251001': { inputPerMTok: 1, outputPerMTok: 5 },
 };
@@ -448,7 +448,7 @@ export interface ModelRouterConfig {
 const COMPLEXITY_MODEL_MAP: Record<PromptComplexity, ClaudeModel> = {
   simple: 'claude-haiku-4-5-20251001',
   moderate: 'claude-sonnet-4-6',
-  complex: 'claude-opus-4-6',
+  complex: 'claude-sonnet-4-6',
 };
 
 /**
@@ -539,3 +539,6 @@ export function loadRelevantSkills(prompt: string, skillsDir: string): string[] 
 }
 
 export default selectModel;
+
+
+
