@@ -45,7 +45,7 @@ import {
   type EnvironmentAudit,
   type DockerStatus,
 } from '../tools/env-auditor.js';
-import { runQuery, nowIso, getClient } from '../memory/index.js';
+import { runQuery, nowIso, getClient, telemetry } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 import { scanProjectSecurity } from '../tools/agent-shield.js';
 import { detectSchemaDrift } from '../tools/schema-validator.js';
@@ -664,10 +664,36 @@ export async function runPhase0Scout(
       for (const f of findings) {
         log(`  [${f.severity}] ${f.category}: ${f.message}`);
       }
-      if (grade === 'F') {
+      // Log findings to build memory (non-blocking — degraded-not-fatal per Contract 4)
+      try {
+        const hasCritical = findings.some((f) => f.severity === 'critical');
+        const hasHigh = findings.some((f) => f.severity === 'high');
+        await telemetry.createEvent({
+          project_name: projectPath.split(/[\\/]/).filter(Boolean).pop() ?? 'unknown',
+          event_type: 'feedback',
+          event_data: {
+            source: 'agent-shield',
+            grade,
+            findingCount: findings.length,
+            findings: findings.map((f) => ({
+              severity: f.severity,
+              category: f.category,
+              message: f.message,
+              file: f.file,
+              ...(f.line !== undefined ? { line: f.line } : {}),
+            })),
+            recommendations: securityReport.recommendations,
+          },
+          severity: hasCritical ? 'critical' : hasHigh ? 'warning' : 'info',
+        });
+      } catch {
+        // Non-fatal; Build Memory unavailable is degraded-not-fatal (Contract 4)
+      }
+      // Grade B+ means A or B; C / D / F fall below the required threshold
+      if (grade !== 'A' && grade !== 'B') {
         const criticalHighCount = findings.filter((f) => f.severity === 'critical' || f.severity === 'high').length;
         blockers.push(
-          `AgentShield security grade ${grade} is below required D — ` +
+          `AgentShield security grade ${grade} is below required B — ` +
             `${criticalHighCount} critical/high finding(s) must be resolved before proceeding`
         );
       }
