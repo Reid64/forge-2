@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-005** — loops.ts verified: updateDecisionWeights (line 120) and analyzeForEvolutions (line 198) confirmed full SQLite implementations (not stubs). No changes to loops.ts required — both functions already present with complete logic. Governance files updated.
+**r4-006** — sync.ts verified: .transaction() errors already resolved (BEGIN/COMMIT/ROLLBACK pattern confirmed). All four exports present: loadSyncConfig, acquireSyncLock, releaseSyncLock, syncForgeMemory. No code changes required — fixes were applied in r4-001. Cross-Machine Sync COMPLETE.
 
 ---
 
