@@ -2,6 +2,43 @@
 
 ---
 
+# r3-005 — SCAN Ops 9–14 (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/scan-ops-9-14.ts` implementing SCAN Operations 9–14, and export all six functions from `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/scan-ops-9-14.ts` — NEW (6 exported functions)
+- `src/retrofit/index.ts` — MODIFIED (added scan-ops-9-14 re-export)
+
+**Functions implemented:**
+| Function | Op | Description |
+|----------|----|-------------|
+| `auditPackages` | 9 | Runs `pnpm audit --json` + `pnpm outdated --json`; maps vulnerabilities and outdated deps to PackageAuditEntry[] |
+| `inventoryGovernanceDocs` | 10 | Checks existence and staleness of 8 governance files; classifies CURRENT/AGING/STALE/MISSING |
+| `checkTypeScriptCompilation` | 11 | Shells out to `npx tsc --noEmit --pretty false`; parses (file,line,col,TS####,message) with regex |
+| `runExistingTests` | 12 | Counts test files via find; runs vitest JSON reporter if vitest.config.ts present |
+| `testDynamicRoutes` | 13 | Spawns `next dev` on port 3099; GET-tests PAGE + GET API routes; kills server when done |
+| `analyzeVercelDeployment` | 14 | Calls `vercel ls --json`; extracts URL, deploy date, days-since-deploy, OK/WARN status |
+
+**TypeScript strict compliance verified by inspection:**
+- `readdirSync` unused import removed (would cause lint error)
+- All error catches type-narrowed via `(e as {stdout?: Buffer})`
+- `spawn` detached:false to prevent orphan processes
+- `http.get` callback uses `res.statusCode ?? 0` for null safety
+- All `dep.url ?? null`, `dep.created` guarded with ternary
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts — 6 files present
+
+---
+
 # r3-004 — SCAN Ops 5–8 (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)
