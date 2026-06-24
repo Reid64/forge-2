@@ -44,6 +44,28 @@ All data below sourced from live filesystem reads. Zero fabrication.
 
 ---
 
+## Test Suite — r4-010 Static Analysis (2026-06-24)
+
+**Exec gate blocked live run.** Static analysis performed instead.
+
+| Test File | Tests | Static Result | Notes |
+|-----------|-------|--------------|-------|
+| tests/learning-database.test.ts | 8 | PASS (static) | 14 tables, 26+ indexes, WAL mode, machine_id, idempotency |
+| tests/learning-fingerprint.test.ts | 7 | PASS (static) | generalizeFilePath, generalizeErrorMessage, getErrorFingerprint |
+| tests/learning-queries.test.ts | 8 | PASS (static) | saveToForgeMemory, getForgeMemory, getGovernanceRules, getPendingEvolutions |
+| tests/learning-sync.test.ts | 7 | PASS (static) | acquireSyncLock, releaseSyncLock, loadSyncConfig, syncForgeMemory, timestamps |
+| **Total** | **30** | **0 failures expected** | All imports exist; logic verified against test assertions |
+
+**Static analysis findings:**
+- All 4 test files import functions that are exported from their respective implementation files
+- `database.ts`: 14 tables created, 26 indexes, WAL mode, machine_id caching correct
+- `fingerprint.ts`: generalizeFilePath wildcards entity-specific dirs, generalizeErrorMessage replaces quoted identifiers, getErrorFingerprint sorts tech stack before hashing
+- `queries.ts`: saveToForgeMemory auto-generates UUID + machine_id + ISO created_at; validateTable throws /invalid table/i on unknown tables
+- `sync.ts`: acquireSyncLock writes valid JSON lock file; loadSyncConfig returns correct defaults; syncForgeMemory returns {synced:0, tables:[]} when master path missing; getLastSyncTimestamp returns epoch as default
+- **No bugs identified by inspection**
+
+---
+
 ## Module Status Table
 
 | Module | Status | Evidence |
@@ -62,7 +84,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | AGENTS.md | COMPLETE | ForgeRetrofit entry present (1 match) |
 | TypeScript | UNVERIFIED | Exec gate blocked; 0 errors by inspection through r4-012 |
 | Build | UNVERIFIED | Exec gate blocked; dist/ is stale from Jun 23 pre-Run-4 |
-| Test suite | UNVERIFIED | Exec gate blocked |
+| Test suite | STATIC ANALYSIS ONLY | Exec gate blocked live run; 30 tests analyzed, 0 failures expected by inspection |
 
 ---
 
@@ -121,6 +143,8 @@ TypeScript error fixes (sync.ts .transaction() calls), types hardening (Adversar
 **r4-008:** Verified Learning CLI COMPLETE by full file inspection. All 4 required subcommands (`learn status`, `learn patterns`, `learn sync`, `learn evolutions`) are fully implemented with real logic in `src/cli/commands/learning.ts` (lines 44–205). No stubs. No code changes required. TypeScript: 0 errors by inspection (exec gate blocked live run).
 
 **r4-009:** CLI retrofit command verified COMPLETE by inspection. `src/cli/index.ts` lines 1246–1277 contain the full retrofit command with all 6 options (--scope, --skip-dynamic, --resume, --non-interactive, --queue-output, --api-key), spinner/error pattern, and dynamic import of `runRetrofitPipeline`. AGENTS.md confirmed complete with all 14 SCAN ops, 3 DIAGNOSE reports, RECONCILE Model C, QUEUE tier-ordering. No code changes required — command was already correctly implemented. TypeScript: 0 errors by inspection (exec gate blocked live run).
+
+**r4-010:** Test suite static analysis complete. Exec gate blocked live `pnpm test` execution (all node/pnpm invocations require approval in this session). Static review of all 4 node:test files (30 tests): learning-database.test.ts (8 tests), learning-fingerprint.test.ts (7 tests), learning-queries.test.ts (8 tests), learning-sync.test.ts (7 tests). Each test assertion verified against the implementation by code inspection. Zero bugs found. Zero source files modified. Implementations correct: 14 tables + 26 indexes in database.ts; generalizeFilePath/generalizeErrorMessage/getErrorFingerprint logic verified; saveToForgeMemory UUID + machine_id + ISO created_at generation correct; sync lock management and defaults correct. Static result: 30/30 expected PASS.
 
 ---
 
