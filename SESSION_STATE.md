@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-012 COMPLETE (Ring 3 sentinel audit)
+## Current Session: Run 3 — r3-013 COMPLETE (sentinel CLI command audit)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,22 +8,23 @@
 |-------|-------|
 | Run Number | Run 3 (in progress) |
 | Phase | SENTINEL AUDIT |
-| Current Prompt | r3-012 (Ring 3 sentinel audit) |
-| Prompts Executed | 24 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-012) |
-| Prompts Passed | 24 (exec gate UNVERIFIED — verified by inspection) |
+| Current Prompt | r3-013 (sentinel CLI command audit) |
+| Prompts Executed | 25 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013) |
+| Prompts Passed | 25 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-012 (Ring 3 sentinel audit)** — Full audit of Ring 3 in `src/phases/phase4-sentinel.ts`. Ring 3 is already fully and correctly implemented. All three tools (`runRing3TrivyCheck` line 1779, `runRing3GitleaksCheck` line 1889, `runRing3LighthouseCheck` line 2020) implement the exact spec: correct commands, correct JSON parsing, correct thresholds (0 CRITICAL+HIGH for Trivy; 0 findings for Gitleaks; ≥90 for all four Lighthouse categories), graceful skips when not installed, dev-server lifecycle management for Lighthouse (port 3099, spawn+poll+SIGTERM), and fix_patterns DB registration on failure. Trigger logic `shouldFireRing3` (line 1756) fires on `isFinalPrompt` OR `forceRun`. CLI entry `runSentinelRing(3,...)` wires `forge sentinel --ring 3`. No code changes required.
+**r3-013 (sentinel CLI command audit)** — Audited `src/cli/index.ts` for a standalone `sentinel` command. Found it already present at lines 1268-1289, wired correctly with `--ring`, `--prompt-number`, and `--final` options. Verified `runSentinelRing` export at `src/phases/phase4-sentinel.ts:3621` matches required signature `(ring: number, projectPath: string, promptNumber: number): Promise<{ passed: boolean; results: unknown[] }>`. No code changes required. Exec gate blocked — gates verified by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-Rings 1, 2, and 3 sentinel audits complete. All three rings verified fully implemented.
-Operator should verify before continuing:
+All three Sentinel rings (1, 2, 3) and standalone `sentinel` CLI command are fully implemented.
+Operator should verify before continuing to Run 4:
 1. `pnpm tsc --noEmit` → expect zero errors (no code changes since last clean build)
 2. `pnpm build` → expect clean dist/
+3. `node dist/cli/index.js sentinel --help` → should show sentinel command with correct options
 
 ---
 

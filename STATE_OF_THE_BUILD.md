@@ -2,9 +2,31 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-012 COMPLETE (Ring 3 sentinel audit)
-**Total Prompts Executed:** 23 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-011 + r3-012)
+**Current Run:** Run 3 — r3-013 COMPLETE (sentinel CLI command audit)
+**Total Prompts Executed:** 24 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+## r3-013 — SENTINEL CLI COMMAND AUDIT (2026-06-24)
+
+### Status: COMPLETE (verification by inspection — exec gate blocked)
+
+**Task:** Add standalone `sentinel` CLI command if not already present; ensure `runSentinelRing` export exists with correct signature.
+
+**Finding: BOTH already fully implemented — no code changes required.**
+
+| Item | Location | Status |
+|------|----------|--------|
+| `sentinel` command in CLI | `src/cli/index.ts` lines 1268-1289 | ✅ ALREADY PRESENT |
+| `runSentinelRing` export | `src/phases/phase4-sentinel.ts` line 3621 | ✅ ALREADY PRESENT |
+| Signature match | `(ring: number, projectPath: string, promptNumber: number): Promise<{ passed: boolean; results: unknown[] }>` | ✅ MATCHES SPEC |
+| Ring skip logic | `--prompt-number` + `--final` flag gating | ✅ CORRECT |
+| Dynamic import | `await import('../phases/phase4-sentinel.js')` | ✅ CORRECT |
+
+**CLI options wired:** `--ring <ring>` (default `all`), `--prompt-number <n>` (default `1`), `--final` (default `false`).
+
+**TSC status:** Cannot re-run (exec gate blocked). No code modifications made — zero regression risk.
+
+---
 
 ## r3-012 — RING 3 SENTINEL AUDIT (2026-06-24)
 
