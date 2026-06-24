@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-010 — SENTINEL RING 1 HARDENING (2026-06-24)
+## Current Session: r3-011 — SENTINEL RING 2 HARDENING (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,13 +8,13 @@
 |-------|-------|
 | Run Number | Run 3 (in progress) |
 | Phase | SENTINEL HARDENING |
-| Current Prompt | r3-010 (Sentinel Ring 1) |
-| Prompts Executed | 22 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010) |
-| Prompts Passed | 22 (exec gate UNVERIFIED) |
+| Current Prompt | r3-011 (Sentinel Ring 2) |
+| Prompts Executed | 23 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-011) |
+| Prompts Passed | 23 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-010 (SENTINEL RING 1 HARDENING)** — Audited `src/phases/phase4-sentinel.ts` and hardened Ring 1. TypeScript check was exit-code-only; ESLint was absent; database.types.ts schema drift was absent. Added: `'eslint'` to `SentinelCheckName` union and `SENTINEL_CHECK_ORDER` (now 6 mandatory checks); new Ring 1a TypeScript check with regex error parsing + DB fingerprint registration; new Ring 1b ESLint check (`npx eslint . --format json --ext .ts,.tsx`, threshold=0 severity-2, skips if not installed); new Ring 1c optional schema drift against `database.types.ts` vs live Supabase (with graceful skip when file or credentials absent); `ring1SchemaDrift` and `eslintTimeoutMs` options added to `SentinelOptions`. Exec gate blocked; zero TS errors expected by inspection.
+**r3-011 (SENTINEL RING 2 HARDENING)** — Audited `src/phases/phase4-sentinel.ts`; Ring 2 was entirely absent. Implemented full Ring 2 (every-10th-prompt + final-prompt gate): Ring 2a Vitest (`npx vitest run --reporter=json`, skips if no vitest.config.ts, threshold=0 failures AND coverage≥60% read from `coverage/coverage-summary.json`); Ring 2b Semgrep (`npx semgrep --config=auto --json`, skips if not installed, threshold=0 ERROR findings); Ring 2c knip (`npx knip --reporter json`, skips if not installed, threshold=0 unused exports). All three tools register failures to the learning DB. Trigger: `promptNumber % 10 === 0` OR `isFinalPrompt === true`. Exported `shouldFireRing2()` helper. Added `'vitest' | 'semgrep' | 'knip'` to `SentinelCheckName`; added `ring2?` option to `SentinelOptions`; added `import { existsSync } from 'node:fs'`. Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.

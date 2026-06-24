@@ -2,6 +2,64 @@
 
 ---
 
+# r3-011 — SENTINEL RING 2 HARDENING (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Audit and fully implement Ring 2 (every-10th-prompt gate) in `src/phases/phase4-sentinel.ts`.
+
+**Audit findings (pre-change):**
+- Ring 2 was entirely absent — the file had Ring 1 (per-prompt: tsc, eslint, build, file_integrity, schema_drift, deps) and many optional checks but no Ring 2 section at all.
+
+**Changes made to `src/phases/phase4-sentinel.ts`:**
+- Added `import { existsSync } from 'node:fs'` (static import for config-file detection in Vitest check)
+- Added `'vitest' | 'semgrep' | 'knip'` to `SentinelCheckName` union
+- Added `ring2?: { promptNumber, isFinalPrompt?, runVitest?, runSemgrep?, runKnip?, coverageThreshold? }` option to `SentinelOptions`
+- Added new Ring 2 section with:
+  - `VitestJsonOutput` interface — parses `numPassedTests/numFailedTests/numTotalTests`
+  - `CoverageSummaryJson` interface — reads Istanbul `coverage/coverage-summary.json` `total.lines.pct`
+  - `runRing2VitestCheck(projectPath, run, log, coverageThreshold=60)` — Ring 2a:
+    - Skips if no `vitest.config.ts` / `.js` / `.mts` found
+    - Runs `npx vitest run --reporter=json`
+    - Parses test pass/fail from JSON stdout
+    - Reads `coverage/coverage-summary.json` for line coverage; skips coverage check if file absent
+    - Threshold: 0 failures AND coverage ≥ threshold (default 60%)
+    - Registers failures to learning DB via `tryRegisterRing1Error`
+  - `SemgrepFinding` / `SemgrepJsonOutput` interfaces
+  - `runRing2SemgrepCheck(projectPath, run, log)` — Ring 2b:
+    - Skips if `command not found / ENOENT / not installed` in output
+    - Runs `npx semgrep --config=auto --json`
+    - Parses `results[]`, filters `severity=ERROR`
+    - Threshold: 0 ERROR findings; WARNINGs surfaced but pass
+    - Registers ERROR findings to learning DB
+  - `KnipJsonOutput` interface
+  - `runRing2KnipCheck(projectPath, run, log)` — Ring 2c:
+    - Skips if `command not found / ENOENT / not installed` in output
+    - Runs `npx knip --reporter json`
+    - Parses `issues.exports[]` count; threshold: 0 unused exports
+    - Registers failures to learning DB
+  - `shouldFireRing2(promptNumber, isFinalPrompt?)` — exported helper; fires when `promptNumber % 10 === 0` OR `isFinalPrompt === true`
+- Wired Ring 2 into `runSentinel()` after check 17 (Playwright), before final result assembly:
+  - Guards with `options.ring2 && shouldFireRing2(...)` 
+  - Each of the 3 tools respects `shouldSkipRest()` (stopOnFirstFailure)
+  - All runners are guarded (try/catch → skip on throw)
+
+**TypeScript strict-mode compliance (by inspection):**
+- `existsSync` properly imported from `node:fs`
+- All optional chaining used on JSON-parsed results (`parsed?.numFailedTests`, `f.extra?.severity`, etc.)
+- Non-null assertions (`[0]!`) only used after explicit `length > 0` guards
+- `lineCoverage: number | null` properly narrowed before comparison
+- All new functions are either called or exported — no unused locals
+- No `console.log` statements
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+| `pnpm build` | UNVERIFIED (exec gated) |
+
+---
+
 # r3-010 — SENTINEL RING 1 HARDENING (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

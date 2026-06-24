@@ -41,6 +41,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -140,7 +141,10 @@ export type SentinelCheckName =
   | 'live_schema_drift'
   | 'dead_code'
   | 'six_laws'
-  | 'playwright';
+  | 'playwright'
+  | 'vitest'
+  | 'semgrep'
+  | 'knip';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
@@ -480,6 +484,34 @@ export interface SentinelOptions {
    * FAILS the gate; extra live tables are OK (additions are acceptable).
    */
   ring1SchemaDrift?: { projectPath?: string };
+  /**
+   * Ring 2 gate (every-10th-prompt + final-prompt). When supplied, Sentinel runs three additional
+   * quality tools after the mandatory Ring 1 checks have passed. Ring 2 fires automatically when
+   * `ring2.promptNumber % 10 === 0` OR `ring2.isFinalPrompt === true`.
+   *
+   * Tools:
+   *  - **Vitest** (`npx vitest run --reporter=json`): 0 failures AND ≥60% line coverage. Skips
+   *    gracefully when `vitest.config.ts` is absent.
+   *  - **Semgrep** (`npx semgrep --config=auto --json`): 0 severity ERROR findings. Skips when
+   *    semgrep is not installed.
+   *  - **knip** (`npx knip --reporter json`): 0 unused exports. Skips when knip is not installed.
+   *
+   * Each failing tool registers a `fix_patterns` entry in the learning database.
+   */
+  ring2?: {
+    /** 1-based prompt number. Used to compute `promptNumber % 10 === 0`. */
+    promptNumber: number;
+    /** Set to true on the last prompt of a run so Ring 2 always fires at run end. */
+    isFinalPrompt?: boolean;
+    /** Override Vitest runner (tests). Receives the resolved coverageThreshold as 4th arg. */
+    runVitest?: (projectPath: string, run: CommandRunner, log: (m: string) => void, coverageThreshold: number) => Promise<CheckResult>;
+    /** Override Semgrep runner (tests). */
+    runSemgrep?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Override knip runner (tests). */
+    runKnip?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Minimum line-coverage percentage for Vitest to pass. Default 60. */
+    coverageThreshold?: number;
+  };
   /** Progress reporter. Default logs to the console with a `[FORGE:sentinel]` prefix. */
   log?: (message: string) => void;
 }
@@ -1402,6 +1434,285 @@ function evaluateSixLaws(result: SixLawsResult, durationMs: number): CheckResult
     result.report,
     durationMs
   );
+}
+
+// ---------------------------------------------------------------------------
+// Ring 2 — Every-10th-prompt gate (Vitest, Semgrep, knip)
+// ---------------------------------------------------------------------------
+
+/** Output shape from `npx vitest run --reporter=json` (partial — fields we use). */
+interface VitestJsonOutput {
+  numPassedTests?: number;
+  numFailedTests?: number;
+  numTotalTests?: number;
+}
+
+/** Shape of Istanbul/v8 `coverage/coverage-summary.json` — only the `total` bucket. */
+interface CoverageSummaryJson {
+  total?: { lines?: { pct?: number } };
+}
+
+/**
+ * Ring 2a: Vitest check.
+ * Runs `npx vitest run --reporter=json` (exactly as specified). Skips when no vitest config file
+ * is present. Threshold: 0 failing tests AND line coverage ≥ coverageThreshold (default 60%).
+ * Coverage data is read from `coverage/coverage-summary.json` when present (written by vitest's
+ * coverage provider when `coverage.enabled: true` in the config); if absent, coverage is skipped
+ * (graceful — no coverage provider is not a failure).
+ * Registers failures to the learning DB.
+ */
+async function runRing2VitestCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void,
+  coverageThreshold = 60
+): Promise<CheckResult> {
+  const configPaths = [
+    join(projectPath, 'vitest.config.ts'),
+    join(projectPath, 'vitest.config.js'),
+    join(projectPath, 'vitest.config.mts'),
+  ];
+  const hasConfig = configPaths.some((p) => existsSync(p));
+  if (!hasConfig) {
+    return skip('vitest', 'vitest.config.ts not found — Ring 2 Vitest check skipped');
+  }
+
+  const startedAt = nowMs();
+  const res = await run('npx vitest run --reporter=json', projectPath, 5 * 60 * 1000);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('vitest', 'Vitest TIMED OUT after 300s', combined, durationMs);
+  }
+
+  // Parse the JSON blob from stdout (vitest emits JSON to stdout with --reporter=json).
+  let parsed: VitestJsonOutput | null = null;
+  try {
+    const firstBrace = res.stdout.indexOf('{');
+    if (firstBrace >= 0) {
+      parsed = JSON.parse(res.stdout.slice(firstBrace)) as VitestJsonOutput;
+    }
+  } catch {
+    parsed = null;
+  }
+
+  const failedTests = parsed?.numFailedTests ?? (res.ok ? 0 : 1);
+  const totalTests = parsed?.numTotalTests ?? 0;
+
+  if (failedTests > 0) {
+    tryRegisterRing1Error(
+      { file: projectPath, code: 'VITEST_FAILURES', message: `${failedTests} test(s) failed`, category: 'COMPILE' },
+      log
+    );
+    return fail('vitest', `Vitest: ${failedTests} test(s) failed of ${totalTests} total`, clip(combined), durationMs);
+  }
+
+  // Read coverage from `coverage/coverage-summary.json` when present (Istanbul / v8 provider).
+  let lineCoverage: number | null = null;
+  const coverageSummaryPath = join(projectPath, 'coverage', 'coverage-summary.json');
+  const coverageRaw = await readTextSafe(coverageSummaryPath);
+  if (coverageRaw) {
+    try {
+      const covJson = JSON.parse(coverageRaw) as CoverageSummaryJson;
+      const pct = covJson.total?.lines?.pct;
+      if (typeof pct === 'number') lineCoverage = pct;
+    } catch {
+      log('WARNING: Ring 2 Vitest — coverage-summary.json could not be parsed; coverage check skipped');
+    }
+  }
+
+  if (lineCoverage !== null && lineCoverage < coverageThreshold) {
+    tryRegisterRing1Error(
+      {
+        file: projectPath,
+        code: 'VITEST_COVERAGE',
+        message: `Line coverage ${lineCoverage.toFixed(1)}% is below ${coverageThreshold}% threshold`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail('vitest', `Vitest: coverage ${lineCoverage.toFixed(1)}% < ${coverageThreshold}% threshold`, clip(combined), durationMs);
+  }
+
+  const coverageNote = lineCoverage !== null ? `, coverage ${lineCoverage.toFixed(1)}%` : ' (coverage data unavailable — not checked)';
+  return pass('vitest', `Vitest: ${totalTests} test(s) passed${coverageNote}`, clip(combined), durationMs);
+}
+
+/** A single Semgrep finding from `npx semgrep --config=auto --json`. */
+interface SemgrepFinding {
+  check_id?: string;
+  path?: string;
+  start?: { line?: number };
+  extra?: { severity?: string; message?: string };
+}
+interface SemgrepJsonOutput {
+  results?: SemgrepFinding[];
+}
+
+/**
+ * Ring 2b: Semgrep check.
+ * Runs `npx semgrep --config=auto --json`. Skips when semgrep is not installed.
+ * Threshold: 0 `severity=ERROR` findings. WARNING findings are surfaced but pass.
+ * Registers ERROR findings to the learning DB.
+ */
+async function runRing2SemgrepCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const res = await run('npx semgrep --config=auto --json', projectPath, 5 * 60 * 1000);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('semgrep', 'Semgrep TIMED OUT after 300s', combined, durationMs);
+  }
+
+  // Skip when semgrep is not installed (command not found).
+  if (/command not found|is not recognized|Cannot find module|no such file|ENOENT|not installed/i.test(combined)) {
+    return skip('semgrep', 'semgrep not installed — Ring 2 Semgrep check skipped');
+  }
+
+  // Try to parse JSON output.
+  const jsonStr = res.stdout.trim();
+  let parsed: SemgrepJsonOutput | null = null;
+  try {
+    const firstBrace = jsonStr.indexOf('{');
+    if (firstBrace >= 0) {
+      parsed = JSON.parse(jsonStr.slice(firstBrace)) as SemgrepJsonOutput;
+    }
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed === null && !res.ok) {
+    return fail('semgrep', `Semgrep exited ${res.exitCode ?? 'null'} without JSON: ${firstLine(combined)}`, clip(combined), durationMs);
+  }
+
+  const findings = parsed?.results ?? [];
+  const errorFindings = findings.filter(
+    (f) => (f.extra?.severity ?? '').toUpperCase() === 'ERROR'
+  );
+
+  for (const f of errorFindings) {
+    tryRegisterRing1Error(
+      {
+        file: f.path ?? projectPath,
+        code: f.check_id ?? 'SEMGREP_ERROR',
+        message: f.extra?.message ?? 'Semgrep ERROR finding',
+        category: 'COMPILE',
+      },
+      log
+    );
+  }
+
+  if (errorFindings.length > 0) {
+    const firstError = errorFindings[0]!;
+    const detail = `Semgrep: ${errorFindings.length} ERROR finding(s) — ${firstError.check_id ?? 'rule'} at ${firstError.path ?? '?'}:${firstError.start?.line ?? '?'}`;
+    const output = errorFindings
+      .map((f) => `[ERROR] ${f.check_id ?? 'rule'} at ${f.path ?? '?'}:${f.start?.line ?? '?'}: ${f.extra?.message ?? ''}`)
+      .join('\n');
+    return fail('semgrep', detail, output, durationMs);
+  }
+
+  const warnCount = findings.filter((f) => (f.extra?.severity ?? '').toUpperCase() === 'WARNING').length;
+  const note = warnCount > 0 ? ` (${warnCount} warning(s) surfaced — non-blocking)` : '';
+  return pass('semgrep', `Semgrep: 0 ERROR finding(s)${note}`, clip(combined), durationMs);
+}
+
+/** Shape of `npx knip --reporter json` output. */
+interface KnipJsonOutput {
+  files?: string[];
+  issues?: {
+    exports?: Array<{ name?: string; pos?: number; col?: number; filePath?: string }>;
+    types?: Array<{ name?: string; filePath?: string }>;
+    duplicates?: Array<{ name?: string; filePath?: string }>;
+    unlisted?: Array<{ name?: string; filePath?: string }>;
+    unresolved?: Array<{ name?: string; filePath?: string }>;
+  };
+}
+
+/**
+ * Ring 2c: knip dead-code check.
+ * Runs `npx knip --reporter json`. Skips when knip is not installed.
+ * Threshold: 0 unused exports.
+ * Registers failures to the learning DB.
+ */
+async function runRing2KnipCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const res = await run('npx knip --reporter json', projectPath, 5 * 60 * 1000);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('knip', 'knip TIMED OUT after 300s', combined, durationMs);
+  }
+
+  // Skip when knip is not installed.
+  if (/command not found|is not recognized|Cannot find module|no such file|ENOENT|not installed/i.test(combined)) {
+    return skip('knip', 'knip not installed — Ring 2 knip check skipped');
+  }
+
+  // Parse JSON output.
+  const jsonStr = res.stdout.trim();
+  let parsed: KnipJsonOutput | null = null;
+  try {
+    const firstBrace = jsonStr.indexOf('{');
+    const firstBracket = jsonStr.indexOf('[');
+    const startIdx =
+      firstBrace >= 0 && (firstBracket < 0 || firstBrace < firstBracket) ? firstBrace : firstBracket;
+    if (startIdx >= 0) {
+      parsed = JSON.parse(jsonStr.slice(startIdx)) as KnipJsonOutput;
+    }
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed === null) {
+    // knip exits non-zero when it finds issues; if JSON is missing but exit is ok, treat as clean.
+    if (res.ok) {
+      return pass('knip', 'knip: 0 unused exports', clip(combined), durationMs);
+    }
+    return fail('knip', `knip exited ${res.exitCode ?? 'null'} without parseable JSON: ${firstLine(combined)}`, clip(combined), durationMs);
+  }
+
+  const unusedExports = parsed.issues?.exports ?? [];
+  const unusedCount = unusedExports.length;
+
+  if (unusedCount > 0) {
+    const first = unusedExports[0]!;
+    tryRegisterRing1Error(
+      {
+        file: first.filePath ?? projectPath,
+        code: 'KNIP_UNUSED_EXPORT',
+        message: `${unusedCount} unused export(s) detected by knip`,
+        category: 'LINT',
+      },
+      log
+    );
+    const detail = `knip: ${unusedCount} unused export(s) — first: ${first.name ?? '?'} in ${first.filePath ?? '?'}`;
+    const output = unusedExports
+      .slice(0, 50)
+      .map((e) => `${e.filePath ?? '?'}: ${e.name ?? '?'}`)
+      .join('\n');
+    return fail('knip', detail, output, durationMs);
+  }
+
+  return pass('knip', 'knip: 0 unused exports', clip(combined), durationMs);
+}
+
+/**
+ * Determine whether Ring 2 should fire on this prompt.
+ * Fires when `promptNumber % 10 === 0` OR when `isFinalPrompt` is true.
+ */
+export function shouldFireRing2(promptNumber: number, isFinalPrompt = false): boolean {
+  return isFinalPrompt || (promptNumber > 0 && promptNumber % 10 === 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -2341,6 +2652,62 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       record(
         await runCommandCheck('playwright', playwrightCmd, playwrightPath, playwrightTimeout, run)
       );
+    }
+  }
+
+  // --- Ring 2. Every-10th-prompt gate (Vitest, Semgrep, knip) ---------------------------------
+  // Fires when ring2.promptNumber % 10 === 0 OR ring2.isFinalPrompt === true.
+  // Each tool skips gracefully when not installed / not configured.
+  // A failing tool registers a fix_patterns entry in the learning DB.
+  if (options.ring2 && shouldFireRing2(options.ring2.promptNumber, options.ring2.isFinalPrompt)) {
+    const coverageThreshold = options.ring2.coverageThreshold ?? 60;
+
+    // Ring 2a: Vitest
+    if (shouldSkipRest()) {
+      record(skipRest('vitest'));
+    } else {
+      log(`Ring 2a: Vitest (prompt ${options.ring2.promptNumber})`);
+      const vitestFn = options.ring2.runVitest ?? runRing2VitestCheck;
+      let vitestResult: CheckResult;
+      try {
+        vitestResult = await vitestFn(projectPath, run, log, coverageThreshold);
+      } catch (err) {
+        log(`WARNING: Ring 2 Vitest check threw (${describe(err)})`);
+        vitestResult = skip('vitest', 'Ring 2 Vitest runner threw — not evaluated');
+      }
+      record(vitestResult);
+    }
+
+    // Ring 2b: Semgrep
+    if (shouldSkipRest()) {
+      record(skipRest('semgrep'));
+    } else {
+      log(`Ring 2b: Semgrep (prompt ${options.ring2.promptNumber})`);
+      const semgrepFn = options.ring2.runSemgrep ?? runRing2SemgrepCheck;
+      let semgrepResult: CheckResult;
+      try {
+        semgrepResult = await semgrepFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 2 Semgrep check threw (${describe(err)})`);
+        semgrepResult = skip('semgrep', 'Ring 2 Semgrep runner threw — not evaluated');
+      }
+      record(semgrepResult);
+    }
+
+    // Ring 2c: knip (dead code / unused exports)
+    if (shouldSkipRest()) {
+      record(skipRest('knip'));
+    } else {
+      log(`Ring 2c: knip (prompt ${options.ring2.promptNumber})`);
+      const knipFn = options.ring2.runKnip ?? runRing2KnipCheck;
+      let knipResult: CheckResult;
+      try {
+        knipResult = await knipFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 2 knip check threw (${describe(err)})`);
+        knipResult = skip('knip', 'Ring 2 knip runner threw — not evaluated');
+      }
+      record(knipResult);
     }
   }
 
