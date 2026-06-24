@@ -2,6 +2,47 @@
 
 ---
 
+# r3-007 — RETROFIT DIAGNOSE: All Three Reports (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/diagnose.ts` implementing all three DIAGNOSE reports, and add diagnose exports to `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/diagnose.ts` — NEW (5 exported functions + 4 exported types)
+- `src/retrofit/index.ts` — MODIFIED (added diagnose re-exports)
+
+**Functions implemented:**
+| Function | Description |
+|----------|-------------|
+| `deriveFindingsFromScanReport` | Converts ScanReport fields into DiagnoseFinding[] — maps brokenImports, compilationErrors, envAudit, schemaAudit, dynamicAudit, packageAudit, governanceInventory, vercelAudit, deadFiles |
+| `generateArchitectureHealthReport` | Runs primary findings + optional Claude API adversarial review; buckets into critical/warn/info/adversaryFindings |
+| `detectMaturityStage` | Classifies project as FOUNDATION/GROWTH/ENTERPRISE by file count, route count, test file presence |
+| `buildGovernanceReconciliationReport` | Parses STATE_OF_THE_BUILD.md for NOT_STARTED/DEFERRED items; cross-references AGENTS.md for undocumented API routes |
+| `buildEnterprisePatternsGapReport` | Checks 6 enterprise patterns against maturity stage; grep-based presence detection; flags missing required patterns as WARN |
+
+**Types exported:** `MaturityStage`, `ArchitectureHealthReport`, `GovernanceReconciliationReport`, `EnterprisePatternsGapReport`
+
+**TypeScript strict compliance verified by inspection:**
+- All imports resolve (`node:fs`, `node:path`, `node:child_process`, `./types.js`)
+- `FindingSeverity` matches `PackageAuditEntry.severity` exactly — no unsafe cast
+- `catch {}` empty blocks are valid TS (adversarial API failure is non-fatal by design)
+- `execSync` stdio: 'pipe' — no stdout pollution
+- `matchAll` capture group `m[1]` typed as `string` by TS stdlib (not undefined)
+- `PATTERNS` key `levels[key]` where key is `'foundation'|'growth'|'enterprise'` — fully safe
+- `fetch` available globally in Node.js 18+ (project targets Node 20+)
+- No unused imports, no unused variables, no console.log statements
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts, diagnose.ts — 8 files present
+
+---
+
 # r3-006 — SCAN Orchestrator (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

@@ -6,4 +6,6 @@ export { buildRouteInventory, auditEnvVars, extractDatabaseSchema, analyzeGitHis
 export { auditPackages, inventoryGovernanceDocs, checkTypeScriptCompilation, runExistingTests, testDynamicRoutes, analyzeVercelDeployment } from './scan-ops-9-14.js';
 export { runScan } from './scan.js';
 export type { ScanOptions } from './scan.js';
+export { generateArchitectureHealthReport, deriveFindingsFromScanReport, detectMaturityStage, buildGovernanceReconciliationReport, buildEnterprisePatternsGapReport } from './diagnose.js';
+export type { ArchitectureHealthReport, GovernanceReconciliationReport, EnterprisePatternsGapReport, MaturityStage } from './diagnose.js';
 export const RETROFIT_VERSION = '2.0.0';

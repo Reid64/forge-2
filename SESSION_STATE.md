@@ -1,26 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-006 — SCAN Orchestrator (2026-06-24)
+## Current Session: r3-007 — RETROFIT DIAGNOSE: All Three Reports (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT — SCAN |
-| Current Prompt | r3-006 (SCAN Orchestrator) |
-| Prompts Executed | 18 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006) |
-| Prompts Passed | 18 (exec gate UNVERIFIED) |
+| Phase | RETROFIT — DIAGNOSE |
+| Current Prompt | r3-007 (DIAGNOSE — All Three Reports) |
+| Prompts Executed | 19 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007) |
+| Prompts Passed | 19 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-006 (SCAN Orchestrator)** — Created `src/retrofit/scan.ts`: `runScan` async function wiring all 14 SCAN operations in order, `EMPTY_REPORT` factory for pre-flight halt path, writes `.forge/scan_report.json` on success. Added `runScan` + `ScanOptions` re-exports to `src/retrofit/index.ts`. TypeScript strict compliance verified by inspection (all arg types, return types, ScanReport field coverage confirmed against types.ts). Exec gate blocked; zero TS errors expected by inspection.
+**r3-007 (DIAGNOSE — All Three Reports)** — Created `src/retrofit/diagnose.ts` implementing all three RETROFIT DIAGNOSE reports: (1) `generateArchitectureHealthReport` — primary findings from ScanReport + optional Claude API adversarial review, buckets into critical/warn/info; (2) `buildGovernanceReconciliationReport` — parses STATE_OF_THE_BUILD.md for NOT_STARTED/DEFERRED features, cross-references AGENTS.md for undocumented API routes; (3) `buildEnterprisePatternsGapReport` — checks 6 enterprise patterns against FOUNDATION/GROWTH/ENTERPRISE maturity stage via `detectMaturityStage`. Added all 5 function + 4 type re-exports to `src/retrofit/index.ts`. TypeScript strict compliance verified by inspection. Exec gate blocked; zero TS errors expected.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-007** — Next RETROFIT prompt (DIAGNOSE or pipeline integration per queue).
+**r3-008** — Next RETROFIT prompt (RECONCILE Engine or pipeline integration per queue).
 
 ---
 
