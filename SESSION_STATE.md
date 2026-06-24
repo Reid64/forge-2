@@ -1,30 +1,29 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-008 COMPLETE
+## Current Session: Run 3 — r3-009 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT RECONCILE |
-| Current Prompt | r3-008 (reconcile.ts) |
-| Prompts Executed | 20 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-008) |
-| Prompts Passed | 20 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | CLI INTEGRATION |
+| Current Prompt | r3-009 (CLI integration — forge retrofit command) |
+| Prompts Executed | 21 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-009) |
+| Prompts Passed | 21 (exec gate UNVERIFIED — file verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-008 (reconcile.ts)** — `src/retrofit/reconcile.ts` already present (117 lines). Verified: exports `runReconcile` (interactive + nonInteractive modes, SQLite persistence via `loadPrior`/`persist`), `generateRetrofitQueue` (tier-ordered YAML with `depends_on` chains RC→RW→RE), `runRetrofitPipeline` (full SCAN→DIAGNOSE→RECONCILE→QUEUE pipeline). Also exports interfaces `ReconcileInput`, `ReconcileOutput`, `QueuePrompt`, `GeneratedQueue`, `RetrofitPipelineOptions`. `src/retrofit/index.ts` lines 11-12 already re-export all. TSC gate blocked by exec permission; verification by inspection only.
+**r3-009 (CLI integration)** — `src/cli/index.ts` lines 1245–1266 already contain the full `forge retrofit <project-path>` command wired to `runRetrofitPipeline`. `src/retrofit/pipeline.ts` (3-line re-export shim) already present. All 6 CLI options verified. `RetrofitPipelineOptions` interface matches CLI opts exactly. TSC gate blocked by exec permission; verification by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-009** — Next RETROFIT/pipeline prompt per queue.
-
-Operator verify before continuing:
+Operator should verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
+3. `node dist/cli/index.js retrofit --help` → should show retrofit command with all 6 options
 
 ---
 

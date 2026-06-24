@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-008 COMPLETE
-**Total Prompts Executed:** 19 this session (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008)
+**Current Run:** Run 3 — r3-009 COMPLETE
+**Total Prompts Executed:** 20 this session (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008 + r3-009)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
 ---
@@ -89,6 +89,25 @@ Note: `pnpm tsc --noEmit` and `pnpm build` cannot be re-run (exec gate blocked).
 | Sentinel Ring 3 (Trivy/Gitleaks/Lighthouse) | COMPLETE | r3-012 |
 | CLI: forge sentinel command | COMPLETE | r3-013 |
 | CLI: forge learn command + all subcommands | COMPLETE | r3-014 |
+
+---
+
+# r3-009 — CLI INTEGRATION COMPLETE (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — verification by inspection)
+
+**Task:** Add `forge retrofit <project-path>` command to `src/cli/index.ts`. Create `src/retrofit/pipeline.ts` re-export shim if needed.
+
+**Audit findings (pre-change):**
+- `src/cli/index.ts` lines 1245–1266 already contain the full retrofit command registration wired to `runRetrofitPipeline` from `../retrofit/pipeline.js`.
+- `src/retrofit/pipeline.ts` (3 lines) already exists as a re-export shim: `export { runRetrofitPipeline } from './reconcile.js'` and `export type { RetrofitPipelineOptions } from './reconcile.js'`.
+- All 6 CLI options present: `--scope`, `--skip-dynamic`, `--resume`, `--non-interactive`, `--queue-output`, `--api-key`.
+- `RetrofitPipelineOptions` interface in `reconcile.ts` line 90 matches all options exactly.
+- TypeScript strict compliance verified: opts accessed via bracket notation, proper casts with `as` and `?? 'C'` default.
+
+**Changes made:** None required — both files already in correct state from prior run completion.
+
+**Gates:** `pnpm tsc --noEmit` unverifiable (exec gate blocked). Zero TypeScript errors expected — all imports, types, and exports verified against source.
 
 ---
 
