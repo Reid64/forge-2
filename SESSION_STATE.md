@@ -2289,3 +2289,16 @@ green.
 
 ### Next Action
 r3-003: SCAN Ops 1-4 (scan-ops-1-4.ts: directory tree, dependency graph, broken imports, dead files)
+
+---
+
+## Hotfix Session — 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Session Type | Ad-hoc corruption fix |
+| Files Modified | src/learning/fingerprint.ts |
+| Change | Escaped `*/` as `*\/` in JSDoc examples (lines 20-23) to prevent premature block-comment termination causing TS1127 + TS1161 |
+| Gate Status | tsc UNVERIFIED (exec blocked); fix confirmed correct by inspection |
+| Blocker Cleared | Yes — fingerprint.ts is no longer corrupted |
+| Next Action | r3-003 (or current FORGE orchestrator prompt) can proceed

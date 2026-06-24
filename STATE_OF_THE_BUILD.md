@@ -3338,3 +3338,45 @@ verifies s1-p04 (CRUD modules) and completes s1-p05 (integration test).
 - No packages installed, no existing files modified
 
 ### Run 2 Progress: 1/13 prompts complete (queued prompt index r2-001 equivalent)
+
+---
+
+## Hotfix — 2026-06-24: fingerprint.ts Corruption Resolved
+
+**Prompt:** ad-hoc corruption fix (between r3-001 and r3-002 in new numbering)
+**Outcome:** FIXED
+
+### Problem
+`src/learning/fingerprint.ts` had two TypeScript errors:
+- Line 21: TS1127 Invalid character (corrupted `->` arrow and/or `*/` inside JSDoc)
+- Line 24: TS1161 Unterminated regular expression literal (JSDoc comment terminated early by `*/` in path examples)
+
+### Root Cause
+The JSDoc comment block (lines 15–24) contained example paths with `*/` sequences
+(e.g. `app/api/*/route.ts`) that terminated the block comment prematurely. This caused
+TypeScript to parse subsequent lines as code, producing TS1127 and TS1161.
+
+### Fix Applied
+Escaped `*/` as `*\/` in all four JSDoc example lines:
+- `app/api/*/route.ts` → `app/api/*\/route.ts`
+- `components/*/StormMap.tsx` → `components/*\/StormMap.tsx`
+- `app/api/*/[id]/route.ts` → `app/api/*\/[id]/route.ts`
+
+No logic, variable names, or structure changed. Only the JSDoc comment text was corrected.
+
+### Gate Status
+- `pnpm tsc --noEmit`: UNVERIFIED — exec gate blocked by sandbox policy this session.
+  Reviewed by inspection: the fix removes the premature `*/` terminator that caused both errors.
+  No other changes to the file.
+
+### Codebase Audit (2026-06-24)
+| Module | Files Present | Status |
+|--------|--------------|--------|
+| src/learning/ | 10 files (database.ts, queries.ts, hooks-enhanced.ts, precompact.ts, session.ts, integration.ts, loops.ts, sync.ts, types.ts, fingerprint.ts) | Run 1 COMPLETE |
+| src/retrofit/ | 10 files (types.ts, preflight.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts, diagnose.ts, reconcile.ts, index.ts, pipeline.ts) | Run 2 COMPLETE |
+| src/engine/ | 9+ files | Run 3 IN PROGRESS |
+| src/phases/ | 6+ files | Run 3 IN PROGRESS |
+| src/analysis/ | 6+ files | Run 3 IN PROGRESS |
+| src/tools/ | 15+ files | Run 3 IN PROGRESS |
+| src/memory/ | 12+ files | Run 3 IN PROGRESS |
+| src/cli/ | 4+ files | Run 3 IN PROGRESS |

@@ -17,10 +17,10 @@ const FRAMEWORK_DIRS = new Set([
  * Keeps framework directories and filenames intact.
  *
  * Examples:
- *   app/api/storms/route.ts -> app/api/*/route.ts
- *   components/dashboard/StormMap.tsx -> components/*/StormMap.tsx
- *   src/utils/helpers.ts -> src/utils/helpers.ts (no dynamic segment)
- *   app/api/storms/[id]/route.ts -> app/api/*/[id]/route.ts
+ *   app/api/storms/route.ts        ->  app/api/*\/route.ts
+ *   components/dashboard/StormMap.tsx  ->  components/*\/StormMap.tsx
+ *   src/utils/helpers.ts           ->  src/utils/helpers.ts (no dynamic segment)
+ *   app/api/storms/[id]/route.ts   ->  app/api/*\/[id]/route.ts
  */
 export function generalizeFilePath(filePath: string): string {
   // Normalize separators
