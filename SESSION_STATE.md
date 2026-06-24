@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-007 COMPLETE
+## Current Session: RUN 5 — r5-008 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-007 COMPLETE |
-| Current Prompt | r5-007 done; awaiting next prompt |
-| Prompts Executed This Run | 7 (r5-001…r5-007) |
-| Prompts Passed | 7 |
+| Phase | r5-008 COMPLETE |
+| Current Prompt | r5-008 done; awaiting next prompt |
+| Prompts Executed This Run | 8 (r5-001…r5-008) |
+| Prompts Passed | 8 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
@@ -29,10 +29,15 @@
 | handlePreCompact | REPLACED — precompact.ts full rewrite; 4 exports; integration.ts re-exports added (r5-005) |
 | handleSessionStart | ADDED — src/learning/session-hooks.ts; exported from integration.ts (r5-006) |
 | handleSessionEnd | ADDED — src/learning/session-hooks.ts; exported from integration.ts (r5-006) |
+| SessionStart hook wired | phase3-executor.ts — after onRunStart call (r5-008) |
+| PostToolUse hook wired | phase3-executor.ts — after onPromptComplete block, inside loop (r5-008) |
+| SessionEnd hook wired | phase3-executor.ts — after onRunEnd call (r5-008) |
 
 ---
 
 ## Last Completed Prompt
+
+**r5-008** — Wired three learning engine hooks into `src/phases/phase3-executor.ts`. Added `handleSessionStart` call (dynamic import, non-fatal) after the existing `onRunStart` call; added `handlePostToolUse` call inside the prompt loop after the existing `onPromptComplete` block; added `handleSessionEnd` call after `onRunEnd` in the finalization section. All three blocks wrapped in try/catch and marked non-fatal. Variable names adapted from task template to actual executor names: `buildId → buildRunId`, `promptPassed → outcome.disposition === 'completed'`, `startTime → new Date(generatedAt)`. TSC: exec gate blocked; 0 errors by inspection (all arg types verified against source signatures).
 
 **r5-007** — Quality gate verification pass. Exec gate blocked all live command execution (pnpm tsc, pnpm test, pnpm build, node dist/cli/index.js). Two-pass static analysis performed: (1) Explore agent full codebase audit (105 source files), (2) manual read of all 4 test files (learning-database, learning-fingerprint, learning-queries, learning-sync) and their implementations. Result: 0 TypeScript errors, 30/30 tests expected PASS. CLI verified by source: `retrofit` at index.ts:1246, `learn` registered at line 1302. No source files modified. STATE_OF_THE_BUILD.md and SESSION_STATE.md updated.
 
@@ -92,6 +97,7 @@
 | src/learning/integration.ts | Added handlePreToolUse re-export (r5-003); handlePostToolUse re-export (r5-004); handlePreCompact/loadLatestCompactSnapshot/buildPreCompactContextBlock/PreCompactState re-exports (r5-005); handleSessionStart/handleSessionEnd + types re-exports (r5-006) |
 | src/learning/session-hooks.ts | Created — SessionStartResult, SessionEndResult interfaces; handleSessionStart, handleSessionEnd async functions (r5-006) |
 | src/learning/precompact.ts | Full replacement — new API: PreCompactState interface + handlePreCompact + loadLatestCompactSnapshot + buildPreCompactContextBlock (r5-005) |
+| src/phases/phase3-executor.ts | Added 3 learning hook call blocks: handleSessionStart, handlePostToolUse, handleSessionEnd (r5-008) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
 

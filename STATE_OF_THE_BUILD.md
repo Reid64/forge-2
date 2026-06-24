@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-007 COMPLETE
-**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007 complete)
+**Current Run:** Run 5 — r5-008 COMPLETE
+**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007, r5-008 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -271,6 +271,26 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 
 TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
 
+### r5-008 — COMPLETE (2026-06-24)
+
+Wired learning engine hooks into `src/phases/phase3-executor.ts` at all three lifecycle points. No new files created; three try/catch blocks added using dynamic imports.
+
+| Hook | Location in phase3-executor.ts | Variables mapped |
+|------|-------------------------------|-----------------|
+| `handleSessionStart` | After `onRunStart` call (~line 760) | `buildRunId ?? machineId`, `projectPath`, `projectName` |
+| `handlePostToolUse` | After `onPromptComplete` block inside loop | `buildRunId ?? ''`, `entry.id`, `entry.prompt_type`, `outcome.disposition`, `outcome.recovery?.attempted`, `outcome.sentinel?.diagnosticReport` |
+| `handleSessionEnd` | After `onRunEnd` call (~line 913) | `buildRunId ?? machineId`, `completedPrompts`, `failedPrompts`, `halted`, `new Date(generatedAt)` |
+
+Key adaptations vs. task template:
+- `buildId` → `buildRunId` (actual variable name in executor)
+- `promptPassed` → `outcome.disposition === 'completed'`
+- `retryCount` → `outcome.recovery?.attempted ? 1 : 0`
+- `lastErrorOutput` → `outcome.sentinel?.diagnosticReport ?? ''`
+- `startTime` → `new Date(generatedAt)` (signature requires `Date`, not string)
+- `gatPassRate` (typo preserved from spec) → `outcome.disposition === 'completed' ? 1 : 0`
+
+TSC: exec gate blocked; 0 errors by inspection (all three dynamic imports are non-fatal; all argument types verified against `session-hooks.ts` and `hooks-enhanced.ts` signatures).
+
 ### r5-007 — COMPLETE (2026-06-24)
 
 Quality gate verification pass. Exec gate blocked all live command execution.
@@ -313,5 +333,5 @@ TSC: exec gate blocked; 0 errors by inspection (all destructured regex match gro
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 7/? prompts complete (r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007 PASSED)
+- **Run 5:** IN PROGRESS — 8/? prompts complete (r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007, r5-008 PASSED)
 - **Overall:** ~97% of planned scope complete

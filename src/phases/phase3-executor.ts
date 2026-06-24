@@ -753,6 +753,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // Learning engine — non-critical, failures are caught internally
   await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
 
+  // Learning Engine: SessionStart hook
+  try {
+    const { handleSessionStart } = await import('../learning/session-hooks.js');
+    const sessionStartResult = await handleSessionStart(buildRunId ?? machineId, projectPath, projectName);
+    if (sessionStartResult.contextBlock) console.log(sessionStartResult.contextBlock);
+  } catch { /* non-fatal -- learning engine is always optional */ }
+
   // 3. Walk the prompts in dependency order.
   const ctx: LoopContext = {
     projectPath,
@@ -845,6 +852,25 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       techStackTags: ['typescript'],
       templateHash: outcome.promptHash,
     });
+
+    // Learning Engine: PostToolUse hook
+    try {
+      const { handlePostToolUse } = await import('../learning/hooks-enhanced.js');
+      await handlePostToolUse({
+        buildId: buildRunId ?? '',
+        promptId: entry.id,
+        taskType: (entry.prompt_type ?? 'SCAFFOLD') as string,
+        techStackTags: ['typescript', 'nextjs'],
+        firstPassSuccess: outcome.disposition === 'completed',
+        retryCount: outcome.recovery?.attempted ? 1 : 0,
+        tokensConsumed: 0,
+        gatPassRate: outcome.disposition === 'completed' ? 1 : 0,
+        errorOutput: outcome.sentinel?.diagnosticReport ?? '',
+        filesModified: [],
+        projectName,
+      });
+    } catch { /* non-fatal */ }
+
     if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
 
     // Carry this prompt's Sentinel status into the next prompt (Contract 13).
@@ -897,6 +923,21 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     totalTokens,
     startTime: generatedAt,
   }).catch(() => {});
+
+  // Learning Engine: SessionEnd hook
+  try {
+    const { handleSessionEnd } = await import('../learning/session-hooks.js');
+    await handleSessionEnd({
+      buildId: buildRunId ?? machineId,
+      projectPath,
+      projectName,
+      promptsExecuted: completedPrompts + failedPrompts + skippedPrompts,
+      promptsPassed: completedPrompts,
+      promptsFailed: failedPrompts,
+      endReason: halted ? 'FAILED' : 'COMPLETED',
+      startTime: new Date(generatedAt),
+    });
+  } catch { /* non-fatal */ }
 
   // 5. Dry Run Mode (F11): assemble the simulation report from the per-prompt dry-run pass + the
   //    cost-estimator. Only on a dry run — a real build executed and needs no simulation.
