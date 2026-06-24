@@ -238,3 +238,5 @@ export async function onRunEnd(
 export { detectStaleLock, checkCrashRecovery } from './session-lifecycle.js';
 export { setForgeLock as setForgeLockV2, removeForgeLock as removeForgeLockV2 } from './session-lifecycle.js';
 export type { LockFileContent, CrashRecoveryResult, RunStartResult, RunEndOptions } from './session-lifecycle.js';
+export { generateSessionHandoff } from './handoff-generator.js';
+export type { HandoffOptions } from './handoff-generator.js';
