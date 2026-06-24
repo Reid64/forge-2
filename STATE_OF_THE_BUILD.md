@@ -2,6 +2,32 @@
 
 ---
 
+# r1-004 — FORGE 2.0 Learning Engine: `src/learning/fingerprint.ts` complete implementation, 2026-06-23 (session #59)
+
+## Build Status: r1-004 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/fingerprint.ts`** (REPLACED prior partial stub with FULL implementation) — Complete error fingerprinting algorithm:
+  - `FRAMEWORK_DIRS` — Set of 20 structural directory names that are NOT wildcarded (app, api, components, src, lib, utils, types, hooks, middleware, pages, layouts, styles, public, supabase, migrations, config, scripts, tests, node_modules, .next, dist, build)
+  - `generalizeFilePath(filePath)` — normalizes path separators, keeps framework dirs and filenames intact, keeps dynamic route segments `[id]`/`[slug]`, wildcards entity-specific directory names. Example: `app/api/storms/route.ts` → `app/api/*/route.ts`
+  - `generalizeErrorMessage(message)` — replaces single/double/backtick-quoted strings with `'*'`/`"*"`/`` `*` ``, replaces PascalCase identifiers that are NOT in the `structuralWords` set (Module, Property, Type, Cannot, Error, Warning, Object, Array, String, Number, Boolean, Function, Promise, Argument, Parameter, Return, Import, Export, Default, Undefined, Null, Void, Never, Unknown, Any) with `*`, replaces relative file paths (`./x`, `../x`) with `*`, collapses consecutive `*` into a single `*`
+  - `getErrorFingerprint(error)` — SHA-256 hash of four pipe-separated components: (1) errorCode.toLowerCase().trim(), (2) generalizeFilePath(filePath), (3) generalizeErrorMessage(errorMessage), (4) techStack.sort().join(','); returns first 32 hex characters. Two identical error patterns in different entity-specific files produce the SAME fingerprint; two different error codes/messages produce DIFFERENT fingerprints.
+
+### Design invariants verified by inspection
+- Same error pattern (same errorCode + same structural message + same generalizable path) → same fingerprint regardless of entity name (storms vs alerts)
+- Different error codes → different fingerprints
+- Fingerprint is always exactly 32 lowercase hex characters
+- `FP_VERSION` export removed (prior stub artifact; full implementation has no version constant — signature is stable via the algorithm itself)
+- No imports beyond `node:crypto` (zero external dependencies)
+- All three exports are named exports compatible with the verification script's destructured import
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-004 prompt spec (5 tests: same-pattern same-fingerprint, different-error different-fingerprint, 32-char hex format, path generalization, message generalization) → all PASS.
+3. Proceed to r1-005: implement `src/learning/loops.ts`.
+
+---
+
 # r1-003 — FORGE 2.0 Learning Engine: `src/learning/queries.ts` full implementation, 2026-06-23 (session #58)
 
 ## Build Status: r1-003 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

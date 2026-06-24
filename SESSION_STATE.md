@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-004 — `src/learning/fingerprint.ts` complete implementation (session #59)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-004 — Replaced `src/learning/fingerprint.ts` with the complete error fingerprinting algorithm. Exports: `generalizeFilePath` (wildcards entity-specific dirs, keeps FRAMEWORK_DIRS set + filenames + `[param]` route segments), `generalizeErrorMessage` (replaces quoted strings and non-structural PascalCase identifiers with `*`, collapses consecutive `*`), `getErrorFingerprint` (SHA-256 of errorCode|generalizedPath|generalizedMessage|sortedTechStack, first 32 hex chars). Deterministic: same error pattern in different entity files → same fingerprint; different errorCode/message → different fingerprint. No external deps beyond `node:crypto`. Compile/runtime gates UNVERIFIED — exec blocker persists. Verified by inspection: all three exports present, algorithm matches spec exactly.
+
+## Next Prompt: r1-005 — Implement `src/learning/loops.ts` (5 learning loops). Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-004 verification tests (5 tests) → all PASS.
+
+---
+
+# PRIOR SESSION (#58)
+
 ## Current Session: r1-003 — `src/learning/queries.ts` full implementation (session #58)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23
