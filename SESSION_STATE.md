@@ -1,26 +1,29 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-008 — RETROFIT RECONCILE + QUEUE + PIPELINE (2026-06-24)
+## Current Session: r3-009 — CLI INTEGRATION: 'forge retrofit' command (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT — RECONCILE |
-| Current Prompt | r3-008 (RECONCILE + QUEUE + PIPELINE) |
-| Prompts Executed | 20 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008) |
-| Prompts Passed | 20 (exec gate UNVERIFIED) |
+| Phase | RETROFIT — CLI INTEGRATION |
+| Current Prompt | r3-009 (CLI Integration) |
+| Prompts Executed | 21 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008 + r3-009) |
+| Prompts Passed | 21 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-008 (RECONCILE + QUEUE + PIPELINE)** — Created `src/retrofit/reconcile.ts` implementing the full RECONCILE/QUEUE/PIPELINE module: (1) `runReconcile` — interactive or non-interactive session presenting CRITICAL/WARN/UNBUILT/ENTERPRISE findings via readline, persisting decisions to SQLite; (2) `generateRetrofitQueue` — converts ReconcileOutput into tier-ordered queue.yaml (CRITICAL → WARN → ENTERPRISE) with dependency chains; (3) `runRetrofitPipeline` — full RETROFIT orchestrator wiring SCAN → DIAGNOSE → RECONCILE → QUEUE with ANSI progress display. Added 3 function + 5 type re-exports to `src/retrofit/index.ts`. TypeScript strict compliance verified by inspection. Exec gate blocked; zero TS errors expected.
+**r3-009 (CLI INTEGRATION)** — Added `forge retrofit <project-path>` command to `src/cli/index.ts` with 6 options (--scope, --skip-dynamic, --resume, --non-interactive, --queue-output, --api-key). Created `src/retrofit/pipeline.ts` re-export shim so the CLI can dynamically import from `'../retrofit/pipeline.js'`. Command inserted after the 'config' block and before `registerLearningCommands`. TypeScript types verified by inspection: `opts['scope']` cast to `ScanScope`, boolean coercions safe, dynamic import path resolves via shim. Exec gate blocked; zero TS errors expected.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-009** — Next RETROFIT prompt (CLI integration or handoff per queue).
+Run 3 RETROFIT module complete. Operator can verify with:
+1. `pnpm tsc --noEmit` → expect zero errors
+2. `pnpm build` → expect clean dist/
+3. `node dist/cli/index.js retrofit --help` → expect command with all 6 options listed
 
 ---
 

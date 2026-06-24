@@ -1242,6 +1242,29 @@ async function main(): Promise<void> {
       console.log('\n' + describeConfig(config));
     });
 
+  program
+    .command('retrofit')
+    .description('FORGE RETROFIT: scan, diagnose, reconcile, and queue an existing codebase for autonomous continuation')
+    .argument('<project-path>', 'Absolute path to the project to retrofit')
+    .option('--scope <scope>', 'Analysis scope: A (codebase), B (+database), C (+Vercel)', 'C')
+    .option('--skip-dynamic', 'Skip dynamic route testing (no dev server)', false)
+    .option('--resume', 'Resume from prior SCAN checkpoint', false)
+    .option('--non-interactive', 'Auto-approve all RECONCILE decisions (CI/overnight mode)', false)
+    .option('--queue-output <path>', 'Override queue output directory')
+    .option('--api-key <key>', 'Anthropic API key for adversarial review')
+    .action(async (projectPath: string, opts: Record<string, unknown>) => {
+      const { runRetrofitPipeline } = await import('../retrofit/pipeline.js');
+      await runRetrofitPipeline({
+        projectPath,
+        scope: (opts['scope'] as 'A' | 'B' | 'C') ?? 'C',
+        skipDynamic: Boolean(opts['skipDynamic']),
+        resume: Boolean(opts['resume']),
+        nonInteractive: Boolean(opts['nonInteractive']),
+        queueOutputPath: opts['queueOutput'] as string | undefined,
+        apiKey: opts['apiKey'] as string | undefined,
+      });
+    });
+
   registerLearningCommands(program);
 
   await program.parseAsync(process.argv);

@@ -2,6 +2,45 @@
 
 ---
 
+# r3-009 — CLI INTEGRATION: 'forge retrofit' command (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Add `forge retrofit <project-path>` command to `src/cli/index.ts`. Create `src/retrofit/pipeline.ts` as a re-export shim.
+
+**Files created/modified:**
+- `src/retrofit/pipeline.ts` — NEW (re-exports `runRetrofitPipeline` + `RetrofitPipelineOptions` from `./reconcile.js`)
+- `src/cli/index.ts` — MODIFIED (retrofit command inserted after 'config' block, before `registerLearningCommands`)
+
+**Command registered:**
+```
+forge retrofit <project-path>
+  --scope <scope>        A/B/C (default: C)
+  --skip-dynamic         Skip dynamic route testing
+  --resume               Resume from prior SCAN checkpoint
+  --non-interactive      Auto-approve all RECONCILE decisions
+  --queue-output <path>  Override queue output directory
+  --api-key <key>        Anthropic API key for adversarial review
+```
+
+**TypeScript strict compliance verified by inspection:**
+- `opts['scope']` cast to `'A' | 'B' | 'C'` — matches `ScanScope` exactly
+- `Boolean(opts['skipDynamic'])` etc. — safe boolean coercion for Commander kebab→camel conversion
+- Dynamic import `'../retrofit/pipeline.js'` resolves via the new shim
+- No unused variables, no empty interfaces, no console.log statements
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+| `pnpm build` | UNVERIFIED (exec gated) |
+| `node dist/cli/index.js retrofit --help` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts, diagnose.ts, reconcile.ts, pipeline.ts — 10 files present
+
+---
+
 # r3-008 — RETROFIT RECONCILE + QUEUE + PIPELINE (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)
