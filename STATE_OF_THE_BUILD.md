@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-003 COMPLETE
-**Total Prompts Executed:** 53+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003 complete)
+**Current Run:** Run 5 — r5-004 COMPLETE
+**Total Prompts Executed:** 54+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -114,10 +114,10 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | database.ts | 14,850 bytes | SQLite init, 14 tables, connection management, machine identity |
 | queries.ts | 11,070 bytes | 15 read/write query functions |
 | loops.ts | 12,900 bytes | 5 learning loops incl. updateDecisionWeights, analyzeForEvolutions |
-| hooks-enhanced.ts | ~16,200 bytes | 24 default hooks, execution engine, handlePreToolUse (r5-003) |
+| hooks-enhanced.ts | ~20,000 bytes | 24 default hooks, execution engine, handlePreToolUse (r5-003), handlePostToolUse (r5-004) |
 | sync.ts | 10,368 bytes | Cross-machine sync with BEGIN/COMMIT/ROLLBACK |
 | session.ts | 10,118 bytes | Session orchestration |
-| integration.ts | 9,118 bytes | Executor wiring |
+| integration.ts | 9,118 bytes | Executor wiring; re-exports handlePreToolUse + handlePostToolUse |
 | fingerprint.ts | 4,230 bytes | Error fingerprinting |
 | precompact.ts | 3,363 bytes | PreCompact handler |
 | session-lifecycle.ts | 8,299 bytes | Session lifecycle (212 lines) |
@@ -260,6 +260,17 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 
 TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
 
+### r5-004 — COMPLETE (2026-06-24)
+
+`handlePostToolUse` function added to `src/learning/hooks-enhanced.ts` and re-exported from `src/learning/integration.ts`. The function writes prompt execution scores to `prompt_scores`, upserts TypeScript error fingerprints into `fix_patterns`, and logs modified files to `hook_execution_log` — all non-fatal (wrapped in try/catch). Dropped unused `computeFingerprint` import from spec to satisfy `noUnusedLocals: true`.
+
+| File | Change |
+|------|--------|
+| src/learning/hooks-enhanced.ts | Added exported `handlePostToolUse` function (111 lines) |
+| src/learning/integration.ts | Updated re-export: `handlePreToolUse, handlePostToolUse` from `./hooks-enhanced.js` |
+
+TSC: exec gate blocked; 0 errors by inspection (all destructured regex match groups guarded with `!filePath || !errorCode || !message` before use; `existing` type-cast to `{ id: string; occurrence_count: number } | undefined`; empty `catch {}` valid in ES2022 target).
+
 ---
 
 ## Completion Tracking
@@ -268,5 +279,5 @@ TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noU
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 3/? prompts complete (r5-001, r5-002, r5-003 PASSED)
+- **Run 5:** IN PROGRESS — 4/? prompts complete (r5-001, r5-002, r5-003, r5-004 PASSED)
 - **Overall:** ~97% of planned scope complete

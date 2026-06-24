@@ -547,3 +547,119 @@ export async function handlePreToolUse(
   }
 }
 
+// ---------------------------------------------------------------------------
+// handlePostToolUse — records prompt scores and error fingerprints to DB
+// ---------------------------------------------------------------------------
+
+export async function handlePostToolUse(
+  opts: {
+    buildId: string;
+    promptId: string;
+    taskType: string;
+    techStackTags: string[];
+    firstPassSuccess: boolean;
+    retryCount: number;
+    tokensConsumed: number;
+    gatPassRate: number;
+    errorOutput: string;
+    filesModified: string[];
+    projectName: string;
+    dbPath?: string;
+  }
+): Promise<void> {
+  const resolvedPath = opts.dbPath ?? join(homedir(), '.forge', 'forge_memory.db');
+  if (!existsSync(resolvedPath)) return;
+
+  try {
+    const db = getConnection(resolvedPath);
+    const { randomUUID, createHash } = await import('node:crypto');
+
+    // 1. Record prompt score
+    const templateHash = createHash('sha256')
+      .update(`${opts.taskType}:${opts.promptId}`)
+      .digest('hex');
+
+    db.prepare(`
+      INSERT OR REPLACE INTO prompt_scores
+        (id, prompt_template_hash, task_type, tech_stack_tags, first_pass_success,
+         retry_count, tokens_consumed, gate_pass_rate, drift_score,
+         project_name, build_id, machine_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'unknown', datetime('now'))
+    `).run(
+      randomUUID(),
+      templateHash,
+      opts.taskType,
+      JSON.stringify(opts.techStackTags),
+      opts.firstPassSuccess ? 1 : 0,
+      opts.retryCount,
+      opts.tokensConsumed,
+      opts.gatPassRate,
+      opts.projectName,
+      opts.buildId
+    );
+
+    // 2. Register error fingerprints if failed
+    if (!opts.firstPassSuccess && opts.errorOutput) {
+      // Parse TypeScript errors from output
+      const tscErrors = opts.errorOutput.matchAll(
+        /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/gm
+      );
+
+      for (const m of tscErrors) {
+        const [, filePath, , , errorCode, message] = m;
+        if (!filePath || !errorCode || !message) continue;
+
+        // Generalize file path to pattern
+        const filePattern = (filePath ?? '')
+          .replace(/\\/g, '/')
+          .replace(/src\/[^/]+\//, 'src/*/')
+          .replace(/\d+/g, 'N');
+
+        const fingerprint = createHash('sha256')
+          .update(`${errorCode}:${filePattern}:${(message ?? '').substring(0, 100)}`)
+          .digest('hex')
+          .substring(0, 32);
+
+        // Upsert fix_pattern
+        const existing = db.prepare(
+          'SELECT id, occurrence_count FROM fix_patterns WHERE error_fingerprint = ?'
+        ).get(fingerprint) as { id: string; occurrence_count: number } | undefined;
+
+        if (existing) {
+          db.prepare(
+            "UPDATE fix_patterns SET occurrence_count = occurrence_count + 1, last_seen = datetime('now') WHERE error_fingerprint = ?"
+          ).run(fingerprint);
+        } else {
+          db.prepare(`
+            INSERT OR IGNORE INTO fix_patterns
+              (id, error_fingerprint, error_message, error_category, file_path_pattern,
+               fix_diff, fix_description, fix_files_modified, tech_stack_tags,
+               occurrence_count, success_rate, times_fix_applied, times_fix_succeeded,
+               last_seen, machine_id, created_at)
+            VALUES (?, ?, ?, 'COMPILE', ?, null, null, '[]', ?, 1, 0, 0, 0, datetime('now'), 'unknown', datetime('now'))
+          `).run(
+            randomUUID(),
+            fingerprint,
+            `${errorCode}: ${(message ?? '').substring(0, 200)}`,
+            filePattern,
+            JSON.stringify(opts.techStackTags)
+          );
+        }
+      }
+    }
+
+    // 3. Record files modified to hook_execution_log
+    if (opts.filesModified.length > 0) {
+      db.prepare(`
+        INSERT INTO hook_execution_log
+          (id, hook_name, event, status, duration_ms, output, build_id, machine_id, created_at)
+        VALUES (?, 'files-modified', 'PostToolUse', 'PASS', 0, ?, ?, 'unknown', datetime('now'))
+      `).run(
+        randomUUID(),
+        JSON.stringify(opts.filesModified),
+        opts.buildId
+      );
+    }
+  } catch { /* non-fatal */ }
+}
+
