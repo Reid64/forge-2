@@ -22,7 +22,9 @@
 
 ## Last Completed Prompt
 
-r6-004 — Enrich `handlePreCompact` with DB-sourced state in `src/learning/precompact.ts` (PASSED)
+r6-001 (re-run) — Inject `handlePreToolUse` into `assemblePrompt` in `src/engine/prompt-assembler.ts` (CONFIRMED COMPLETE)
+
+Re-audit confirmed implementation is already in place from prior execution. No code changes needed. Gates blocked (exec gate requires approval). State files updated from live codebase audit.
 
 **What was built:**
 - **`handlePreCompact`** now queries the database at save time: (1) `fix_patterns` WHERE `occurrence_count > 0` ORDER BY `last_seen DESC` LIMIT 20 — formats as `[CATEGORY][xN] message (fingerprint)`; (2) `governance_rules` WHERE `active = 1` ORDER BY `enforcement_count DESC` — formats as `[SCOPE] short_name: rule_text`. DB-sourced values are merged with caller-supplied arrays using `Set` dedup. `'unknown'` machine_id replaced with real `getMachineId(resolvedPath)` call.
@@ -41,7 +43,7 @@ r6-004 — Enrich `handlePreCompact` with DB-sourced state in `src/learning/prec
 
 ## Next Action
 
-Await next prompt from queue (r6-004 complete; next TBD).
+Proceed to r6-005 (r6-001 re-audit complete; r6-002 through r6-004 previously passed).
 
 ---
 

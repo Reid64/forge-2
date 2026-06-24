@@ -1,6 +1,6 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-06-24 (re-audit after r6-001 snapshot restore)
 **Build Status:** IN_PROGRESS
 **Current Run:** RUN-6 (r6-001…r6-004 complete)
 **Total Prompts Executed:** 58+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-004 complete)
@@ -101,6 +101,13 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 
 ---
 
+## Re-Audit Note (r6-001 snapshot restore)
+
+FORGE orchestrator created snapshot "Before r6-001" and re-ran this prompt. On re-audit:
+- `src/engine/prompt-assembler.ts`: `handlePreToolUse` import at line 57 confirmed; call at lines 487-511 confirmed; result prepended to prompt at line 511. Implementation complete — no code changes needed.
+- `src/learning/hooks-enhanced.ts`: `handlePreToolUse` export confirmed at line 452. Queries `fix_patterns` (success_rate>0.7, high occurrence) and `governance_rules` (active=1, GLOBAL scope) from `~/.forge/forge_memory.db`; returns `{ contextInjection, patternsFound, rulesFound }`.
+- Gates: exec blocked — `pnpm tsc --noEmit` and `pnpm build` require manual approval. Code verified type-safe by inspection. No new TypeScript errors introduced.
+
 ## Next Action
 
-Continue Run 6: next prompt TBD (r6-004 complete).
+Continue Run 6: next prompt after r6-004 (r6-005 or next in queue).
