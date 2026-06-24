@@ -26,6 +26,31 @@
 
 ---
 
+# r1-002 — FORGE 2.0 Learning Engine: `src/learning/database.ts` full implementation, 2026-06-23 (session #57)
+
+## Build Status: r1-002 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists this session. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/database.ts`** (REPLACED stub with FULL implementation) — Complete database initialization module:
+  - `getForgeDbPath()` — resolves `~/.forge/forge_memory.db`, creates dir if absent
+  - `getConnection(dbPath?)` — opens (or returns cached) `better-sqlite3` connection with WAL + 5s busy_timeout + foreign_keys ON
+  - `closeConnection(dbPath?)` — closes and evicts from connection cache
+  - `getMachineId(dbPath?)` — derives 16-hex-char machine identity from `sha256(hostname|mac)`, persisted in `forge_meta`; cached in-process
+  - `initializeForgeMemory(dbPath?)` — idempotent: creates all **14 tables** with full column types, CHECK constraints, and DEFAULT values; creates all **26 indexes** (4 on prompt_scores, 4 on fix_patterns incl. UNIQUE, 2 on decision_weights, 2 on governance_rules, 1 on pending_evolutions, 2 on build_outcomes, 2 on skill_library, 1 on reconcile_decisions, 1 on scan_reports, 3 on hook_execution_log, 1 on compact_snapshots, 1 on build_fingerprints, 2 on adversary_findings); stores machine_id in forge_meta after table creation
+
+### Tables created (14)
+`forge_meta`, `prompt_scores`, `fix_patterns`, `decision_weights`, `governance_rules`, `pending_evolutions`, `build_outcomes`, `skill_library`, `reconcile_decisions`, `scan_reports`, `hook_execution_log`, `compact_snapshots`, `build_fingerprints`, `adversary_findings`
+
+### Indexes created (26)
+All `idx_*` indexes matching SCHEMA_REGISTRY.md exactly, plus `idx_fix_patterns_stack`, `idx_fix_patterns_count`, `idx_decision_weights_type`, `idx_decision_weights_error_rate`, `idx_governance_rules_stack`, `idx_pending_evolutions_status`, `idx_build_outcomes_project`, `idx_build_outcomes_created`, `idx_skill_library_stack`, `idx_skill_library_fingerprint`, `idx_reconcile_project`, `idx_scan_reports_project`, `idx_hook_log_name`, `idx_hook_log_duration`, `idx_compact_build`, `idx_fingerprints_build`, `idx_adversary_build`, `idx_adversary_severity` — all previously missing from the stub, now present.
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors (no type changes; `better-sqlite3` already installed per memory).
+2. Run the Node.js verification script from the prompt spec (6 tests: table count 14+, required tables, idempotency, machine ID 16-hex-char + consistent, index count 20+, schema_version = '1.0.0').
+3. Proceed to r1-003: implement `src/learning/queries.ts`.
+
+---
+
 # RE-VERIFICATION — PDF Generator (pdf-lib): `src/tools/pdf-generator.ts` audited complete, 2026-06-11 (session #55)
 
 ## Build Status: RE-RAN the PDF Generator brief verbatim for a third session and again found it **already fully implemented on disk** (authored #53, audited #54, re-audited here #55) — no re-authoring needed or performed. `pdf-lib@^1.17.1` is declared in `package.json` AND installed (`node_modules/pdf-lib` audited PRESENT), so the brief's "install pdf-lib" step is already satisfied. Compile/test gates remain operator-**UNVERIFIED** this session: `node_modules/.bin/tsc --noEmit`, `npx tsc --noEmit` (Bash + PowerShell), and the bare `node_modules/.bin/tsc` form were each DENIED ("requires approval") — the exec blocker recurred (intermittent: it worked once on 2026-06-11 per memory). Per Iron Law 3 this is reported as authored + by-inspection-reviewed, NOT a green gate.
