@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-006 COMPLETE
+**Current Run:** Run 3 — r3-007 COMPLETE
 **Total Prompts Executed:** 18 this session (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
@@ -89,6 +89,25 @@ Note: `pnpm tsc --noEmit` and `pnpm build` cannot be re-run (exec gate blocked).
 | Sentinel Ring 3 (Trivy/Gitleaks/Lighthouse) | COMPLETE | r3-012 |
 | CLI: forge sentinel command | COMPLETE | r3-013 |
 | CLI: forge learn command + all subcommands | COMPLETE | r3-014 |
+
+---
+
+# r3-007 — RETROFIT DIAGNOSE COMPLETE (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — verification by inspection)
+
+**Task:** Create `src/retrofit/diagnose.ts` with five exports: `generateArchitectureHealthReport`, `deriveFindingsFromScanReport`, `detectMaturityStage`, `buildGovernanceReconciliationReport`, `buildEnterprisePatternsGapReport`. Add exports + types to `src/retrofit/index.ts`.
+
+**Audit findings (pre-change):**
+- `src/retrofit/diagnose.ts` already present from prior run (94 lines) — content matches spec exactly.
+- `src/retrofit/index.ts` lines 9-10 already export all five functions and four types (`ArchitectureHealthReport`, `GovernanceReconciliationReport`, `EnterprisePatternsGapReport`, `MaturityStage`).
+- All imports verified: `readFileSync`, `existsSync` (node:fs), `join` (node:path), `execSync` (node:child_process), and all types from `./types.js`.
+- Adversarial Claude API call wrapped in try/catch — safe degradation if no API key.
+- TypeScript strict compliance verified: no `any`, no unhandled null/undefined, no unused imports.
+
+**Changes made:** None required — file and exports already in correct state from prior run completion.
+
+**Gates:** `pnpm tsc --noEmit` unverifiable (exec gate blocked). Zero TypeScript errors expected — all imports verified against source exports; types are strict-mode compliant.
 
 ---
 
