@@ -20,7 +20,7 @@
 | Executor Integration | AUTHORED — inspection confirmed | `integration.ts` (onRunStart, onPromptComplete, onRunEnd) wired into `src/phases/phase3-executor.ts` at 3 call sites |
 | CLI Commands (6 subcommands) | AUTHORED — inspection confirmed | `src/cli/commands/learning.ts`: forge learning init/status/sync/evolutions/rules; registered in `src/cli/index.ts` |
 | Tests (31 tests, 4 files) | AUTHORED — inspection confirmed | `tests/learning-{database,fingerprint,queries,sync}.test.ts` (352 total lines) |
-| better-sqlite3 dependency | WORKAROUND ACTIVE | Type stub at `src/types/better-sqlite3.d.ts` enables tsc without package. For runtime: `pnpm add better-sqlite3 && pnpm add -D @types/better-sqlite3` |
+| better-sqlite3 dependency | AUTHORED in package.json | `"better-sqlite3": "^9.6.0"` in dependencies; `"@types/better-sqlite3": "^7.6.12"` in devDependencies. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Exec gate still blocked — `pnpm install` cannot run to actually fetch the package. |
 | Compile + Runtime Gates | UNVERIFIED | Exec blocker persists. Type stub should allow `npx tsc --noEmit` → 0 errors. Target: `npm test` → 31/31 pass |
 
 ## Prompts Executed This Run
@@ -28,7 +28,7 @@
 | Prompt | Status | Built |
 |--------|--------|-------|
 | r1-001 | PASSED | Initial project scaffolding |
-| r1-001b | PASSED | Scaffolding corrections |
+| r1-001b | AUTHORED (gate UNVERIFIED) | Added `better-sqlite3` + `@types/better-sqlite3` to package.json; confirmed `database.ts` full implementation (14 tables, 26 indexes) by inspection |
 | r1-002 | PASSED | `src/learning/database.ts` (328 lines) |
 | r1-003 | PASSED | `src/learning/queries.ts` (360 lines) |
 | r1-004 | PASSED | `src/learning/fingerprint.ts` (120 lines) |

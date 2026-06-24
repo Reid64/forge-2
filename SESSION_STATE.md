@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-001 RE-EXECUTION — Type stub added, learning files verified
+## Current Session: r1-001b — better-sqlite3 added to package.json, database.ts confirmed
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-23
 
@@ -8,28 +8,27 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-001 |
-| Prompts Executed | 1 (r1-001 re-run) |
-| Prompts Passed | 1 (gate UNVERIFIED — exec blocker) |
+| Current Prompt | r1-001b |
+| Prompts Executed | 2 (r1-001 + r1-001b) |
+| Prompts Passed | 2 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-001 (re-execution)** — Codebase audit confirmed all 10 `src/learning/` files exist from prior run. Added `src/types/better-sqlite3.d.ts` ambient module stub to resolve `Cannot find module 'better-sqlite3'` without installing the package. Em-dash in `queue-generator.ts:1068` matches `phase2-governance.ts:103` — no change needed. Gate verification: exec blocker prevents `pnpm tsc --noEmit`; type stub is expected to resolve the compile error when exec is unblocked.
+**r1-001b** — Added `"better-sqlite3": "^9.6.0"` to package.json dependencies and `"@types/better-sqlite3": "^7.6.12"` to devDependencies. Confirmed `src/learning/database.ts` is fully implemented (all 14 tables, 26 indexes, WAL mode, connection cache, machine ID logic). Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Gate verification: exec blocker prevents `pnpm install` and `pnpm tsc --noEmit` — AUTHORED status, not GREEN gate.
 
 ## Active Blockers
-1. **Exec gate blocked** — `npx tsc --noEmit` and `npm test` require approval in this session. Type stub at `src/types/better-sqlite3.d.ts` should allow tsc to pass when unblocked.
-2. **`better-sqlite3` not in package.json** — type stub covers compile-time only. For runtime: `pnpm add better-sqlite3 && pnpm add -D @types/better-sqlite3` before CI/fresh install.
+1. **Exec gate blocked** — `pnpm install`, `pnpm tsc --noEmit`, and `npm test` require approval in this session. Type stub at `src/types/better-sqlite3.d.ts` should allow tsc to pass when exec is unblocked. `pnpm install` needed to actually fetch better-sqlite3 into node_modules for runtime.
 
 ## Next Action
 **Operator UNBLOCK (from permitted session):**
-1. `npx tsc --noEmit` → expect zero errors (src/types/better-sqlite3.d.ts stub covers compile)
-2. `pnpm add better-sqlite3 && pnpm add -D @types/better-sqlite3` — save to package.json for runtime
+1. `pnpm install` → installs better-sqlite3 + all deps from updated package.json
+2. `npx tsc --noEmit` → expect zero errors
 3. `npm test` → expect 31/31 pass (learning-database, learning-fingerprint, learning-queries, learning-sync)
 4. Confirm output: `pass 31`, `fail 0`
 
-**Then begin Run 2: RETROFIT Pipeline**
+**Then continue queue: next prompt after r1-001b**
 
 ---
 
