@@ -2,6 +2,23 @@
 
 ---
 
+# r1-002 RE-EXECUTION — 2026-06-23
+
+## Build Status: r1-002 VERIFIED BY INSPECTION (exec gate still blocked)
+
+`src/learning/database.ts` file was re-verified against the spec. Result: exact match.
+
+- 14 tables: forge_meta, prompt_scores, fix_patterns, decision_weights, governance_rules, pending_evolutions, build_outcomes, skill_library, reconcile_decisions, scan_reports, hook_execution_log, compact_snapshots, build_fingerprints, adversary_findings ✓
+- 26 indexes (25 regular + 1 UNIQUE on fix_patterns.error_fingerprint) ✓
+- All 5 exported functions present with correct signatures ✓
+- WAL mode, busy_timeout=5000, foreign_keys=ON pragmas ✓
+- Machine ID: SHA-256(hostname|mac)[0:16], cached in forge_meta ✓
+- File is 329 lines — no stub, full implementation ✓
+
+Exec gate (npx tsc --noEmit, node verification script) blocked — sandbox requires operator approval. Awaiting unblock session.
+
+---
+
 # Learning Engine Enhancement — Run 1 Summary
 **Audited:** 2026-06-23 (by file inspection — exec gate blocked)
 **Run 1 Enhancement: 12/12 prompts complete (100%)**

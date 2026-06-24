@@ -2214,3 +2214,21 @@ so Sprint 3 is fully authored; the next prompt is s4-p01 (Governance Document
 Generators, Phase 2), which turns the approved `ArchitectureDesign` into the governance
 package. Sprints 2–3 progress closes for each file once an operator runs the tsc gate
 green.
+
+---
+
+## r1-002 Re-Execution — 2026-06-23
+
+**Prompt:** r1-002 (Learning Engine — Database Initialization)
+**Snapshot:** Before r1-002 (git tag 1c81b4f)
+**Outcome:** VERIFIED BY INSPECTION — exec gate blocked
+
+`src/learning/database.ts` re-verified against the r1-002 spec:
+- 14 tables with full CHECK constraints, DEFAULT values, correct column types ✓
+- 26 indexes (25 CREATE INDEX + 1 CREATE UNIQUE INDEX) ✓
+- All 5 exported functions: getForgeDbPath, getConnection, closeConnection, getMachineId, initializeForgeMemory ✓
+- File unchanged from previous PASSED run — no edits required
+
+**Exec gate status:** `npx tsc --noEmit` and `node` verification both require sandbox approval. Gate cannot be confirmed without operator unblock.
+
+**Next prompt:** r1-003 or next in queue per FORGE orchestrator.
