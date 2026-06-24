@@ -60,8 +60,8 @@ export function buildGovernanceReconciliationReport(report: ScanReport, projectP
   const sf = join(projectPath, 'STATE_OF_THE_BUILD.md');
   if (existsSync(sf)) {
     let c = ''; try { c = readFileSync(sf, 'utf8'); } catch {}
-    for (const m of c.matchAll(/\|\s*([^|]+)\s*\|\s*NOT_STARTED\s*\|/g)) unbuilt.push({ feature: m[1].trim(), source: 'STATE_OF_THE_BUILD.md', recommendation: 'BUILD' });
-    for (const m of c.matchAll(/\|\s*([^|]+)\s*\|\s*DEFERRED\s*\|/g)) unbuilt.push({ feature: m[1].trim(), source: 'STATE_OF_THE_BUILD.md', recommendation: 'DEFER' });
+    for (const m of c.matchAll(/\|\s*([^|]+)\s*\|\s*NOT_STARTED\s*\|/g)) unbuilt.push({ feature: (m[1] ?? '').trim(), source: 'STATE_OF_THE_BUILD.md', recommendation: 'BUILD' });
+    for (const m of c.matchAll(/\|\s*([^|]+)\s*\|\s*DEFERRED\s*\|/g)) unbuilt.push({ feature: (m[1] ?? '').trim(), source: 'STATE_OF_THE_BUILD.md', recommendation: 'DEFER' });
   }
   let ag = ''; if (existsSync(join(projectPath,'AGENTS.md'))) try { ag = readFileSync(join(projectPath,'AGENTS.md'),'utf8'); } catch {}
   for (const r of report.routeInventory) { if (r.type === 'API' && !ag.includes(r.route.replace(/^\//,'')) && !ag.includes(r.file)) undocumented.push({ feature: `API route: ${r.route}`, file: r.file }); }

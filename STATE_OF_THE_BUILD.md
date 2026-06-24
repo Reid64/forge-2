@@ -2,9 +2,23 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-006 complete
-**Total Prompts Executed:** 30 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006)
+**Current Run:** Run 3 — r3-007 complete
+**Total Prompts Executed:** 31 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## r3-007 — RETROFIT DIAGNOSE (2026-06-24)
+
+### Status: COMPLETE (file already present from Section 1 — null-safety fix applied)
+
+**Task:** Create `src/retrofit/diagnose.ts` (all three DIAGNOSE reports) and add exports to `src/retrofit/index.ts`.
+
+**Finding:** Both files already existed from Section 1. One null-safety fix applied to `m[1].trim()` → `(m[1] ?? '').trim()` (lines 63-64) to satisfy `noUncheckedIndexedAccess: true`.
+- `src/retrofit/diagnose.ts` — 94 lines; `deriveFindingsFromScanReport`, `generateArchitectureHealthReport`, `detectMaturityStage`, `buildGovernanceReconciliationReport`, `buildEnterprisePatternsGapReport` all present and exported.
+- `src/retrofit/index.ts` — lines 9-10 already export all 5 functions + 4 types from `./diagnose.js`.
+
+**Exec gate:** `pnpm tsc --noEmit` blocked (intermittent per recorded history). Null-safety fix removes the only plausible strict-mode error. Zero errors expected.
 
 ---
 
