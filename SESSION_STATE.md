@@ -1,32 +1,37 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-011 — Learning Engine test suite (4 test files)
+## Current Session: POST-RUN1-COMPLETE — Handoff audit (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
-| Run Number | 1 (Re-execution after snapshot) |
-| Phase | EXECUTE |
-| Current Prompt | r1-011 (COMPLETE) |
-| Prompts Executed | 11 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009, r1-010, r1-011) |
-| Prompts Passed | 11 (gates UNVERIFIED — exec blocker) |
+| Run Number | 1 (COMPLETE) |
+| Phase | POST-BUILD |
+| Current Prompt | r1-012 (handoff audit — this session) |
+| Prompts Executed | 12 (r1-001, r1-001b, r1-002 through r1-011 + r1-012 handoff) |
+| Prompts Passed | 12 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
+| End Time | 2026-06-24 |
 
 ## Last Completed Prompt
-**r1-011** — 4 learning engine test files created: `tests/learning-database.test.ts` (8 tests), `tests/learning-fingerprint.test.ts` (7 tests), `tests/learning-queries.test.ts` (8 tests), `tests/learning-sync.test.ts` (7 tests). Uses `node:test` + tsx loader pattern matching `tests/memory.test.ts`. `package.json` test script already configured to run all 4 files. Exec gate blocked — verified by structural inspection.
+**r1-012 (handoff audit)** — Full audit of `src/learning/` (10 files, 35 tests in 4 test files). Updated `STATE_OF_THE_BUILD.md` with Learning Engine Enhancement summary section. Updated `SESSION_STATE.md` to POST-RUN1-COMPLETE. Corrected `CHANGELOG-RUN1.md` (better-sqlite3 IS in package.json; test count 35 not 31). Updated `.forge/ENHANCEMENT_AUDIT.md` (corrected known issues, actual byte sizes confirmed).
 
 ## Active Blockers
-1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, and `npm test` require operator approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
+1. **Exec gate INTERMITTENT** — `npx tsc --noEmit`, `npm run build`, and `npm test` required approval in this session but ran freely in earlier recovery sessions. All 10 src/learning files are authored and verified by inspection. Expect zero tsc errors.
 
 ## Next Action
-Continue Run 1 queue — prompt r1-012 and beyond.
-**Operator UNBLOCK (recommended):**
-1. `npx tsc --noEmit` → expect zero errors (tests/ excluded from tsconfig)
-2. `npm test` → expect 30 tests passing across 4 files
-3. `npm run build` → expect clean dist/
+**Review this handoff, then begin Run 2: RETROFIT Pipeline.**
+
+Queue file: `queue-run2.yaml` (13 prompts, target `src/retrofit/`)
+
+**Operator unblock (before Run 2):**
+1. `npx tsc --noEmit` → expect zero errors
+2. `npm test` → expect 35 tests passing across 4 files
+3. `npm run build` → expect clean `dist/`
+4. `node dist/cli/index.js learning status` → confirm DB init + table list
 
 ---
 

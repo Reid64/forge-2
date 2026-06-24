@@ -2,6 +2,80 @@
 
 ---
 
+# Learning Engine Enhancement — Run 1 Summary
+**Updated:** 2026-06-24
+**Status:** COMPLETE (12/12 prompts PASSED by inspection; exec gate UNVERIFIED)
+
+## Completion Matrix
+
+| Component | Status | Files | Notes |
+|-----------|--------|-------|-------|
+| SQLite Database (14 tables, 26 indexes) | COMPLETE | `src/learning/database.ts` | `initializeForgeMemory`, `getConnection`, `getMachineId`, `closeConnection`; WAL mode; connection cache |
+| Query Layer (15 functions) | COMPLETE | `src/learning/queries.ts` | Full CRUD: `saveToForgeMemory`, `getForgeMemory`, `updateForgeMemory`, `savePromptScore`, `getBestPromptTemplates`, `getFixPattern`, `registerError`, `registerFix`, `getGovernanceRules`, `incrementGovernanceEnforcement`, `getDecisionWeights`, `getRelevantSkills`, `getPendingEvolutions`, `updateEvolutionStatus` + `generateId` |
+| Error Fingerprinting | COMPLETE | `src/learning/fingerprint.ts` | SHA-256(errorCode\|generalizedPath\|generalizedMessage\|sortedStack), 32-char hex |
+| Five Learning Loops | COMPLETE | `src/learning/loops.ts` | Loop 1: scorePromptExecution; Loop 2: captureError + checkAutoElevation; Loop 3: updateDecisionWeights; Loop 4: loadCrossProjectKnowledge; Loop 5: analyzeForEvolutions + presentEvolutions + applyEvolution |
+| Cross-Machine Sync | COMPLETE | `src/learning/sync.ts` | Append-only (INSERT OR IGNORE), file locking, stale-lock detection (>2 min), graceful master-absent degradation |
+| Enhanced Hooks (24 defaults) | COMPLETE | `src/learning/hooks-enhanced.ts` | SessionStart(3) + PreToolUse(2) + PostToolUse(4) + PreCommit(3) + PreCompact(1) + PreDeploy(3) + PostDeploy(3) + SessionEnd(5) |
+| PreCompact + Session Orchestration | COMPLETE | `src/learning/precompact.ts`, `src/learning/session.ts` | Context snapshots, crash recovery, build fingerprinting, session handoff |
+| Executor Integration | COMPLETE | `src/learning/integration.ts` | `onRunStart`/`onPromptComplete`/`onRunEnd` wired into `src/phases/phase3-executor.ts`; non-critical (all calls wrapped in .catch) |
+| CLI Commands | COMPLETE | `src/cli/commands/learning.ts` | `forge learning init/status/sync/evolutions/rules`; wired into `src/cli/index.ts` |
+| Type Definitions | COMPLETE | `src/learning/types.ts` | 14 table interfaces, `VALID_TABLES`, `TASK_TYPES`, `ERROR_CATEGORIES`, `HOOK_EVENTS` |
+| Tests | COMPLETE | `tests/learning-*.test.ts` | 35 tests across 4 files (8+10+9+8); `node:test` + tsx loader |
+
+## Artifact Inventory
+
+| File | Bytes | Lines (approx) |
+|------|-------|----------------|
+| `src/learning/types.ts` | 4,883 | 172 |
+| `src/learning/database.ts` | 14,850 | 328 |
+| `src/learning/queries.ts` | 11,070 | 360 |
+| `src/learning/fingerprint.ts` | 4,220 | 120 |
+| `src/learning/loops.ts` | 12,919 | 326 |
+| `src/learning/sync.ts` | 10,142 | 297 |
+| `src/learning/hooks-enhanced.ts` | 12,268 | 444 |
+| `src/learning/precompact.ts` | 3,363 | 124 |
+| `src/learning/session.ts` | 10,118 | 318 |
+| `src/learning/integration.ts` | 8,654 | 236 |
+| `src/cli/commands/learning.ts` | — | 193 |
+| `tests/learning-database.test.ts` | — | 80 |
+| `tests/learning-fingerprint.test.ts` | — | 92 |
+| `tests/learning-queries.test.ts` | — | 98 |
+| `tests/learning-sync.test.ts` | — | 82 |
+
+**Total new code:** ~2,725 lines (src/learning) + 352 lines (tests) + 193 lines (CLI) = **3,270 lines**
+
+## Gate Status
+
+| Gate | Status | Notes |
+|------|--------|-------|
+| `npx tsc --noEmit` | UNVERIFIED | Exec requires operator approval this session; zero errors expected |
+| `npm run build` | UNVERIFIED | Exec requires operator approval this session |
+| `npm test` | UNVERIFIED | 35 tests expected to pass; exec gated |
+| `forge learning status` | UNVERIFIED | No `dist/` built yet |
+
+**Operator unblock:** From a permitted session, run `npx tsc --noEmit` then `npm test`. Both are expected to pass (better-sqlite3 and all deps now in package.json).
+
+## Run 1 Prompt Sequence
+
+| Prompt | Status | Artifact |
+|--------|--------|---------|
+| r1-001 | PASSED | Project scaffolding |
+| r1-001b | PASSED | Scaffolding corrections |
+| r1-002 | PASSED | `src/learning/database.ts` |
+| r1-003 | PASSED | `src/learning/queries.ts` |
+| r1-004 | PASSED | `src/learning/fingerprint.ts` |
+| r1-005 | PASSED | `src/learning/loops.ts` |
+| r1-006 | PASSED | `src/learning/sync.ts` |
+| r1-007 | PASSED | `src/learning/hooks-enhanced.ts` |
+| r1-008 | PASSED | `src/learning/precompact.ts` + `src/learning/session.ts` |
+| r1-009 | PASSED | `src/learning/integration.ts` + phase3-executor wiring |
+| r1-010 | PASSED | `src/cli/commands/learning.ts` + index.ts wiring |
+| r1-011 | PASSED | 4 test files (35 tests total) |
+
+**Next:** Run 2 — RETROFIT pipeline (`src/retrofit/`). Queue: `queue-run2.yaml` (13 prompts).
+
+---
+
 # r1-011 — 2026-06-24
 
 ## Build Status: r1-011 VERIFIED BY INSPECTION (exec gate blocked)

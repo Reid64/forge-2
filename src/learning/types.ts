@@ -1,6 +1,4 @@
 // FORGE 2.0 Learning Engine — Type Definitions
-// NOTE: better-sqlite3 import is commented out until installed in a later prompt
-// import type Database from 'better-sqlite3';
 
 export interface ForgeMeta {
   key: string;

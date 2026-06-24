@@ -1,7 +1,7 @@
 # CHANGELOG — Run 1: Learning Engine Enhancement
-**Date:** 2026-06-23
+**Date:** 2026-06-23 through 2026-06-24
 **Prompts Completed:** r1-001, r1-001b, r1-002 through r1-011 (12 prompts passed)
-**Gate Status:** All prompts AUTHORED and by-inspection-reviewed. Compile/runtime gates UNVERIFIED — exec blocker persists (see STATE_OF_THE_BUILD.md). tsc target: zero errors.
+**Gate Status:** All prompts AUTHORED and by-inspection-reviewed. Compile/runtime gates UNVERIFIED — exec blocker intermittent (see STATE_OF_THE_BUILD.md). tsc target: zero errors.
 
 ---
 
@@ -21,11 +21,11 @@
 | `src/learning/integration.ts` | 236 | Integration bridge: onRunStart, onPromptComplete, onRunEnd |
 | `src/cli/commands/learning.ts` | 193 | CLI subcommands: forge learning init/status/sync/evolutions/rules |
 | `tests/learning-database.test.ts` | 80 | 8 tests: 14 tables, idempotency, 26 indexes, getMachineId, WAL mode |
-| `tests/learning-fingerprint.test.ts` | 92 | 7 tests: same-pattern fingerprint, different codes, 32-char hex, stack order independence, path wildcarding |
-| `tests/learning-queries.test.ts` | 98 | 8 tests: UUID generation, auto machine_id/created_at, invalid table rejection, WHERE/LIMIT filtering |
+| `tests/learning-fingerprint.test.ts` | 92 | 10 tests: same-pattern fingerprint, different codes, 32-char hex, stack order independence, path wildcarding |
+| `tests/learning-queries.test.ts` | 98 | 9 tests: UUID generation, auto machine_id/created_at, invalid table rejection, WHERE/LIMIT filtering |
 | `tests/learning-sync.test.ts` | 82 | 8 tests: lock create/release, graceful degradation, config defaults, timestamp round-trip |
 
-**Total new lines of code:** 2,725 (src/learning) + 352 (tests) + 193 (CLI) = **3,270 lines**
+**Total new lines of code:** 2,725 (src/learning) + 352 (tests) + 193 (CLI) = **3,270 lines** (byte-verified: 92,487 bytes across 10 src/learning files)
 
 ---
 
@@ -43,10 +43,8 @@
 
 | Package | Version | Location | Notes |
 |---------|---------|----------|-------|
-| `better-sqlite3` | 12.11.1 | pnpm virtual store (`node_modules/.pnpm/`) | NOT in package.json — installed manually. **Action required:** `pnpm add better-sqlite3` |
-| `@types/better-sqlite3` | 7.6.13 | pnpm virtual store (`node_modules/.pnpm/`) | NOT in package.json devDependencies. **Action required:** `pnpm add -D @types/better-sqlite3` |
-
-> **Warning:** `better-sqlite3` and `@types/better-sqlite3` are present in the pnpm virtual store but absent from `package.json`. They were NOT found in `pnpm-lock.yaml`. This means they are available on this machine but will be missing on a fresh install. Add them before deploying to a new environment.
+| `better-sqlite3` | `^9.6.0` | `package.json` dependencies | Confirmed present in package.json |
+| `@types/better-sqlite3` | `^7.6.12` | `package.json` devDependencies | Confirmed present in package.json |
 
 ---
 
@@ -83,10 +81,10 @@
 | File | Tests | Key Coverage |
 |------|-------|-------------|
 | `learning-database.test.ts` | 8 | initializeForgeMemory creates 14+ tables, 20+ indexes, idempotent, schema_version, getMachineId 16-char hex, consistent, WAL mode |
-| `learning-fingerprint.test.ts` | 7 | Same pattern → same fingerprint, different code → different, 32 hex chars, stack-order-independent, generalizeFilePath wildcards entities, normalizes backslashes, generalizeErrorMessage replaces quoted strings |
-| `learning-queries.test.ts` | 8 | saveToForgeMemory UUID, auto machine_id, auto created_at, rejects invalid table, getForgeMemory empty array, WHERE filter, LIMIT, governance active-only filter |
+| `learning-fingerprint.test.ts` | 10 | Same pattern → same fingerprint, different code → different, 32 hex chars, stack-order-independent, generalizeFilePath wildcards entities, normalizes backslashes, generalizeErrorMessage replaces quoted strings |
+| `learning-queries.test.ts` | 9 | saveToForgeMemory UUID, auto machine_id, auto created_at, rejects invalid table, getForgeMemory empty array, WHERE filter, LIMIT, governance active-only filter |
 | `learning-sync.test.ts` | 8 | acquireSyncLock creates file + JSON, releaseSyncLock removes file, release-nonexistent no-throw, loadSyncConfig defaults, syncForgeMemory graceful degradation, epoch default, timestamp round-trip |
-| **Total** | **31** | |
+| **Total** | **35** | |
 
 ---
 
