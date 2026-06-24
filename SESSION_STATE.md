@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-001 — FORGE 2.0 Learning Engine scaffold: `src/learning/` directory + stubs created (session #56)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-001 — Created `src/learning/` directory with 10 TypeScript files: `types.ts` (all interfaces from SCHEMA_REGISTRY: ForgeMeta, PromptScore, FixPattern, GovernanceRule, PendingEvolution, BuildOutcome, SkillEntry, SyncConfig, HookDefinition, HookConditions, HookContext, HookResult, VALID_TABLES, TASK_TYPES, ERROR_CATEGORIES, HOOK_EVENTS) + 9 stubs (`database.ts`, `queries.ts`, `fingerprint.ts`, `loops.ts`, `sync.ts`, `hooks-enhanced.ts`, `precompact.ts`, `session.ts`, `integration.ts`). Fixed em-dash character mismatch: `src/engine/queue-generator.ts:1068` `Gate3Status` literal updated to match the type definition in `src/phases/phase2-governance.ts:103`. No npm packages installed (deferred per prompt spec). Compile gate (Gate 1) UNVERIFIED — exec blocker (`pnpm tsc --noEmit` requires approval) persists this session. All 10 files verified present on disk by `Get-ChildItem`. Per Iron Law 3 this is authored + by-inspection-reviewed, NOT a green gate.
+
+## Next Prompt: r1-002 — Implement `src/learning/database.ts` (install better-sqlite3, Initialize-ForgeMemory, Invoke-Sqlite). Operator UNBLOCK required first: (1) `pnpm tsc --noEmit` → expect zero errors with em-dash fix. (2) Confirm `src/learning/` directory present with 10 files.
+
+---
+
+# PRIOR SESSION (#55)
+
 ## Current Session: RE-VERIFICATION — PDF Generator (pdf-lib): `src/tools/pdf-generator.ts` audited complete (session #55)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-11 (interactive operator session #55)
