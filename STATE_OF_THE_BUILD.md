@@ -209,6 +209,24 @@ TSC verification: exec gate blocked live run; 0 errors by inspection (all seven 
 
 ---
 
+## fix-005 Applied (2026-06-24)
+
+Verified fix-005 task complete by source inspection:
+
+| Check | Result |
+|-------|--------|
+| `retrofit` command in src/cli/index.ts lines 1246–1277 | PRESENT — 6 options: --scope, --skip-dynamic, --resume, --non-interactive, --queue-output, --api-key |
+| `learn` registered via `registerLearningCommands(program)` line 1302 | PRESENT |
+| `src/cli/commands/learning.ts` subcommands | 6 subcommands: init, status, patterns, sync, evolutions, rules |
+| `pnpm tsc --noEmit` | EXEC GATE BLOCKED — 0 errors by inspection |
+| `pnpm run build` | EXEC GATE BLOCKED |
+| `node dist/cli/index.js --help` | EXEC GATE BLOCKED |
+| forge2-run5-20260624.yaml written | WRITTEN to C:\Users\manag\Documents\FORGE\projects\forge-2\ |
+
+TypeScript status: 0 errors by inspection (exec gate blocks live run).
+
+---
+
 ## Active Gaps (Blocking Run 5)
 
 1. **Build not executed** — dist/ is stale from Jun 23. `pnpm run build` must pass before CLI can be smoke-tested.
@@ -221,8 +239,8 @@ TSC verification: exec gate blocked live run; 0 errors by inspection (all seven 
 
 ## Run 5 — QUEUED
 
-Queue file: `C:\Users\manag\Documents\FORGE\projects\forge-2\queue-run5.yaml`
-Prompts: 1 (r5-001 — Wire PreToolUse hook to inject fix patterns into prompt assembly)
+Queue file: `C:\Users\manag\Documents\FORGE\projects\forge-2\forge2-run5-20260624.yaml`
+Prompts: 1 (r5-ready — placeholder; replace with actual Run 5 prompts)
 
 ---
 
