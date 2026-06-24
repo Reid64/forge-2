@@ -2,6 +2,42 @@
 
 ---
 
+# r6-003 — handleSessionStart + handleSessionEnd wired in phase3-executor.ts, 2026-06-24
+
+## Build Status: VERIFIED (code inspection). Both session lifecycle hooks from `src/learning/session-hooks.ts` are correctly wired in `src/phases/phase3-executor.ts`:
+
+**handleSessionStart** (lines 756–761): Called BEFORE the prompt loop (which starts at line 801). Dynamic import from `'../learning/session-hooks.js'`, passes `buildRunId ?? machineId`, `projectPath`, `projectName`. Logs the returned `contextBlock` if non-empty. Wrapped in `try {} catch { /* non-fatal -- learning engine is always optional */ }`.
+
+**handleSessionEnd** (lines 992–1007): Called in a `finally` block that wraps the simulation + return section (lines 930–1007), so it always fires — including when an unexpected error occurs in that section. Passes `buildId: buildRunId ?? machineId`, `projectPath`, `projectName`, `promptsExecuted: completedPrompts + failedPrompts + skippedPrompts`, `promptsPassed: completedPrompts`, `promptsFailed: failedPrompts`, `endReason: halted ? 'FAILED' : 'COMPLETED'`, `startTime: new Date(generatedAt)`. Wrapped in `try {} catch { /* non-fatal */ }`.
+
+All variables referenced in the finally block (`completedPrompts`, `failedPrompts`, `skippedPrompts`, `halted`, `generatedAt`) are declared in the outer function scope (lines 897–900, 796–799) and are in scope at the finally block.
+
+No code changes were required — both hooks were already in place from prior runs.
+
+Compile gate is operator-**UNVERIFIED** this session — exec gate denied (known intermittent blocker per memory). By-inspection: dynamic imports from `'../learning/session-hooks.js'` resolve at runtime; all passed fields match the `handleSessionStart` and `handleSessionEnd` interface signatures in `src/learning/session-hooks.ts`.
+
+### Files changed
+- None — `handleSessionStart` and `handleSessionEnd` were already correctly wired in `src/phases/phase3-executor.ts`
+
+### Codebase audit (r6-003)
+Full source tree audited. All modules present:
+- `src/phases/`: phase0-scout, phase1a-prd, phase1b-architect, phase1c-ingest, phase2-governance, phase3-executor, phase4-sentinel, phase5-learner — ALL PRESENT
+- `src/learning/`: database, queries, loops, hooks-enhanced, sync, session, integration, fingerprint, precompact, types, handoff-generator, session-lifecycle, session-hooks — ALL PRESENT (13 files)
+- `src/retrofit/`: types, preflight, scan-ops-1-4, scan-ops-5-8, scan-ops-9-14, scan, diagnose, reconcile, pipeline, index — ALL PRESENT (Run 2 complete)
+- `src/engine/`: queue-generator, parallel-scheduler, failure-predictor, prompt-rewriter, prompt-decomposer, prompt-assembler, claude-runner, git-manager, model-router, hook-manager, free-tier-manager, provider-router, governance-gate — ALL PRESENT
+- `src/analysis/`: cost-estimator, adversarial-review, agent-creator, template-evolver, six-laws-verifier, pattern-extractor, instinct-extractor, pass-at-k — ALL PRESENT
+- `src/memory/`: builds, prompts, resolutions, agents, insights, telemetry, profiles, patterns, brands, governance, scheduled-tasks, index, client, session-hooks, errors — ALL PRESENT
+- `src/tools/`: forge-logger, log-search, codebase-rag, dead-code-scanner, incremental-tester, security-scanner, architecture-guard, and 17+ more tools — ALL PRESENT
+- `src/cli/`: index, commands/learning, repair-command — ALL PRESENT
+- `src/monitoring/`: deploy-agent, telemetry-receiver — ALL PRESENT
+- `src/types/`: index, build, governance, patterns, better-sqlite3.d.ts — ALL PRESENT
+
+### UNBLOCK (operator, from a permitted session)
+1. `pnpm tsc --noEmit` → expect zero errors.
+2. `pnpm run build` → expect clean build.
+
+---
+
 # r6-002 — handlePostToolUse call verified in phase3-executor.ts, 2026-06-24
 
 ## Build Status: VERIFIED (code inspection). `handlePostToolUse` from `src/learning/hooks-enhanced.ts` is called in `src/phases/phase3-executor.ts` at lines 857–872 of the main prompt loop, immediately after each `executePrompt` returns. The call is wrapped in `try/catch` (learning failures cannot crash the build) and passes all required parameters: `buildId`, `promptId`, `taskType`, `firstPassSuccess`, `retryCount`, `tokensConsumed`, `errorOutput`, `filesModified`, `projectName`, plus `techStackTags` for completeness. Compile gate is operator-**UNVERIFIED** this session — exec gate denied (known intermittent blocker per memory). By-inspection: the call site uses dynamic import (`await import('../learning/hooks-enhanced.js')`), passes all typed fields consistent with the `handlePostToolUse` opts interface, and matches the `gatPassRate` field name used in both the function signature and caller (intentional spelling — both sides consistent). No code changes required; implementation was already correct.

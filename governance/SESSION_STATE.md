@@ -1,6 +1,16 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r6-002 — handlePostToolUse call verified in phase3-executor.ts (2026-06-24)
+## Current Session: r6-003 — handleSessionStart + handleSessionEnd wired in phase3-executor.ts (2026-06-24)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-24 (autonomous FORGE session r6-003)
+
+## Last Completed Prompt: r6-003 VERIFIED (code inspection). `handleSessionStart` from `src/learning/session-hooks.ts` is wired at lines 756–761 of `src/phases/phase3-executor.ts`, BEFORE the prompt loop (line 801). `handleSessionEnd` is wired in a `finally` block at lines 992–1007, so it always fires including on unexpected throws. Both calls are wrapped in `try {} catch { /* non-fatal */ }`. `handleSessionStart` passes `buildRunId ?? machineId`, `projectPath`, `projectName` and logs the returned `contextBlock`. `handleSessionEnd` passes all required fields including `endReason` (FAILED when halted, else COMPLETED) and `startTime` from `generatedAt`. No code changes required — both hooks were already in place from prior runs. Compile/build gates exec-DENIED (known intermittent blocker); verified correct by inspection.
+
+## Next Prompt: Per queue — next prompt in sequence after r6-003.
+
+---
+
+# PRIOR SESSION (r6-002) — handlePostToolUse call verified in phase3-executor.ts (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-24 (autonomous FORGE session r6-002)
 
