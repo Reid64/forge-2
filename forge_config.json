@@ -1,0 +1,8 @@
+{
+  "version": "2.0",
+  "build": { "model": "claude-sonnet-4-6", "maxRetries": 3, "maxPromptsPerRun": 45, "parallelism": 1, "timeoutMinutes": 15 },
+  "sentinel": { "ring1OnEveryPrompt": true, "ring2EveryNthPrompt": 10, "ring3OnRunEnd": true, "eslintConfig": "next/core-web-vitals", "coverageThreshold": 60 },
+  "learning": { "dbPath": "~/.forge/forge_memory.db", "syncEnabled": false, "syncMasterPath": null, "adversarialReview": true, "selfModification": true },
+  "deploy": { "provider": "vercel", "canaryEnabled": true, "rollbackOnFailure": true, "healthCheckPath": "/api/health" },
+  "providers": { "primary": "anthropic", "fallback": null, "anthropicApiKey": null, "openaiApiKey": null }
+}

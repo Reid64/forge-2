@@ -26,8 +26,8 @@ import { randomUUID } from 'node:crypto';
 
 import { z, validateConfigFile } from '../tools/schema-validator.js';
 
-/** The resolved FORGE configuration the CLI commands consume. */
-export interface ForgeConfig {
+/** The resolved FORGE env/runtime configuration the CLI commands consume. */
+export interface EnvConfig {
   /** Self-hosted Supabase URL (Build Memory backend). */
   supabaseUrl: string | null;
   /** Supabase anon key (present for completeness; FORGE uses the service key). */
@@ -62,7 +62,7 @@ const DEFAULT_BACKUP_DIR = 'E:\\forge-backups';
  * but when `supabaseUrl` IS present it must be a well-formed URL, and the always-
  * resolved fields (machineId, dataDir, backupDir) must be non-empty.
  */
-const ForgeConfigShapeSchema = z.object({
+const EnvConfigShapeSchema = z.object({
   supabaseUrl: z.string().url('FORGE_SUPABASE_URL must be a valid URL').nullable(),
   supabaseServiceKey: z.string().min(1).nullable(),
   anthropicApiKey: z.string().min(1).nullable(),
@@ -138,7 +138,7 @@ function envValue(key: string): string | null {
  * overwriting values already set in the shell, then snapshots the resolved config.
  * Always returns a config — never throws.
  */
-export function loadConfig(): ForgeConfig {
+export function loadConfig(): EnvConfig {
   const warnings: string[] = [];
 
   // 1. Load a .env file into process.env (shell values win). ------------------
@@ -173,7 +173,7 @@ export function loadConfig(): ForgeConfig {
   const supabaseServiceKey = envValue('FORGE_SUPABASE_SERVICE_KEY');
   const anthropicApiKey = envValue('ANTHROPIC_API_KEY');
 
-  const config: ForgeConfig = {
+  const config: EnvConfig = {
     supabaseUrl,
     supabaseAnonKey: envValue('FORGE_SUPABASE_ANON_KEY'),
     supabaseServiceKey,
@@ -191,7 +191,7 @@ export function loadConfig(): ForgeConfig {
   // time, so any shape problem is surfaced as a clear config WARNING rather than
   // logged to the (possibly-absent) `forge-validation` channel. `warnings` is the
   // same array referenced by `config.warnings`, so these reach the caller.
-  const validated = validateConfigFile(ForgeConfigShapeSchema, config, {
+  const validated = validateConfigFile(EnvConfigShapeSchema, config, {
     context: 'cli:config',
     target: '.env',
     report: false,
@@ -216,7 +216,7 @@ function mask(value: string | null): string {
  * A human-readable, SECRET-SAFE summary of the resolved config (for `forge status`
  * / diagnostics). Keys are shown; secret values are masked.
  */
-export function describeConfig(config: ForgeConfig): string {
+export function describeConfig(config: EnvConfig): string {
   return [
     `env file:        ${config.envFilePath ?? '(none)'}`,
     `machine id:      ${config.machineId}`,
@@ -227,6 +227,45 @@ export function describeConfig(config: ForgeConfig): string {
     `data dir:        ${config.dataDir}`,
     `backup dir:      ${config.backupDir}`,
   ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// FORGE build-system configuration (forge_config.json)
+// ---------------------------------------------------------------------------
+
+export interface ForgeConfig {
+  version: string;
+  build: { model: string; maxRetries: number; maxPromptsPerRun: number; parallelism: number; timeoutMinutes: number };
+  sentinel: { ring1OnEveryPrompt: boolean; ring2EveryNthPrompt: number; ring3OnRunEnd: boolean; eslintConfig: string; coverageThreshold: number };
+  learning: { dbPath: string; syncEnabled: boolean; syncMasterPath: string | null; adversarialReview: boolean; selfModification: boolean };
+  deploy: { provider: string; canaryEnabled: boolean; rollbackOnFailure: boolean; healthCheckPath: string };
+  providers: { primary: string; fallback: string | null; anthropicApiKey: string | null; openaiApiKey: string | null };
+}
+
+export const DEFAULT_FORGE_CONFIG: ForgeConfig = {
+  version: '2.0',
+  build: { model: 'claude-sonnet-4-6', maxRetries: 3, maxPromptsPerRun: 45, parallelism: 1, timeoutMinutes: 15 },
+  sentinel: { ring1OnEveryPrompt: true, ring2EveryNthPrompt: 10, ring3OnRunEnd: true, eslintConfig: 'next/core-web-vitals', coverageThreshold: 60 },
+  learning: { dbPath: '~/.forge/forge_memory.db', syncEnabled: false, syncMasterPath: null, adversarialReview: true, selfModification: true },
+  deploy: { provider: 'vercel', canaryEnabled: true, rollbackOnFailure: true, healthCheckPath: '/api/health' },
+  providers: { primary: 'anthropic', fallback: null, anthropicApiKey: null, openaiApiKey: null },
+};
+
+export function mergeWithDefaults(partial: Partial<ForgeConfig>): ForgeConfig {
+  return {
+    version: partial.version ?? DEFAULT_FORGE_CONFIG.version,
+    build: { ...DEFAULT_FORGE_CONFIG.build, ...(partial.build ?? {}) },
+    sentinel: { ...DEFAULT_FORGE_CONFIG.sentinel, ...(partial.sentinel ?? {}) },
+    learning: { ...DEFAULT_FORGE_CONFIG.learning, ...(partial.learning ?? {}) },
+    deploy: { ...DEFAULT_FORGE_CONFIG.deploy, ...(partial.deploy ?? {}) },
+    providers: { ...DEFAULT_FORGE_CONFIG.providers, ...(partial.providers ?? {}) },
+  };
+}
+
+export function saveConfig(projectPath: string, config: ForgeConfig): void {
+  const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+  const { join } = require('node:path') as typeof import('node:path');
+  writeFileSync(join(projectPath, 'forge_config.json'), JSON.stringify(config, null, 2) + '\n', 'utf8');
 }
 
 export default loadConfig;

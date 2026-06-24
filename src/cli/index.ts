@@ -43,7 +43,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { dump as dumpYaml } from 'js-yaml';
 
-import { loadConfig, describeConfig, type ForgeConfig } from './config.js';
+import { loadConfig, describeConfig, type EnvConfig } from './config.js';
 
 import { runPhase0Scout, type Phase0Result } from '../phases/phase0-scout.js';
 import { runPhase1aPrd } from '../phases/phase1a-prd.js';
@@ -96,7 +96,7 @@ function printHeader(): void {
 }
 
 /** Print the config's non-fatal warnings (e.g. no .env, generated machine id). */
-function printConfigWarnings(config: ForgeConfig): void {
+function printConfigWarnings(config: EnvConfig): void {
   for (const w of config.warnings) console.log(chalk.dim(`  • ${w}`));
 }
 
@@ -524,7 +524,7 @@ async function runReplay(
 }
 
 /** `forge status [build-id]` — build status from Build Memory. */
-async function cmdStatus(buildId: string | undefined, config: ForgeConfig): Promise<void> {
+async function cmdStatus(buildId: string | undefined, config: EnvConfig): Promise<void> {
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no build history is available.'));
     console.log(chalk.dim('Configure FORGE_SUPABASE_URL + FORGE_SUPABASE_SERVICE_KEY in .env to enable it.'));
@@ -578,7 +578,7 @@ function printPromptLine(p: PromptExecution): void {
 }
 
 /** `forge history [--project name]` — list past builds. */
-async function cmdHistory(opts: { project?: string }, config: ForgeConfig): Promise<void> {
+async function cmdHistory(opts: { project?: string }, config: EnvConfig): Promise<void> {
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no history available.'));
     return;
@@ -604,7 +604,7 @@ async function cmdHistory(opts: { project?: string }, config: ForgeConfig): Prom
 }
 
 /** `forge patterns` — known error patterns + success rates. */
-async function cmdPatterns(config: ForgeConfig): Promise<void> {
+async function cmdPatterns(config: EnvConfig): Promise<void> {
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no error patterns available.'));
     return;
@@ -632,7 +632,7 @@ async function cmdPatterns(config: ForgeConfig): Promise<void> {
 }
 
 /** `forge agents` — self-created agents + status. */
-async function cmdAgents(config: ForgeConfig): Promise<void> {
+async function cmdAgents(config: EnvConfig): Promise<void> {
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no agents available.'));
     return;
