@@ -1,26 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-005 COMPLETE
+## Current Session: Run 3 — r3-006 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT SCAN ops 9-14 |
-| Current Prompt | r3-005 (scan-ops-9-14.ts) |
-| Prompts Executed | 17 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005) |
-| Prompts Passed | 17 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | RETROFIT SCAN Orchestrator |
+| Current Prompt | r3-006 (scan.ts) |
+| Prompts Executed | 18 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006) |
+| Prompts Passed | 18 (exec gate UNVERIFIED — file verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-005 (scan-ops-9-14.ts)** — `src/retrofit/scan-ops-9-14.ts` already present from prior run (88 lines, 6 exports: `auditPackages`, `inventoryGovernanceDocs`, `checkTypeScriptCompilation`, `runExistingTests`, `testDynamicRoutes`, `analyzeVercelDeployment`). `src/retrofit/index.ts` line 6 already exports all six. All types (`PackageAuditEntry`, `GovernanceDocEntry`, `CompilationError`, `DynamicRouteResult`, `VercelDeployInfo`) correctly imported from `./types.js`. Strict TS compliance verified; unused `readdirSync` import correctly omitted. TSC gate blocked by exec permission; verification by inspection only.
+**r3-006 (scan.ts)** — `src/retrofit/scan.ts` already present from prior run (64 lines). Verified: exports `runScan(options: ScanOptions)` and `ScanOptions` interface. Wires all 14 scan ops (ops 1-4, 5-8, 9-14), calls `runPreFlightChecks`, builds full `ScanReport`, writes `.forge/scan_report.json` via `mkdirSync`+`writeFileSync`. `src/retrofit/index.ts` line 7-8 already re-exports `runScan` and `ScanOptions`. `resume` parameter correctly prefixed `_resume` to satisfy no-unused-vars. TSC gate blocked by exec permission; verification by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-006** — `src/retrofit/scan.ts` SCAN orchestrator (wires all 14 ops, writes `.forge/scan_report.json`).
+**r3-007** — DIAGNOSE: `src/retrofit/diagnose-health.ts` — Architecture Health Report + Claude API adversarial review.
 
 Operator verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
