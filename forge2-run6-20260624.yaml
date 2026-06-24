@@ -1,0 +1,46 @@
+---
+project: forge-2
+governance:
+- BLUEPRINT.md
+- STATE_OF_THE_BUILD.md
+- SESSION_STATE.md
+- SCHEMA_REGISTRY.md
+- BEHAVIORAL_CONTRACTS.md
+- AGENTS.md
+settings:
+  build_model: claude-sonnet-4-6
+  max_retries: 3
+prompts:
+- id: r6-001
+  name: Audit phase3-executor.ts hook wiring and verify learning engine is active
+  prompt: |
+    Read src/phases/phase3-executor.ts in full. Verify handleSessionStart,
+    handlePostToolUse, and handleSessionEnd are all wired at correct lifecycle points.
+    Run pnpm tsc --noEmit -- must pass 0 errors.
+    Run pnpm build -- must succeed.
+    Run pnpm test -- must pass.
+    Report actual hook wiring status from real file read.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+- id: r6-002
+  name: Implement PRD 4-pass refinement hardening in phase1a-prd.ts
+  prompt: |
+    Read src/phases/phase1a-prd.ts in full.
+    Identify what is complete vs stubbed in the 4-pass PRD pipeline.
+    Implement any missing passes with full inline TypeScript.
+    Pass 1: Completeness check -- all user stories have acceptance criteria.
+    Pass 2: Adversarial review via runAdversarialReview from src/analysis/adversarial-review.ts.
+    Pass 3: Schema completeness -- all entities have columns, indexes, RLS.
+    Pass 4: Governance alignment -- verify against BEHAVIORAL_CONTRACTS.md.
+    Run pnpm tsc --noEmit -- 0 errors.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
+- id: r6-003
+  name: Harden phase1b-architect.ts governance suite generation
+  prompt: |
+    Read src/phases/phase1b-architect.ts in full.
+    Identify what governance documents are generated and what is missing.
+    Ensure all 8 documents are generated: BLUEPRINT.md, SCHEMA_REGISTRY.md,
+    AGENTS.md, BEHAVIORAL_CONTRACTS.md, INTERACTION_MAPS.md, TESTING.md,
+    STATE_OF_THE_BUILD.md, SESSION_STATE.md.
+    Wire adversarial review after generation via runAdversarialReview with phase ARCHITECT_GOVERNANCE.
+    Run pnpm tsc --noEmit -- 0 errors.
+    Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit.
