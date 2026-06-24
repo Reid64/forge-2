@@ -1,26 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-003 COMPLETE
+## Current Session: Run 3 — r3-004 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT SCAN ops 1-4 |
-| Current Prompt | r3-003 (scan-ops-1-4.ts) |
-| Prompts Executed | 15 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003) |
-| Prompts Passed | 15 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | RETROFIT SCAN ops 5-8 |
+| Current Prompt | r3-004 (scan-ops-5-8.ts) |
+| Prompts Executed | 16 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004) |
+| Prompts Passed | 16 (exec gate UNVERIFIED — file verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-003 (scan-ops-1-4.ts re-verified)** — `src/retrofit/scan-ops-1-4.ts` was already present from prior run (96 lines, 4 exports: `scanDirectoryTree`, `buildDependencyGraph`, `detectBrokenImports`, `detectDeadFiles`). `src/retrofit/index.ts` already exports all four functions. File content matches spec exactly. TSC gate blocked by exec permission; verification by inspection only.
+**r3-004 (scan-ops-5-8.ts)** — `src/retrofit/scan-ops-5-8.ts` already present from prior run (122 lines, 4 exports: `buildRouteInventory`, `auditEnvVars`, `extractDatabaseSchema`, `analyzeGitHistory`). `src/retrofit/index.ts` already exports all four on line 5. All types correctly imported from `./types.js`. Null safety verified — `?? null` on all array accesses, strict TypeScript compliant. TSC gate blocked by exec permission; verification by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-004** — `src/retrofit/scan-ops-5-8.ts` (buildRouteInventory, auditEnvVars, extractDatabaseSchema, analyzeGitHistory).
+**r3-005** — `src/retrofit/scan-ops-9-14.ts` (auditPackages, inventoryGovernanceDocs, checkTypeScriptCompilation, runExistingTests, testDynamicRoutes, analyzeVercelDeployment).
 
 Operator verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
