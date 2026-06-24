@@ -2,6 +2,36 @@
 
 ---
 
+# r3-003 — SCAN Ops 1–4 (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/scan-ops-1-4.ts` implementing SCAN Operations 1–4, and export all four functions from `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/scan-ops-1-4.ts` — NEW (4 exported functions, ~85 lines)
+- `src/retrofit/index.ts` — MODIFIED (added scan-ops-1-4 re-export)
+
+**Functions implemented:**
+| Function | Op | Description |
+|----------|----|-------------|
+| `scanDirectoryTree` | 1 | Recursive file walk with EXCLUDE filter; byExtension stats; totalBytes |
+| `buildDependencyGraph` | 2 | Parses TS/JS imports via regex; builds node map + edge list; resolves relative imports |
+| `detectBrokenImports` | 3 | Finds relative imports with no resolved target; checks missing named exports |
+| `detectDeadFiles` | 4 | Returns files not imported by any other file, excluding entry-point patterns |
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (by file inspection):**
+- `src/retrofit/` — types.ts, preflight.ts, index.ts (from r3-002), + scan-ops-1-4.ts (new)
+- `src/learning/` — 10 files, all present (Run 1 artifacts)
+- All types consumed (`FileTreeResult`, `DependencyGraph`, `BrokenImport`, `ImportEdge`) exist in `src/retrofit/types.ts`
+
+---
+
 # r3-001 Corruption Fix — 2026-06-24
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

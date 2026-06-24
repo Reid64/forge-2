@@ -1,6 +1,30 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-001 — Fingerprint corruption fix (2026-06-24)
+## Current Session: r3-003 — SCAN Ops 1–4 (2026-06-24)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Last Updated: 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Run Number | Run 3 (in progress) |
+| Phase | RETROFIT — SCAN |
+| Current Prompt | r3-003 (SCAN Ops 1–4) |
+| Prompts Executed | 15 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003) |
+| Prompts Passed | 15 (exec gate UNVERIFIED) |
+| Prompts Failed | 0 |
+
+## Last Completed Prompt
+**r3-003 (SCAN Ops 1–4)** — Created `src/retrofit/scan-ops-1-4.ts` with four SCAN operations: `scanDirectoryTree` (Op 1 — file walk + byExtension stats), `buildDependencyGraph` (Op 2 — import-edge map with relative resolution), `detectBrokenImports` (Op 3 — unresolvable imports + missing named exports), `detectDeadFiles` (Op 4 — unreferenced non-entry-point files). Added re-export to `src/retrofit/index.ts`. Exec gate blocked; zero TS errors expected by inspection.
+
+## Active Blockers
+1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
+
+## Next Action
+**r3-004** — SCAN Ops 5–8 (`src/retrofit/scan-ops-5-8.ts`): route inventory, env audit, schema extraction, git history.
+
+---
+
+# PRIOR SESSION — r3-001 — Fingerprint corruption fix (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
