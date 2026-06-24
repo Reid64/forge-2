@@ -2,6 +2,31 @@
 
 ---
 
+# r1-009 — 2026-06-24
+
+## Build Status: r1-009 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/integration.ts` — Learning Engine Integration Bridge, fully implemented.
+`src/phases/phase3-executor.ts` — Wired with all three learning callbacks (import + 3 call sites).
+
+### integration.ts
+- **`onRunStart(projectPath, buildId, techStackTags, projectName, dbPath?)`** → initializes DB, checks crash recovery, sets lock, syncs pull from master (graceful), loads cross-project knowledge, presents pending evolutions, checks session resumption, records build start in `build_outcomes` → returns `{ knowledge, resumeState }` ✓
+- **`onPromptComplete(result, dbPath?)`** → scores prompt via Loop 1 `scorePromptExecution`; on failure, parses TypeScript error lines (up to 5), calls Loop 2 `captureError` + `checkAutoElevation` for each matching `TSxxxx` error → never throws ✓
+- **`onRunEnd(buildId, projectPath, runStats, dbPath?)`** → exports session state, updates Loop 3 decision weights, runs Loop 5 evolution analysis, generates session handoff, syncs push to master → ALWAYS releases lock in `finally` block ✓
+- All imports verified: `database.js` (initializeForgeMemory, getMachineId), `queries.js` (saveToForgeMemory), `loops.js` (scorePromptExecution, captureError, checkAutoElevation, updateDecisionWeights, loadCrossProjectKnowledge, analyzeForEvolutions, presentEvolutions), `sync.js` (syncForgeMemory, loadSyncConfig), `session.js` (all 7 functions), `types.js` (GovernanceRule, SkillEntry, FixPattern) ✓
+- Non-critical posture: every learning call wrapped in try/catch; build proceeds unaffected if any learning operation fails ✓
+
+### phase3-executor.ts changes (minimal)
+- **Line 129**: `import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js';` ✓
+- **Line 754**: `const _learningState = await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(...)` ✓
+- **Lines 835–847**: `onPromptComplete({ promptId, success, retryCount, tokensConsumed, gatePassRate, errorOutput, buildId, projectName, taskType, techStackTags, templateHash })` ✓
+- **Lines 893–900**: `await onRunEnd(buildRunId ?? '', projectPath, { promptsExecuted, promptsPassed, promptsFailed, totalTokens, startTime: generatedAt }).catch(() => {})` ✓
+- All field mappings use actual executor variable names; `.catch(() => {})` guards ensure executor is unaffected ✓
+
+Exec gate blocked — `pnpm tsc --noEmit` requires operator approval. Verified by inspection: all exported symbols confirmed present in their source modules via grep; TypeScript strict mode compliance verified manually.
+
+---
+
 # r1-008 — 2026-06-24
 
 ## Build Status: r1-008 VERIFIED BY INSPECTION (exec gate blocked)

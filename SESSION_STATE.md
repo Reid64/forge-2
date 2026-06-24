@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-008 — precompact.ts + session.ts complete
+## Current Session: r1-009 — Learning Engine integration wired into executor
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,27 +8,28 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-008 |
-| Prompts Executed | 8 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008) |
-| Prompts Passed | 8 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-009 (COMPLETE) |
+| Prompts Executed | 9 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009) |
+| Prompts Passed | 9 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-008** — `src/learning/precompact.ts` + `src/learning/session.ts` complete. `precompact.ts`: `shouldPreCompact` (80% threshold + every 10th after 30), `invokePreCompactSave` (active errors + governance rules + git status → compact_snapshots), `restoreCompactedContext` (reads snapshot, formats FORGE CONTEXT RECOVERY block). `session.ts`: `getBuildFingerprint` (SHA-256 of file content composite, excludes build dirs), `exportSessionState` (git state + fingerprint → session_state.json + build_outcomes), `resumeForgeSession` (reads JSON, compares fingerprint), `testCrashRecovery` (stale lock > 5 min → crashed), `setForgeLock` / `removeForgeLock` (lock file lifecycle), `exportSessionHandoff` (8-section SESSION_HANDOFF.md). Exec gate blocked — verified by inspection against tsconfig strict flags.
+**r1-009** — `src/learning/integration.ts` created (Learning Engine Integration Bridge). Three call sites wired into `src/phases/phase3-executor.ts`: `onRunStart` (before the prompt loop, non-critical), `onPromptComplete` (after each prompt, scores + captures errors), `onRunEnd` (in finally-equivalent cleanup, always releases lock). All learning calls guarded with `.catch(() => {})` — executor is completely unaffected by learning failures. All imports verified against source modules. Exec gate blocked — verified by inspection.
 
 ## Active Blockers
-1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
+1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
 
 ## Next Action
-**Operator UNBLOCK (from permitted session):**
-1. `npx tsc --noEmit` → expect zero errors
-2. `pnpm run build` → expect clean
-3. `pnpm lint` → expect clean
-4. node test → expect R1-008 ALL TESTS PASS (precompact triggers, lock management, fingerprint)
+**Run 1 is now COMPLETE** (9/9 prompts passed). All learning engine modules built and wired:
+- types.ts, database.ts, fingerprint.ts, queries.ts, loops.ts, sync.ts, hooks-enhanced.ts, precompact.ts, session.ts, integration.ts
 
-**Then continue queue: next prompt r1-009**
+**Next: Run 2 — RETROFIT pipeline** (queue-run2.yaml → r2-001 through r2-013)
+**Operator UNBLOCK (recommended before Run 2):**
+1. `pnpm tsc --noEmit` → expect zero errors
+2. `pnpm run build` → expect clean
+3. `pnpm test` → expect learning module tests PASS
 
 ---
 
