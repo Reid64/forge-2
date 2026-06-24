@@ -924,23 +924,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     startTime: generatedAt,
   }).catch(() => {});
 
-  // Learning Engine: SessionEnd hook
-  try {
-    const { handleSessionEnd } = await import('../learning/session-hooks.js');
-    await handleSessionEnd({
-      buildId: buildRunId ?? machineId,
-      projectPath,
-      projectName,
-      promptsExecuted: completedPrompts + failedPrompts + skippedPrompts,
-      promptsPassed: completedPrompts,
-      promptsFailed: failedPrompts,
-      endReason: halted ? 'FAILED' : 'COMPLETED',
-      startTime: new Date(generatedAt),
-    });
-  } catch { /* non-fatal */ }
-
   // 5. Dry Run Mode (F11): assemble the simulation report from the per-prompt dry-run pass + the
   //    cost-estimator. Only on a dry run — a real build executed and needs no simulation.
+  // handleSessionEnd fires in the finally block below so it always runs.
+  try {
   let simulation: SimulationReport | null = null;
   if (dryRun) {
     simulation = await buildSimulationReport({
@@ -1002,6 +989,22 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     warnings,
     generatedAt,
   };
+  } finally {
+    // Learning Engine: SessionEnd — always fires (including on unexpected throw).
+    try {
+      const { handleSessionEnd } = await import('../learning/session-hooks.js');
+      await handleSessionEnd({
+        buildId: buildRunId ?? machineId,
+        projectPath,
+        projectName,
+        promptsExecuted: completedPrompts + failedPrompts + skippedPrompts,
+        promptsPassed: completedPrompts,
+        promptsFailed: failedPrompts,
+        endReason: halted ? 'FAILED' : 'COMPLETED',
+        startTime: new Date(generatedAt),
+      });
+    } catch { /* non-fatal */ }
+  }
 }
 
 // ---------------------------------------------------------------------------

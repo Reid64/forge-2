@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-6 (r6-001 complete; r6-002 queued)
-**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001…r5-010 complete)
+**Current Run:** RUN-6 (r6-001…r6-003 complete)
+**Total Prompts Executed:** 57+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-003 complete)
 **Total Prompts Planned:** 175-245 (across 4-6 runs)
 
 ---
@@ -65,15 +65,26 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 
 ---
 
-## Run 6 — IN PROGRESS (2/3)
-
-Queue file: `forge2-run6-20260624.yaml` (written to project root 2026-06-24)
+## Run 6 — IN PROGRESS (3/3+)
 
 | Prompt | Name | Status | Notes |
 |--------|------|--------|-------|
 | r6-001 | Inject handlePreToolUse into assemblePrompt | PASSED | `src/engine/prompt-assembler.ts` — added import + try/catch call to `handlePreToolUse`; prepends fix_patterns + governance_rules context block before assembled prompt sections; non-fatal (DB absent → skip). tsc/build/lint/test UNVERIFIED (exec gate blocked). |
-| r6-002 | Wire handlePostToolUse in phase3-executor.ts | PASSED | `src/phases/phase3-executor.ts` — verified `handlePostToolUse` call exists at lines 856-873 (added in r5 series); improved `tokensConsumed` from hardcoded `0` to `outcome.tokensEstimated` so the learning engine receives actual token data; call is already wrapped in try/catch (learning failures never crash the build). tsc/build UNVERIFIED (exec gate blocked). |
-| r6-003 | Harden phase1b-architect.ts governance suite generation | QUEUED | |
+| r6-002 | Wire handlePostToolUse in phase3-executor.ts | PASSED | `src/phases/phase3-executor.ts` — verified `handlePostToolUse` call exists at lines 856-873; improved `tokensConsumed` from hardcoded `0` to `outcome.tokensEstimated`. tsc/build UNVERIFIED (exec gate blocked). |
+| r6-003 | Wire handleSessionStart/handleSessionEnd hooks | PASSED | `src/phases/phase3-executor.ts` — `handleSessionStart` confirmed at lines 757-761 (before prompt loop); `handleSessionEnd` moved from sequential call into `try { ... } finally { handleSessionEnd }` block (lines 930-1007) so it always fires even on unexpected throw. All calls non-fatal (catch swallows). tsc/build UNVERIFIED (exec gate blocked). |
+
+---
+
+## Hook Wiring Summary (src/phases/phase3-executor.ts)
+
+| Hook | Location | When |
+|------|----------|------|
+| `onRunStart` | line 754 | Before prompt loop |
+| `handleSessionStart` | lines 757-761 (try/catch) | Before prompt loop |
+| `onPromptComplete` | lines 842-854 | After each prompt |
+| `handlePostToolUse` | lines 856-873 (try/catch) | After each prompt |
+| `onRunEnd` | lines 919-925 | After loop, before finally |
+| `handleSessionEnd` | lines 994-1006 (finally) | Always — even on throw |
 
 ---
 
@@ -84,11 +95,11 @@ Queue file: `forge2-run6-20260624.yaml` (written to project root 2026-06-24)
 - **Run 3:** COMPLETE ✓
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
-- **Run 6:** 2/3 IN PROGRESS
-- **Overall:** ~64/~65 queued prompts complete (~98%)
+- **Run 6:** 3/3+ IN PROGRESS
+- **Overall:** ~57/~65 queued prompts complete (~88%)
 
 ---
 
 ## Next Action
 
-Continue Run 6: execute r6-003 (harden phase1b-architect.ts governance suite generation).
+Continue Run 6: next prompt TBD (r6-003 complete).
