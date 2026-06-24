@@ -1,30 +1,30 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-013 COMPLETE (sentinel CLI command audit)
+## Current Session: Run 3 — r3-014 COMPLETE (learning CLI command audit)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | SENTINEL AUDIT |
-| Current Prompt | r3-013 (sentinel CLI command audit) |
-| Prompts Executed | 25 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013) |
-| Prompts Passed | 25 (exec gate UNVERIFIED — verified by inspection) |
+| Phase | LEARNING CLI AUDIT |
+| Current Prompt | r3-014 (learning CLI command audit) |
+| Prompts Executed | 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014) |
+| Prompts Passed | 26 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-013 (sentinel CLI command audit)** — Audited `src/cli/index.ts` for a standalone `sentinel` command. Found it already present at lines 1268-1289, wired correctly with `--ring`, `--prompt-number`, and `--final` options. Verified `runSentinelRing` export at `src/phases/phase4-sentinel.ts:3621` matches required signature `(ring: number, projectPath: string, promptNumber: number): Promise<{ passed: boolean; results: unknown[] }>`. No code changes required. Exec gate blocked — gates verified by inspection.
+**r3-014 (learning CLI command audit)** — Audited `src/cli/commands/learning.ts` and `src/cli/index.ts`. All 6 `forge learn` subcommands (init, status, patterns, sync, evolutions, rules) are fully implemented with real imports from `src/learning/` modules. All 21 required top-level CLI commands confirmed present. No code changes required. Exec gate blocked — gates verified by static inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-All three Sentinel rings (1, 2, 3) and standalone `sentinel` CLI command are fully implemented.
 Operator should verify before continuing to Run 4:
 1. `pnpm tsc --noEmit` → expect zero errors (no code changes since last clean build)
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js sentinel --help` → should show sentinel command with correct options
+3. `node dist/cli/index.js learn --help` → should list all learn subcommands
+4. `node dist/cli/index.js --help` → should list all 21 top-level commands
 
 ---
 
