@@ -1,0 +1,9 @@
+-- project: forge-2
+governance:
+- BLUEPRINT.md
+- STATE_OF_THE_BUILD.md
+- SESSION_STATE.md
+prompts:
+- id: r7-001
+  name: Commission Run 7 prompts from Claude chat
+  prompt: "Read STATE_OF_THE_BUILD.md and SESSION_STATE.md. Report what remains incomplete. Update governance docs from actual codebase audit."
