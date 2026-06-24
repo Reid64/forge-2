@@ -126,6 +126,7 @@ import {
 } from '../engine/model-router.js';
 import { runSmokeTests, shouldRunTests } from '../tools/incremental-tester.js';
 import { scanDeadCode } from '../tools/dead-code-scanner.js';
+import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -749,6 +750,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const instincts: Instinct[] = options.instincts ?? [];
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
 
+  // Learning engine — non-critical, failures are caught internally
+  const _learningState = await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
+
   // 3. Walk the prompts in dependency order.
   const ctx: LoopContext = {
     projectPath,
@@ -828,6 +832,19 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       executePrompt(ctx, entry, index, previousSentinel, schemaPromptsHaveRun)
     );
     outcomes.push(outcome);
+    onPromptComplete({
+      promptId: entry.id,
+      success: outcome.disposition === 'completed',
+      retryCount: outcome.recovery?.attempted ? 1 : 0,
+      tokensConsumed: outcome.tokensEstimated,
+      gatePassRate: outcome.sentinel?.passed ? 1.0 : 0.0,
+      errorOutput: outcome.sentinel?.diagnosticReport ?? undefined,
+      buildId: buildRunId ?? '',
+      projectName,
+      taskType: entry.prompt_type,
+      techStackTags: ['typescript'],
+      templateHash: outcome.promptHash,
+    });
     if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
 
     // Carry this prompt's Sentinel status into the next prompt (Contract 13).
@@ -872,6 +889,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       log(`WARNING: final updateBuild degraded (${describe(error)})`);
     }
   }
+
+  await onRunEnd(buildRunId ?? '', projectPath, {
+    promptsExecuted: completedPrompts + failedPrompts + skippedPrompts,
+    promptsPassed: completedPrompts,
+    promptsFailed: failedPrompts,
+    totalTokens,
+    startTime: generatedAt,
+  }).catch(() => {});
 
   // 5. Dry Run Mode (F11): assemble the simulation report from the per-prompt dry-run pass + the
   //    cost-estimator. Only on a dry run — a real build executed and needs no simulation.

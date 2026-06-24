@@ -2,6 +2,35 @@
 
 ---
 
+# r1-009 — FORGE 2.0 Learning Engine: `src/learning/integration.ts` + wired into `src/phases/phase3-executor.ts`, 2026-06-23
+
+## Build Status: r1-009 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/integration.ts`** (REPLACED stub with FULL implementation) — Integration Bridge:
+  - **`onRunStart(projectPath, buildId, techStackTags, projectName, dbPath?)`** — initializes learning DB, checks for crash recovery, sets forge lock, attempts sync pull from master (non-critical), loads cross-project knowledge, presents pending evolutions, checks for session resumption, records build start to `build_outcomes`.
+  - **`onPromptComplete(result, dbPath?)`** — scores prompt execution via Loop 1 (`scorePromptExecution`); on failure, parses TypeScript error lines (up to 5) via regex `^(.+?)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)`, captures errors via Loop 2 (`captureError`), and checks for auto-elevation to governance rules.
+  - **`onRunEnd(buildId, projectPath, runStats, dbPath?)`** — exports session state, updates decision weights (Loop 3), analyzes for evolutions (Loop 5), generates session handoff document, attempts sync push to master (non-critical). Lock is ALWAYS released in a `finally` block.
+- **`src/phases/phase3-executor.ts`** (MINIMALLY patched — 4 additions only):
+  - **Import** added: `import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js'` (line 129)
+  - **`onRunStart` call** added after `costTracker` init, before loop (line 754): `const _learningState = await onRunStart(...).catch(() => emptyKnowledge)` — non-critical, swallows errors
+  - **`onPromptComplete` call** added after each real prompt's `outcomes.push(outcome)` (lines 835–847): maps `outcome.*` and `entry.*` fields
+  - **`onRunEnd` call** added after `updateBuild`, before simulation report (lines 893–899): `await onRunEnd(...).catch(() => {})` — lock released in finally block inside integration
+
+### Design invariants verified by inspection
+- All imports used: removed `getLastSyncTimestamp` (was imported but unused in spec) to pass lint ✓
+- `_learningState` prefixed with underscore to satisfy no-unused-vars ✓
+- All three integration calls wrapped with `.catch(() => {})` — executor is completely unaffected by learning failures ✓
+- `onRunEnd`'s `finally` block always calls `removeForgeLock` even if all optional steps fail ✓
+- `outcome.sentinel?.diagnosticReport ?? undefined` correctly typed as `string | undefined` for `errorOutput?: string` ✓
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. `git diff src/phases/phase3-executor.ts | head -60` → verify minimal diff (import + 3 call sites).
+3. Proceed to next prompt in queue.
+
+---
+
 # r1-008 — FORGE 2.0 Learning Engine: `src/learning/precompact.ts` + `src/learning/session.ts` complete implementation, 2026-06-23 (session #63)
 
 ## Build Status: r1-008 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
