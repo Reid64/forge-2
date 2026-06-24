@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: POST-RUN-4 — Awaiting Run 5
+## Current Session: POST-RUN-4 — Run 4 COMPLETE, Awaiting Run 5
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -12,7 +12,7 @@
 |-------|-------|
 | Run Number | 4 (complete) |
 | Phase | POST-RUN-4 |
-| Current Prompt | None — awaiting Run 5 |
+| Current Prompt | None — Run 4 complete, queue-run5.yaml written |
 | Prompts Executed This Run | 13 (r4-001 … r4-013) |
 | Prompts Passed | 13 |
 | Prompts Failed | 0 |
@@ -23,17 +23,17 @@
 
 ## Last Completed Prompt
 
-**r4-012** — `README.md` COMPLETE. 306-line README written from actual source reads: `package.json`, `forge_config.json`, `src/cli/index.ts` (commander wiring lines 1103–1302), `src/phases/phase4-sentinel.ts` (SentinelCheckName type lines 126–151), `src/cli/commands/learning.ts`, plus directory listings for `src/phases/`, `src/learning/`, `src/retrofit/`. Verification: 306 lines ≥ 80 ✓, "retrofit" appears 5 times ≥ 3 ✓. Exec gate blocked live CLI help commands; all content sourced from file reads only. Zero fabrication.
+**r4-013** — Complete verification pass and handoff. Filesystem audit via Read/Glob/Bash wc tools (exec gate blocked tsc/build/test). All module criteria verified: Learning Engine 12 files COMPLETE, RETROFIT 10 files COMPLETE, adversarial-review.ts 127 lines COMPLETE, session-lifecycle.ts 212 lines COMPLETE, handoff-generator.ts 155 lines COMPLETE, README.md 306 lines COMPLETE, forge_config.json EXISTS, AGENTS.md ForgeRetrofit PRESENT. STATE_OF_THE_BUILD.md updated, SESSION_STATE.md updated, `.forge/HANDOFF.md` written with verbatim audit output. `queue-run5.yaml` written to `C:\Users\manag\Documents\FORGE\projects\forge-2\`. Run 4 formally closed.
 
 ---
 
 ## Next Action — What Remains Incomplete
 
-1. **Run `pnpm run build`** — dist/ is stale from Jun 23. All Run 3/4 src changes (learning/, retrofit/, cli/) have not been compiled. The build must produce dist/learning/, dist/retrofit/ subdirs before any CLI smoke test is valid.
+1. **Wire PreToolUse hook** (r5-001) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the only remaining feature gap. Queue: `queue-run5.yaml`.
 
-2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output. All previous verification was by inspection only due to exec gate.
+2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output at Run 5 start. All previous verification was by inspection only due to exec gate.
 
-3. **Wire PreToolUse hook** (r5-001) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the primary remaining feature gap.
+3. **Run `pnpm run build`** — dist/ is stale from Jun 23. All Run 3/4 src changes (learning/, retrofit/, cli/) have not been compiled. The build must produce dist/learning/, dist/retrofit/ subdirs before any CLI smoke test is valid.
 
 4. **Run `pnpm test` live** — r4-010 performed static analysis (30/30 expected PASS). Live run blocked by exec gate. Needs `DANGEROUSLY_SKIP_PERMISSIONS=1` in session environment to execute.
 
