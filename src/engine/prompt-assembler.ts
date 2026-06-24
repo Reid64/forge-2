@@ -54,6 +54,7 @@ import {
 } from './model-router.js';
 import type { ClaudeModel, ModelSelection, ModelRouterOptions } from './model-router.js';
 import { logLine } from '../tools/forge-logger.js';
+import { handlePreToolUse } from '../learning/hooks-enhanced.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -482,7 +483,32 @@ export async function assemblePrompt(
   // 5. Mandatory state-audit footer (verbatim).
   sections.push(STATE_AUDIT_FOOTER);
 
-  const prompt = sections.join('\n\n');
+  // Query fix_patterns + governance_rules from forge_memory.db and prepend to the prompt.
+  // Non-fatal: DB unavailable or query error → skip injection and continue.
+  let learningContextPrefix = '';
+  try {
+    const techStackTags: string[] = input.stackFingerprint
+      ? [
+          input.stackFingerprint.framework,
+          input.stackFingerprint.language,
+          input.stackFingerprint.database,
+          input.stackFingerprint.deployment,
+          input.stackFingerprint.packageManager,
+        ].filter((v): v is string => typeof v === 'string' && v !== '')
+      : [];
+    const preToolResult = await handlePreToolUse(entry.prompt_type, techStackTags, 0);
+    if (preToolResult.contextInjection) {
+      learningContextPrefix = preToolResult.contextInjection + '\n';
+      log(
+        `PreToolUse: injected ${preToolResult.rulesFound} governance rule(s) and ` +
+          `${preToolResult.patternsFound} fix pattern(s) from forge_memory.db`
+      );
+    }
+  } catch {
+    // non-fatal — skip injection
+  }
+
+  const prompt = learningContextPrefix + sections.join('\n\n');
   const hash = hashPrompt(prompt);
 
   // 6. Automatic model selection (Model Router) — keyed on prompt type + recovery flag.

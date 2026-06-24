@@ -24,7 +24,7 @@ export interface SessionEndResult {
 
 export async function handleSessionStart(
   buildId: string,
-  projectPath: string,
+  _projectPath: string,
   projectName: string,
   dbPath?: string
 ): Promise<SessionStartResult> {

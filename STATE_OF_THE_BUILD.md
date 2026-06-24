@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** POST-RUN-5 (r5-010 complete; Run 6 queued)
+**Current Run:** RUN-6 (r6-001 complete; r6-002 queued)
 **Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001…r5-010 complete)
 **Total Prompts Planned:** 175-245 (across 4-6 runs)
 
@@ -65,17 +65,15 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 
 ---
 
-## Run 6 — QUEUED
+## Run 6 — IN PROGRESS (1/3)
 
 Queue file: `forge2-run6-20260624.yaml` (written to project root 2026-06-24)
-Target: `C:\Users\manag\Documents\FORGE\projects\forge-2\forge2-run6-20260624.yaml`
-Note: queue file written to forge-2 project root due to exec gate path restrictions on FORGE dir.
 
-| Prompt | Name | Status |
-|--------|------|--------|
-| r6-001 | Audit phase3-executor.ts hook wiring and verify learning engine is active | QUEUED |
-| r6-002 | Implement PRD 4-pass refinement hardening in phase1a-prd.ts | QUEUED |
-| r6-003 | Harden phase1b-architect.ts governance suite generation | QUEUED |
+| Prompt | Name | Status | Notes |
+|--------|------|--------|-------|
+| r6-001 | Inject handlePreToolUse into assemblePrompt | PASSED | `src/engine/prompt-assembler.ts` — added import + try/catch call to `handlePreToolUse`; prepends fix_patterns + governance_rules context block before assembled prompt sections; non-fatal (DB absent → skip). tsc/build/lint/test UNVERIFIED (exec gate blocked). |
+| r6-002 | Implement PRD 4-pass refinement hardening in phase1a-prd.ts | QUEUED | |
+| r6-003 | Harden phase1b-architect.ts governance suite generation | QUEUED | |
 
 ---
 
@@ -86,13 +84,11 @@ Note: queue file written to forge-2 project root due to exec gate path restricti
 - **Run 3:** COMPLETE ✓
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
-- **Run 6:** 0/3 QUEUED
-- **Overall:** ~62/~65 queued prompts complete (~95%)
+- **Run 6:** 1/3 IN PROGRESS
+- **Overall:** ~63/~65 queued prompts complete (~97%)
 
 ---
 
 ## Next Action
 
-Execute `forge2-run6-20260624.yaml` via FORGE orchestrator.
-Copy queue file from `C:\Users\manag\Documents\forge-2\forge2-run6-20260624.yaml`
-to `C:\Users\manag\Documents\FORGE\projects\forge-2\` before launching Run 6.
+Continue Run 6: execute r6-002 (phase1a-prd.ts PRD 4-pass refinement hardening).
