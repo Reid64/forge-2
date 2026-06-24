@@ -3705,3 +3705,35 @@ No logic, variable names, or structure changed. Only the JSDoc comment text was 
 | src/tools/ | 15+ files | Run 3 IN PROGRESS |
 | src/memory/ | 12+ files | Run 3 IN PROGRESS |
 | src/cli/ | 4+ files | Run 3 IN PROGRESS |
+
+---
+
+## r3-003 Execution — 2026-06-24
+
+**Prompt:** r3-003 (SCAN Ops 1–4)
+**Snapshot:** Before r3-003 (git tag 1554a60)
+**Outcome:** VERIFIED BY INSPECTION — file already present, identical to spec
+
+### Files
+| File | Purpose |
+|------|---------|
+| src/retrofit/scan-ops-1-4.ts | SCAN Ops 1–4: scanDirectoryTree, buildDependencyGraph, detectBrokenImports, detectDeadFiles |
+
+`scan-ops-1-4.ts` was created in a prior session and is byte-for-byte identical to the r3-003 spec.
+`src/retrofit/index.ts` already exports all four functions from `./scan-ops-1-4.js`.
+
+### Gate Status
+- `pnpm tsc --noEmit`: UNVERIFIED — exec gate blocked (sandbox policy)
+- No files created or modified — prior run artifact confirmed correct by inspection
+
+### Codebase Audit (2026-06-24, post r3-003)
+| Module | Files Present | Status |
+|--------|--------------|--------|
+| src/learning/ | 10 files | Run 1 COMPLETE |
+| src/retrofit/ | 10 files (types, preflight, scan-ops-1-4, scan-ops-5-8, scan-ops-9-14, scan, diagnose, reconcile, index, pipeline) | Run 2 COMPLETE |
+| src/engine/ | 9+ files | Run 3 IN PROGRESS |
+| src/phases/ | 6+ files | Run 3 IN PROGRESS |
+| src/analysis/ | 6+ files | Run 3 IN PROGRESS |
+| src/tools/ | 15+ files | Run 3 IN PROGRESS |
+| src/memory/ | 12+ files | Run 3 IN PROGRESS |
+| src/cli/ | 4+ files | Run 3 IN PROGRESS |
