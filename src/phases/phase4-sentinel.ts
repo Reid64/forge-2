@@ -106,6 +106,8 @@ import { runSixLawsCheck } from '../engine/governance-gate.js';
 import type { SixLawsResult } from '../analysis/six-laws-verifier.js';
 import { BuildMemory } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
+import { initializeForgeMemory } from '../learning/database.js';
+import { registerError } from '../learning/queries.js';
 
 const execAsync = promisify(exec);
 
@@ -122,6 +124,7 @@ const execAsync = promisify(exec);
 export type SentinelCheckName =
   | 'migration_safety'
   | 'typescript'
+  | 'eslint'
   | 'build'
   | 'file_integrity'
   | 'schema_drift'
@@ -142,6 +145,7 @@ export type SentinelCheckName =
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
   'typescript',
+  'eslint',
   'build',
   'file_integrity',
   'schema_drift',
@@ -461,6 +465,21 @@ export interface SentinelOptions {
    * Playwright installed that exits non-zero FAILS (not skipped); a timeout FAILS.
    */
   playwright?: { projectPath?: string; command?: string; timeoutMs?: number };
+  /**
+   * Ring 1b ESLint timeout (ms). Default: same as `tscTimeoutMs` (5 minutes).
+   * ESLint runs as part of the mandatory Ring 1 gate, after TypeScript and before Build.
+   */
+  eslintTimeoutMs?: number;
+  /**
+   * Ring 1c schema drift (OPTIONAL). When supplied, Sentinel reads `database.types.ts` (checked
+   * under `src/types/`, `src/`, and the project root) to extract declared Supabase table names
+   * and compares them against the live Supabase schema via the REST API (`/rest/v1/`). Credentials
+   * are read from `SUPABASE_SERVICE_ROLE_KEY` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` env vars or from
+   * `.env.local`. Skips gracefully when the file is absent or credentials are unavailable — never
+   * a false failure. A table declared in `database.types.ts` that is MISSING from live Supabase
+   * FAILS the gate; extra live tables are OK (additions are acceptable).
+   */
+  ring1SchemaDrift?: { projectPath?: string };
   /** Progress reporter. Default logs to the console with a `[FORGE:sentinel]` prefix. */
   log?: (message: string) => void;
 }
@@ -1386,6 +1405,331 @@ function evaluateSixLaws(result: SixLawsResult, durationMs: number): CheckResult
 }
 
 // ---------------------------------------------------------------------------
+// Ring 1 — Enhanced per-prompt gate (TypeScript error parsing, ESLint, schema drift)
+// ---------------------------------------------------------------------------
+
+/** A TypeScript error parsed from `tsc --noEmit --pretty false` output. */
+interface TscError {
+  file: string;
+  line: number;
+  col: number;
+  code: string;
+  message: string;
+}
+
+/** Regex that matches a TypeScript compiler error line from `--pretty false` output. */
+const TSC_ERROR_RE = /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/gm;
+
+/**
+ * Parse TypeScript compiler errors out of `tsc --noEmit --pretty false` output.
+ * Returns an empty array when the output contains no recognisable error lines.
+ */
+export function parseTscErrors(output: string): TscError[] {
+  const errors: TscError[] = [];
+  const re = new RegExp(TSC_ERROR_RE.source, TSC_ERROR_RE.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(output)) !== null) {
+    errors.push({
+      file: (m[1] ?? '').trim(),
+      line: parseInt(m[2] ?? '0', 10),
+      col: parseInt(m[3] ?? '0', 10),
+      code: m[4] ?? '',
+      message: (m[5] ?? '').trim(),
+    });
+  }
+  return errors;
+}
+
+/** Guarded: initialise the learning DB and register one Ring 1 error fingerprint. Never throws. */
+function tryRegisterRing1Error(
+  opts: { file: string; code: string; message: string; category: 'COMPILE' | 'LINT' | 'SCHEMA' },
+  log: (m: string) => void
+): void {
+  try {
+    initializeForgeMemory();
+    registerError({
+      errorCode: opts.code,
+      filePath: opts.file,
+      errorMessage: opts.message,
+      errorCategory: opts.category,
+      techStack: ['typescript', 'nodejs'],
+    });
+  } catch (err) {
+    log(`WARNING: Ring 1 DB registration failed (${err instanceof Error ? err.message : String(err)})`);
+  }
+}
+
+/**
+ * Ring 1a: Enhanced TypeScript check.
+ * Runs `npx tsc --noEmit --pretty false`, parses errors with {@link TSC_ERROR_RE},
+ * registers each error fingerprint to the learning DB, and returns a {@link CheckResult}.
+ * Threshold: 0 errors (any error fails the gate).
+ */
+async function runRing1TypescriptCheck(
+  projectPath: string,
+  timeoutMs: number,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const res = await run('npx tsc --noEmit --pretty false', projectPath, timeoutMs);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('typescript', `TypeScript TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, combined, durationMs);
+  }
+  if (res.ok) {
+    return pass('typescript', '`npx tsc --noEmit` passed — 0 errors', combined, durationMs);
+  }
+
+  const errors = parseTscErrors(combined);
+  for (const e of errors) {
+    tryRegisterRing1Error({ file: e.file, code: e.code, message: e.message, category: 'COMPILE' }, log);
+  }
+
+  const first = errors[0];
+  const detail = first
+    ? `TypeScript: ${errors.length} error(s) — first: ${first.code} at ${first.file}:${first.line}: ${first.message}`
+    : `TypeScript failed (exit ${res.exitCode ?? 'null'}): ${firstLine(res.stderr) || firstLine(res.stdout)}`;
+  const output = errors.length > 0
+    ? errors.map((e) => `${e.code} at ${e.file}:${e.line},${e.col}: ${e.message}`).join('\n')
+    : combined;
+
+  return fail('typescript', detail, output, durationMs);
+}
+
+/** A single message from ESLint's JSON formatter output. */
+interface EslintMessage {
+  ruleId: string | null;
+  severity: number; // 1 = warn, 2 = error
+  message: string;
+  line: number;
+  column: number;
+}
+/** A single file result from ESLint's JSON formatter output. */
+interface EslintFileResult {
+  filePath: string;
+  messages: EslintMessage[];
+}
+
+/**
+ * Parse the JSON output produced by `eslint --format json`.
+ * Returns an empty array when the string is not parseable JSON or not an array.
+ */
+export function parseEslintJsonOutput(jsonStr: string): EslintFileResult[] {
+  try {
+    const arr = JSON.parse(jsonStr) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr as EslintFileResult[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Ring 1b: ESLint check.
+ * Runs `npx eslint . --format json --ext .ts,.tsx`, parses the JSON output, counts severity-2
+ * (error-level) findings, registers each to the learning DB, and returns a {@link CheckResult}.
+ * Threshold: 0 severity-2 findings. Skips gracefully when ESLint is not installed.
+ */
+async function runRing1EslintCheck(
+  projectPath: string,
+  timeoutMs: number,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const res = await run('npx eslint . --format json --ext .ts,.tsx', projectPath, timeoutMs);
+  const durationMs = nowMs() - startedAt;
+
+  if (res.timedOut) {
+    return fail('eslint', `ESLint TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, res.stderr, durationMs);
+  }
+
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  const jsonStr = res.stdout.trim();
+
+  if (!jsonStr.startsWith('[')) {
+    // Not JSON — ESLint not installed, binary not found, or fatal config error.
+    if (/command not found|is not recognized|Cannot find module|no such file|ENOENT/i.test(combined)) {
+      return skip('eslint', 'ESLint not installed (`npx eslint` not available) — Ring 1b ESLint check skipped');
+    }
+    return fail(
+      'eslint',
+      `ESLint exited ${res.exitCode ?? 'null'} without JSON output: ${firstLine(combined)}`,
+      clip(combined),
+      durationMs
+    );
+  }
+
+  const results = parseEslintJsonOutput(jsonStr);
+  const errors: { file: string; rule: string; message: string; line: number; col: number }[] = [];
+
+  for (const fr of results) {
+    for (const lintMsg of fr.messages) {
+      if (lintMsg.severity === 2) {
+        const rule = lintMsg.ruleId ?? 'unknown';
+        errors.push({ file: fr.filePath, rule, message: lintMsg.message, line: lintMsg.line, col: lintMsg.column });
+        tryRegisterRing1Error({ file: fr.filePath, code: rule, message: lintMsg.message, category: 'LINT' }, log);
+      }
+    }
+  }
+
+  if (errors.length === 0) {
+    return pass('eslint', '`npx eslint` passed — 0 severity-2 errors', '', durationMs);
+  }
+
+  const first = errors[0]!;
+  const detail = `ESLint: ${errors.length} error(s) — ${first.rule} at ${first.file}:${first.line}: ${first.message}`;
+  const output = errors.map((e) => `${e.rule} at ${e.file}:${e.line},${e.col}: ${e.message}`).join('\n');
+  return fail('eslint', detail, output, durationMs);
+}
+
+/**
+ * Parse Supabase-generated `database.types.ts` to extract declared table names.
+ * Looks for the `Tables: {` block inside the `Database` type and returns first-level property
+ * names (skipping `Row`, `Insert`, `Update`, `Relationships`). Returns [] when not found.
+ */
+export function parseDatabaseTypesTableNames(content: string): string[] {
+  const names: string[] = [];
+  // Find the Tables block — stop at the next sibling key (Views / Functions / Enums / end of public)
+  const tablesBlockMatch = /Tables:\s*\{([\s\S]*?)(?:\n\s{4,8}(?:Views|Functions|Enums|CompositeTypes):\s*\{|\n\s{2,4}\})/m.exec(content);
+  if (!tablesBlockMatch) return names;
+  const block = tablesBlockMatch[1] ?? '';
+  // Extract top-level property names: 6–12 spaces of indentation followed by `identifier: {`
+  const rowRe = /^\s{6,12}(\w+):\s*\{/gm;
+  const skipNames = new Set(['Row', 'Insert', 'Update', 'Relationships']);
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(block)) !== null) {
+    const name = m[1];
+    if (name && !skipNames.has(name)) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * Try to list Supabase table names via the PostgREST REST API (`/rest/v1/`).
+ * Reads credentials from env vars or `.env.local`. Returns null when credentials are absent or
+ * the request fails (graceful degradation — never throws).
+ */
+async function getSupabaseTableNamesFromEnv(
+  projectPath: string,
+  log: (m: string) => void
+): Promise<string[] | null> {
+  let url = process.env['NEXT_PUBLIC_SUPABASE_URL'] ?? process.env['SUPABASE_URL'] ?? '';
+  let key = process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY'] ?? '';
+
+  if (!url || !key) {
+    const envLocal = await readTextSafe(join(projectPath, '.env.local'));
+    if (envLocal) {
+      const urlM = /(?:NEXT_PUBLIC_)?SUPABASE_URL=([^\r\n]+)/m.exec(envLocal);
+      const keyM = /SUPABASE_SERVICE_ROLE_KEY=([^\r\n]+)|NEXT_PUBLIC_SUPABASE_ANON_KEY=([^\r\n]+)/m.exec(envLocal);
+      if (urlM) url = (urlM[1] ?? '').trim();
+      if (keyM) key = ((keyM[1] ?? keyM[2]) ?? '').trim();
+    }
+  }
+
+  if (!url || !key) return null;
+
+  try {
+    const resp = await fetch(`${url}/rest/v1/`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+    });
+    if (!resp.ok) {
+      log(`WARNING: Supabase REST API returned HTTP ${resp.status} — Ring 1c schema drift skipped`);
+      return null;
+    }
+    // PostgREST OpenAPI: { paths: { '/tableName': {...} } }
+    const data = await resp.json() as { paths?: Record<string, unknown> };
+    if (!data.paths) return null;
+    return Object.keys(data.paths)
+      .filter((p) => p.startsWith('/') && !p.includes('{'))
+      .map((p) => p.slice(1).split('?')[0] ?? '')
+      .filter(Boolean);
+  } catch (err) {
+    log(`WARNING: Supabase table-list fetch failed (${err instanceof Error ? err.message : String(err)}) — Ring 1c schema drift skipped`);
+    return null;
+  }
+}
+
+/**
+ * Ring 1c: Schema drift — compare `database.types.ts` table names against live Supabase.
+ * Searches for the types file under common paths; skips when absent. Reads Supabase credentials
+ * from env / `.env.local`; skips when absent. A declared table MISSING from live Supabase FAILS.
+ * Extra live tables are OK. Never throws (graceful degradation throughout).
+ */
+async function runRing1TypesDriftCheck(
+  projectPath: string,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+
+  const candidatePaths = [
+    join(projectPath, 'src', 'types', 'database.types.ts'),
+    join(projectPath, 'src', 'database.types.ts'),
+    join(projectPath, 'database.types.ts'),
+    join(projectPath, 'types', 'database.types.ts'),
+  ];
+
+  let typesContent: string | null = null;
+  for (const p of candidatePaths) {
+    typesContent = await readTextSafe(p);
+    if (typesContent) break;
+  }
+
+  if (!typesContent) {
+    return skip('live_schema_drift', 'database.types.ts not found — Ring 1c schema drift not applicable');
+  }
+
+  const typesTables = parseDatabaseTypesTableNames(typesContent);
+  if (typesTables.length === 0) {
+    return skip('live_schema_drift', 'No table names parsed from database.types.ts — Ring 1c schema drift not evaluated');
+  }
+
+  const liveTables = await getSupabaseTableNamesFromEnv(projectPath, log);
+  const durationMs = nowMs() - startedAt;
+
+  if (liveTables === null) {
+    return skip(
+      'live_schema_drift',
+      `database.types.ts declares ${typesTables.length} table(s) but Supabase credentials not found — skipping live comparison`
+    );
+  }
+
+  const liveSet = new Set(liveTables);
+  const missingFromLive = typesTables.filter((t) => !liveSet.has(t));
+
+  if (missingFromLive.length === 0) {
+    return pass(
+      'live_schema_drift',
+      `Ring 1c schema drift: all ${typesTables.length} declared table(s) present in live Supabase`,
+      `Types tables: ${typesTables.join(', ')}\nLive tables: ${liveTables.join(', ')}`,
+      durationMs
+    );
+  }
+
+  for (const t of missingFromLive) {
+    tryRegisterRing1Error(
+      {
+        file: 'database.types.ts',
+        code: 'SCHEMA_DRIFT',
+        message: `Table '${t}' declared in database.types.ts but missing from live Supabase`,
+        category: 'SCHEMA',
+      },
+      log
+    );
+  }
+
+  return fail(
+    'live_schema_drift',
+    `Ring 1c schema drift: ${missingFromLive.length} table(s) in database.types.ts missing from live Supabase: ${missingFromLive.join(', ')}`,
+    `Types tables: ${typesTables.join(', ')}\nLive tables: ${liveTables.join(', ')}\nMissing: ${missingFromLive.join(', ')}`,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostic report
 // ---------------------------------------------------------------------------
 
@@ -1509,19 +1853,28 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     }
   }
 
-  // --- 1. TypeScript -------------------------------------------------------
+  // --- 1. TypeScript (Ring 1a) — enhanced: parses errors + registers to learning DB ------------
   if (shouldSkipRest()) {
     record(skipRest('typescript'));
   } else {
-    log('check 1/5: TypeScript (pnpm tsc --noEmit)');
-    record(await runCommandCheck('typescript', 'pnpm tsc --noEmit', projectPath, tscTimeoutMs, run));
+    log('check 1/6: TypeScript Ring 1a (npx tsc --noEmit --pretty false) — error-parsing + DB');
+    record(await runRing1TypescriptCheck(projectPath, tscTimeoutMs, run, log));
+  }
+
+  // --- 1b. ESLint (Ring 1b) — new mandatory gate: severity-2 errors → fail -----------------
+  const eslintTimeoutMs = options.eslintTimeoutMs ?? tscTimeoutMs;
+  if (shouldSkipRest()) {
+    record(skipRest('eslint'));
+  } else {
+    log('check 2/6: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) — 0 errors threshold');
+    record(await runRing1EslintCheck(projectPath, eslintTimeoutMs, run, log));
   }
 
   // --- 2. Build ------------------------------------------------------------
   if (shouldSkipRest()) {
     record(skipRest('build'));
   } else {
-    log('check 2/5: Build (pnpm run build)');
+    log('check 3/6: Build (pnpm run build)');
     record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run));
   }
 
@@ -1529,7 +1882,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('file_integrity'));
   } else {
-    log('check 3/5: File Integrity (git diff --name-status)');
+    log('check 4/6: File Integrity (git diff --name-status)');
     const startedAt = nowMs();
     let changes: GitFileChange[] | null;
     try {
@@ -1550,7 +1903,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   } else if (!options.schemaPromptsHaveRun) {
     record(skip('schema_drift', 'no schema prompts have run yet — drift check not applicable'));
   } else {
-    log('check 4/5: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');
+    log('check 5/6: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');
     const startedAt = nowMs();
     const registryMd =
       options.schemaRegistryContent ?? (await readTextSafe(join(governanceDir, 'SCHEMA_REGISTRY.md')));
@@ -1575,7 +1928,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('dependencies'));
   } else {
-    log('check 5/5: Dependencies (package.json vs TOOLCHAIN.md)');
+    log('check 6/6: Dependencies (package.json vs TOOLCHAIN.md)');
     const startedAt = nowMs();
     const pkgJson = options.packageJsonContent ?? (await readTextSafe(join(projectPath, 'package.json')));
     if (pkgJson === null) {
@@ -1590,6 +1943,27 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         baseline = parsed.length > 0 ? parsed : null;
       }
       record(evaluateDependencies(currentDeps, baseline, nowMs() - startedAt));
+    }
+  }
+
+  // --- Ring 1c. Schema Drift vs database.types.ts (OPTIONAL when ring1SchemaDrift is configured) -
+  // Reads database.types.ts, parses declared table names, compares against live Supabase via the
+  // REST API. Skips gracefully when the file is absent or credentials are unavailable (never a
+  // false failure). A table declared in the types file but MISSING from live Supabase FAILS.
+  if (options.ring1SchemaDrift) {
+    if (shouldSkipRest()) {
+      record(skipRest('live_schema_drift'));
+    } else {
+      log('check Ring 1c: Schema Drift (database.types.ts vs live Supabase)');
+      const r1SchemaPath = options.ring1SchemaDrift.projectPath ?? projectPath;
+      let r1Schema: CheckResult;
+      try {
+        r1Schema = await runRing1TypesDriftCheck(r1SchemaPath, log);
+      } catch (err) {
+        log(`WARNING: Ring 1c schema drift failed (${describe(err)})`);
+        r1Schema = skip('live_schema_drift', 'Ring 1c schema drift runner threw — not evaluated');
+      }
+      record(r1Schema);
     }
   }
 

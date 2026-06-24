@@ -1,29 +1,28 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-009 — CLI INTEGRATION: 'forge retrofit' command (2026-06-24)
+## Current Session: r3-010 — SENTINEL RING 1 HARDENING (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT — CLI INTEGRATION |
-| Current Prompt | r3-009 (CLI Integration) |
-| Prompts Executed | 21 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008 + r3-009) |
-| Prompts Passed | 21 (exec gate UNVERIFIED) |
+| Phase | SENTINEL HARDENING |
+| Current Prompt | r3-010 (Sentinel Ring 1) |
+| Prompts Executed | 22 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010) |
+| Prompts Passed | 22 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-009 (CLI INTEGRATION)** — Added `forge retrofit <project-path>` command to `src/cli/index.ts` with 6 options (--scope, --skip-dynamic, --resume, --non-interactive, --queue-output, --api-key). Created `src/retrofit/pipeline.ts` re-export shim so the CLI can dynamically import from `'../retrofit/pipeline.js'`. Command inserted after the 'config' block and before `registerLearningCommands`. TypeScript types verified by inspection: `opts['scope']` cast to `ScanScope`, boolean coercions safe, dynamic import path resolves via shim. Exec gate blocked; zero TS errors expected.
+**r3-010 (SENTINEL RING 1 HARDENING)** — Audited `src/phases/phase4-sentinel.ts` and hardened Ring 1. TypeScript check was exit-code-only; ESLint was absent; database.types.ts schema drift was absent. Added: `'eslint'` to `SentinelCheckName` union and `SENTINEL_CHECK_ORDER` (now 6 mandatory checks); new Ring 1a TypeScript check with regex error parsing + DB fingerprint registration; new Ring 1b ESLint check (`npx eslint . --format json --ext .ts,.tsx`, threshold=0 severity-2, skips if not installed); new Ring 1c optional schema drift against `database.types.ts` vs live Supabase (with graceful skip when file or credentials absent); `ring1SchemaDrift` and `eslintTimeoutMs` options added to `SentinelOptions`. Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-Run 3 RETROFIT module complete. Operator can verify with:
+Operator can verify with:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js retrofit --help` → expect command with all 6 options listed
 
 ---
 

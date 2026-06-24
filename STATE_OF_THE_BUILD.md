@@ -2,6 +2,54 @@
 
 ---
 
+# r3-010 — SENTINEL RING 1 HARDENING (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Audit `src/phases/phase4-sentinel.ts` and harden Ring 1 (every-prompt gate).
+
+**Audit findings (pre-change):**
+- TypeScript check: existed, but only checked exit code via `pnpm tsc --noEmit` — no error parsing, no DB logging
+- ESLint check: MISSING entirely (not in mandatory 5 or optional checks)
+- Schema drift vs database.types.ts: MISSING (existing checks use SCHEMA_REGISTRY.md or live SQL executor)
+
+**Changes made to `src/phases/phase4-sentinel.ts`:**
+- Added imports: `initializeForgeMemory` from `../learning/database.js`, `registerError` from `../learning/queries.js`
+- Added `'eslint'` to `SentinelCheckName` union
+- Added `'eslint'` to `SENTINEL_CHECK_ORDER` (after `'typescript'`, before `'build'`) — now 6 mandatory checks
+- Added `eslintTimeoutMs` and `ring1SchemaDrift` options to `SentinelOptions`
+- Added new Ring 1 section with 6 exported/private functions:
+  - `parseTscErrors(output)` — parses `tsc --pretty false` output with regex `/^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/gm`
+  - `tryRegisterRing1Error(opts, log)` — guarded DB init + fingerprint registration
+  - `runRing1TypescriptCheck(...)` — Ring 1a: `npx tsc --noEmit --pretty false`, parses errors, logs to DB
+  - `parseEslintJsonOutput(jsonStr)` — parses ESLint `--format json` output
+  - `runRing1EslintCheck(...)` — Ring 1b: `npx eslint . --format json --ext .ts,.tsx`, threshold=0 severity-2, logs to DB, skips if ESLint not installed
+  - `parseDatabaseTypesTableNames(content)` — extracts table names from Supabase `database.types.ts`
+  - `getSupabaseTableNamesFromEnv(projectPath, log)` — fetches live table list via REST API, reads creds from env/.env.local, returns null if absent
+  - `runRing1TypesDriftCheck(projectPath, log)` — Ring 1c: compares database.types.ts tables against live Supabase, skips gracefully
+- Updated `runSentinel()`:
+  - Check 1/6: TypeScript → now uses `runRing1TypescriptCheck` (enhanced)
+  - Check 2/6: ESLint → new `runRing1EslintCheck` (mandatory)
+  - Check 3/6: Build (unchanged)
+  - Check 4/6: File Integrity (unchanged)
+  - Check 5/6: Schema Drift (unchanged)
+  - Check 6/6: Dependencies (unchanged)
+  - Ring 1c: optional `ring1SchemaDrift` check inserted after dependencies, before security scan
+
+**TypeScript strict-mode compliance (by inspection):**
+- All array accesses guarded via `?? ''` or conditional checks (noUncheckedIndexedAccess)
+- No variable shadowing (renamed `msg` → `lintMsg` in ESLint for-loop)
+- No unused locals: all interfaces and functions are used
+- `fetch` is already used elsewhere in the project (diagnose.ts etc.) — compatible
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+| `pnpm build` | UNVERIFIED (exec gated) |
+
+---
+
 # r3-009 — CLI INTEGRATION: 'forge retrofit' command (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)
