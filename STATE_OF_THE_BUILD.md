@@ -2718,3 +2718,25 @@ See UNBLOCK (a–e) at the top of this file. In short: approve command execution
 start the stack, apply migrations, `pnpm install`, then `.\tests\run-tests.ps1`.
 Expected on success: tsc zero errors and all Build Memory tests green, which
 verifies s1-p04 (CRUD modules) and completes s1-p05 (integration test).
+
+---
+
+## r3-002 Execution — 2026-06-24
+
+**Prompt:** r3-002 (RETROFIT Scaffold & Types)
+**Snapshot:** Before r3-002 (git tag 3de055f)
+**Outcome:** AUTHORED — exec gate blocked (sandbox)
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| src/retrofit/types.ts | All RETROFIT type definitions: ScanScope, PreFlightResult, FileEntry, FileTreeResult, ImportEdge, DependencyGraph, BrokenImport, RouteEntry, EnvAuditEntry, SchemaAuditEntry, PackageAuditEntry, GovernanceDocEntry, CompilationError, DynamicRouteResult, VercelDeployInfo, ScanReport, DiagnoseFinding, ReconcileDecision |
+| src/retrofit/preflight.ts | 8 pre-flight checks: project path, git repo, Node.js, package manager, .env.local, Supabase credentials, Vercel CLI, Learning DB |
+| src/retrofit/index.ts | Public barrel export — runPreFlightChecks, all types, RETROFIT_VERSION |
+
+### Gate Status
+- `pnpm tsc --noEmit`: UNVERIFIED — command execution denied this session
+- No packages installed, no existing files modified
+
+### Run 2 Progress: 1/13 prompts complete (queued prompt index r2-001 equivalent)
