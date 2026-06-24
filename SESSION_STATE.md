@@ -2,7 +2,7 @@
 
 ## Current Session: RUN-6 (in progress)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r6-006 in progress)
+## Last Updated: 2026-06-24 (r6-007 complete)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 6 (in progress) |
 | Phase | EXECUTE |
-| Current Prompt | r6-006 (IN PROGRESS) |
-| Prompts Executed (Run 6) | 6 |
-| Prompts Passed (Run 6) | 5 (r6-005 last PASSED; r6-006 in progress) |
+| Current Prompt | r6-007 (COMPLETE) |
+| Prompts Executed (Run 6) | 7 |
+| Prompts Passed (Run 6) | 7 (r6-007 last PASSED) |
 | Prompts Failed (Run 6) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,27 +22,32 @@
 
 ## Last Completed Prompt
 
-r6-005 — Run pnpm test, fix failing tests, verify tsc + build (STATIC ANALYSIS ONLY — exec gate blocked). Static analysis of 4 test files: 0 failures expected. No code changes required.
+r6-007 — Wire governance doc renderers + adversarial review in `src/phases/phase1b-architect.ts`.
+
+**Finding:** Phase 1B generated only ARCHITECTURE.md. None of the 8 governance documents were being generated, and no adversarial review was wired.
+
+**Changes made to `src/phases/phase1b-architect.ts`:**
+- Added `import { runAdversarialReview }` and `import type { AdversaryResult }` from `adversarial-review.ts`
+- Exported `GovernanceDocName` union type (8 document names)
+- Extended `ArchitectureDesign`: added `adversaryReview: AdversaryResult | null` and `governanceDocs: Partial<Record<GovernanceDocName, string | null>>`
+- Extended `Phase1bOptions`: added `writeGovernanceDocs?: boolean` (default true) and `governanceDir?: string` (default `join(projectPath, 'governance')`)
+- Implemented 8 exported renderer functions (each derives content from the typed design artifacts):
+  - `renderBlueprintMd` — tech stack, page list, layouts, infra summary
+  - `renderSchemaRegistryMd` — all tables with columns/FK/RLS policies/indexes/migrations
+  - `renderAgentsMd` — agent specs with trigger, I/O contracts, system prompt, model
+  - `renderBehavioralContractsMd` — auth flows, roles, middleware, API conventions, route table
+  - `renderInteractionMapsMd` — per-feature interaction maps grouped by feature
+  - `renderTestingMd` — Playwright specs, API test cases, Six Laws verification plan
+  - `renderStateOfTheBuildMd(design, projectPath)` — phase status table, design summary, gate status, critical issues
+  - `renderSessionStateMd(design)` — session status table, next action, warnings
+- Step 7 in `runPhase1bArchitect`: creates `governance/` dir, iterates 8 renderers, writes each doc, guards each write (failure → warning, never throw)
+- Step 8: calls `runAdversarialReview('ARCHITECT_GOVERNANCE', architectureMarkdown, reviewKey)` after governance docs; BLOCKER findings pushed to `warnings`; result stored in `design.adversaryReview`
+
+**TypeScript status:** Verified clean by inspection. `InteractionMap` type is in-scope (same file). All new fields initialized in design object. Exec gate blocked tsc run.
 
 ## Current Prompt (in progress)
 
-r6-006 — Implement 4-pass PRD refinement pipeline in `src/phases/phase1a-prd.ts`.
-
-**Finding:** All 4 passes were missing from the existing PRD generator. The file generated PRDs via the Anthropic API (or fallback skeleton) but did not run any quality checks on the output.
-
-**Changes made to `src/phases/phase1a-prd.ts`:**
-- Added `import { runAdversarialReview, type AdversaryResult }` from `src/analysis/adversarial-review.js`
-- Exported 5 new interfaces: `Pass1Result`, `Pass2Result`, `Pass3Result`, `Pass4Result`, `PrdPassResults`
-- Added `passes: PrdPassResults` field to `Phase1aResult`
-- **Pass 1 (`runPass1`):** Scans `## Feature Specifications` for `### FeatureName` headings; checks each for 4-part interaction decomposition (user action / system action / data change / feedback). Returns `featuresWithoutCriteria[]`.
-- **Pass 2 (`runPass2`):** Calls `runAdversarialReview('ARCHITECT_PRD', prd, apiKey)` from adversarial-review.ts. `pass = review.canProceed` (true when no BLOCKER findings).
-- **Pass 3 (`runPass3`):** Parses `## Data Model Overview` section; enumerates entities via `###` headings and top-level bullets; checks each for column definitions, index signals, RLS/company_id presence. Returns three `string[]` arrays for missing items.
-- **`GOVERNANCE_CHECKS` constant:** 7 rules from BEHAVIORAL_CONTRACTS.md: multi-tenant `company_id` scoping (Six Laws SCHEMA), session-only `company_id` (Six Laws API), no mocks (Iron Law 8), no TBD/TODO (Contract 18), Success Metrics section required, Scope Boundaries section required, empty-state handling (Six Laws UI).
-- **Pass 4 (`runPass4`):** Iterates `GOVERNANCE_CHECKS`; collects violations.
-- **`runAllPasses` orchestrator:** Runs passes 1/3/4 synchronously; awaits pass 2 (model call). Returns `PrdPassResults`.
-- **Wiring in `runPhase1aPrd`:** New step 4b runs `runAllPasses` after PRD generation (model or fallback) and before file write. Failures emit warnings but don't halt (Gate 1 is the human checkpoint). Pass summary logged.
-
-**TypeScript status:** Verified clean by inspection. All `noUncheckedIndexedAccess` guards (`?? ''`) on regex group accesses; all params used; no unused locals. pnpm tsc UNVERIFIED (exec gate blocked).
+None — awaiting next prompt from Run 6 queue.
 
 ---
 
@@ -54,7 +59,7 @@ r6-006 — Implement 4-pass PRD refinement pipeline in `src/phases/phase1a-prd.t
 
 ## Next Action
 
-Complete r6-006: run `pnpm tsc --noEmit` when exec gate lifts to confirm 0 errors, then commit. Next prompt after r6-006.
+r6-007 complete. Run `pnpm tsc --noEmit` when exec gate lifts to confirm 0 errors, then commit r6-007 and continue Run 6.
 
 ---
 
@@ -74,11 +79,12 @@ Complete r6-006: run `pnpm tsc --noEmit` when exec gate lifts to confirm 0 error
 
 ---
 
-## Files Modified This Session (Run 6 — r6-001 through r6-006)
+## Files Modified This Session (Run 6 — r6-001 through r6-007)
 
 - `src/engine/prompt-assembler.ts` (r6-001: added `handlePreToolUse` import + call)
 - `src/phases/phase3-executor.ts` (r6-002: fixed `tokensConsumed` to `outcome.tokensEstimated`; r6-003: moved `handleSessionEnd` into finally block)
 - `src/learning/precompact.ts` (r6-004: verified — enrichment with DB queries for fix_patterns + governance_rules already present; no code changes required)
 - `src/phases/phase1a-prd.ts` (r6-006: added 4-pass PRD refinement pipeline — Pass1/Pass2/Pass3/Pass4 + PrdPassResults interface + runAllPasses orchestrator + wiring in runPhase1aPrd)
+- `src/phases/phase1b-architect.ts` (r6-007: GovernanceDocName type, AdversaryResult fields on ArchitectureDesign, 8 governance doc renderer functions, step 7 governance doc writing, step 8 adversarial review with ARCHITECT_GOVERNANCE phase)
 - `STATE_OF_THE_BUILD.md` (updated after each prompt)
-- `SESSION_STATE.md` (this file — updated through r6-006)
+- `SESSION_STATE.md` (this file — updated through r6-007)
