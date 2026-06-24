@@ -1,31 +1,31 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-014 — LEARNING CLI AUDIT & COMPLETE (2026-06-24)
+## Current Session: POST-SECTION-1
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | CLI HARDENING |
-| Current Prompt | r3-014 (Learning CLI audit) |
+| Phase | POST-SECTION-1 |
+| Current Prompt | Section-1-Complete (r3-001 through r3-014) |
 | Prompts Executed | 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014) |
 | Prompts Passed | 26 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
-## Last Completed Prompt
-**r3-014 (LEARNING CLI AUDIT)** — Audited `src/cli/commands/learning.ts`. Found: command was `learning` (not `learn`), `patterns` subcommand missing, `sync` was namespace-only (no direct action), `any` types in two commands. Changes: renamed to `learn`, added `forge learn patterns` (queries `fix_patterns` sorted by success_rate via `getForgeMemory()`), replaced `sync pull`/`sync push` subcommands with single `forge learn sync [--pull] [--push]` (defaults to bidirectional), fixed `any` → proper types. All imports verified against source exports. Exec gate blocked; zero TS errors expected by inspection.
+## Last Completed Section
+**Section 1 COMPLETE** — Built: fingerprint fix, full RETROFIT pipeline (src/retrofit/ 10 files, 812 lines), Sentinel Ring 1/2/3 (src/phases/phase4-sentinel.ts, 3638 lines), CLI: forge retrofit, forge sentinel, forge learn (with 6 subcommands). All verified by filesystem audit. Exec gates blocked throughout — changes verified by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-Operator can verify with:
+**Run Section 2 queue** — Composer Engine + Adversarial Review + Session Orchestration.
+
+Operator verify before Section 2:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js --help` → `learn` appears in command list
-4. `node dist/cli/index.js learn --help` → shows init, status, patterns, sync, evolutions, rules
-5. `node dist/cli/index.js learn patterns --help` → shows `--limit <n>` option
+3. `node dist/cli/index.js --help | grep -E "retrofit|sentinel|learn"` → all three appear
 
 ---
 

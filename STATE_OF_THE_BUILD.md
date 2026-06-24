@@ -1,5 +1,95 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
+**Last Updated:** 2026-06-24
+**Build Status:** IN_PROGRESS
+**Current Run:** Post-Section-1
+**Total Prompts Executed:** 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014)
+**Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+# SECTION 1 COMPLETION AUDIT — 2026-06-24
+
+## Filesystem Verification (actual file audit, exec gate blocked)
+
+### src/retrofit/ — COMPLETE (10 files, 812 total lines)
+
+| File | Lines | Status |
+|------|-------|--------|
+| types.ts | 148 | COMPLETE |
+| preflight.ts | 69 | COMPLETE |
+| scan-ops-1-4.ts | 96 | COMPLETE |
+| scan-ops-5-8.ts | 121 | COMPLETE |
+| scan-ops-9-14.ts | 88 | COMPLETE |
+| scan.ts | 64 | COMPLETE |
+| diagnose.ts | 93 | COMPLETE |
+| reconcile.ts | 117 | COMPLETE |
+| pipeline.ts | 3 | COMPLETE (re-export shim) |
+| index.ts | 13 | COMPLETE |
+
+### src/learning/ — COMPLETE (10 files, 2723 total lines)
+
+| File | Lines | Status |
+|------|-------|--------|
+| types.ts | 170 | COMPLETE |
+| database.ts | 328 | COMPLETE |
+| queries.ts | 360 | COMPLETE |
+| loops.ts | 326 | COMPLETE |
+| hooks-enhanced.ts | 444 | COMPLETE |
+| sync.ts | 297 | COMPLETE |
+| session.ts | 318 | COMPLETE |
+| integration.ts | 236 | COMPLETE |
+| fingerprint.ts | 120 | COMPLETE (corruption fix applied r3-001) |
+| precompact.ts | 124 | COMPLETE |
+
+### src/phases/phase4-sentinel.ts — COMPLETE (3638 lines)
+
+All three rings implemented in single file:
+- Ring 1: TSC + ESLint + Schema Drift (mandatory, every prompt)
+- Ring 2: Vitest + Semgrep + Knip/dead-code (every 10th prompt or final)
+- Ring 3: Trivy + Gitleaks + Lighthouse (pre-deploy / --final flag)
+- Export: `runSentinelRing(ring, projectPath, promptNumber)` at line 3621
+- Export: `shouldFireRing2()`, `shouldFireRing3()` utility guards
+
+### CLI Commands — COMPLETE (src/cli/index.ts)
+
+| Command | Line | Status |
+|---------|------|--------|
+| `forge retrofit <path>` | 1246 | COMPLETE — wired to `runRetrofitPipeline` |
+| `forge sentinel <path>` | 1269 | COMPLETE — wired to `runSentinelRing` |
+| `forge learn` (subcommands) | via `registerLearningCommands` | COMPLETE |
+| `forge learn init` | src/cli/commands/learning.ts | COMPLETE |
+| `forge learn status` | src/cli/commands/learning.ts | COMPLETE |
+| `forge learn patterns` | src/cli/commands/learning.ts | COMPLETE (added r3-014) |
+| `forge learn sync [--pull] [--push]` | src/cli/commands/learning.ts | COMPLETE (refactored r3-014) |
+| `forge learn evolutions` | src/cli/commands/learning.ts | COMPLETE |
+| `forge learn rules` | src/cli/commands/learning.ts | COMPLETE |
+
+### dist/ — BUILD ARTIFACT EXISTS
+Prior build succeeded: `dist/cli/index.js`, `dist/cli/config.js`, `dist/cli/repair-command.js` all present.
+Note: `pnpm tsc --noEmit` and `pnpm build` cannot be re-run (exec gate blocked). Verification by inspection only.
+
+## Section 1 Completed Items
+
+| Item | Status | Prompt |
+|------|--------|--------|
+| fingerprint.ts corruption fix (TS1127/TS1161) | COMPLETE | r3-001 |
+| RETROFIT types.ts | COMPLETE | r2-001/r3-002 |
+| RETROFIT preflight.ts | COMPLETE | r2-001/r3-002 |
+| RETROFIT scan-ops-1-4.ts | COMPLETE | r2-002/r3-003 |
+| RETROFIT scan-ops-5-8.ts | COMPLETE | r2-003/r3-004 |
+| RETROFIT scan-ops-9-14.ts | COMPLETE | r2-004/r3-005 |
+| RETROFIT scan.ts (orchestrator) | COMPLETE | r2-005/r3-006 |
+| RETROFIT diagnose.ts | COMPLETE | r2-006/r3-007 |
+| RETROFIT reconcile.ts | COMPLETE | r2-008/r3-009 |
+| RETROFIT pipeline.ts (shim) | COMPLETE | r3-010 |
+| RETROFIT index.ts | COMPLETE | r3-010 |
+| Sentinel Ring 1 (TSC/ESLint/Schema Drift) | COMPLETE | r3-011 |
+| Sentinel Ring 2 (Vitest/Semgrep/Knip) | COMPLETE | r3-012 |
+| Sentinel Ring 3 (Trivy/Gitleaks/Lighthouse) | COMPLETE | r3-012 |
+| CLI: forge sentinel command | COMPLETE | r3-013 |
+| CLI: forge learn command + all subcommands | COMPLETE | r3-014 |
+
 ---
 
 # r3-014 — LEARNING CLI AUDIT & COMPLETE (2026-06-24)
