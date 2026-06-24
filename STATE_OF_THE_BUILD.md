@@ -2,6 +2,40 @@
 
 ---
 
+# r1-010 — FORGE 2.0 CLI: `src/cli/commands/learning.ts` + wired into `src/cli/index.ts`, 2026-06-23
+
+## Build Status: r1-010 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/cli/commands/learning.ts`** (NEW FILE) — Learning Engine CLI subcommands registered via `registerLearningCommands(program: Command)`:
+  - **`forge learning init`** — calls `initializeForgeMemory`, opens DB, queries `sqlite_master` for table list, prints path/size/table-count/machine-id. Exits 1 on error.
+  - **`forge learning status`** — guards on DB existence, shows path/size/machineId/lastSync, then iterates all 14 `VALID_TABLES` printing row counts in green (>0) or gray (0). Gracefully catches per-table errors.
+  - **`forge learning sync pull`** — loads `~/.forge/sync_config.json`, validates `master_path`, calls `syncForgeMemory('pull', ...)`, reports synced count.
+  - **`forge learning sync push`** — same as pull but in push direction.
+  - **`forge learning evolutions`** — calls `getPendingEvolutions`, displays confidence-colored list (green ≥70%, yellow ≥40%, red <40%).
+  - **`forge learning rules`** — calls `getGovernanceRules([], undefined, dbPath)`, displays source-colored list (cyan=MANUAL, yellow=AUTO_ELEVATED, gray=other).
+  - Import paths corrected to `../../learning/` (file lives at `src/cli/commands/`, modules at `src/learning/`).
+- **`src/cli/index.ts`** (PATCHED — 3 additions):
+  - **Import** added: `import { registerLearningCommands } from './commands/learning.js'` after BuildMemory import.
+  - **Auto-init** added at top of `cmdBuild`: `try { (await import('../learning/database.js')).initializeForgeMemory(); } catch { /* non-critical */ }`.
+  - **Registration** added before `program.parseAsync`: `registerLearningCommands(program)`.
+
+### Design invariants verified by inspection
+- `closeConnection` removed from imports — would trigger `noUnusedLocals` with strict tsconfig ✓
+- All `as any` casts are explicit — `noImplicitAny` satisfied ✓
+- `noUnusedParameters`: no function has unused params ✓
+- `noUncheckedIndexedAccess`: no bare array index access in new code ✓
+- `sync` variable used for `.command('pull')` and `.command('push')` chains — not unused ✓
+- All 6 subcommands gracefully handle missing DB with user-friendly messages ✓
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. `node dist/cli/index.js learning --help` → shows 5 subcommands.
+3. `node dist/cli/index.js learning init` → creates `~/.forge/forge_memory.db` and prints table list.
+4. `node dist/cli/index.js learning status` → shows row counts for all 14 tables.
+
+---
+
 # r1-009 — FORGE 2.0 Learning Engine: `src/learning/integration.ts` + wired into `src/phases/phase3-executor.ts`, 2026-06-23
 
 ## Build Status: r1-009 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

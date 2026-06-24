@@ -58,6 +58,7 @@ import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
 
 import { BuildMemory, runQuery } from '../memory/index.js';
+import { registerLearningCommands } from './commands/learning.js';
 import { getLogger } from '../tools/forge-logger.js';
 import {
   createTaskScheduler,
@@ -329,6 +330,8 @@ async function cmdBuild(
   pathArg: string,
   opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean }
 ): Promise<void> {
+  try { (await import('../learning/database.js')).initializeForgeMemory(); } catch { /* learning is non-critical */ }
+
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
   console.log(chalk.bold(`\nBuilding ${projectName} at ${projectPath}`));
@@ -1238,6 +1241,8 @@ async function main(): Promise<void> {
       printHeader();
       console.log('\n' + describeConfig(config));
     });
+
+  registerLearningCommands(program);
 
   await program.parseAsync(process.argv);
 }
