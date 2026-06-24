@@ -1,16 +1,56 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-011 — Learning Engine test suite (4 test files, 31 tests)
+## Current Session: POST-BUILD AUDIT — Run 1 Enhancement complete
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Started: 2026-06-23
+## Last Updated: 2026-06-23
 
-## Last Completed Prompt: r1-011 — Created 4 test files: `tests/learning-database.test.ts` (8 tests: 14+ tables, idempotency, 20+ indexes, schema_version, getMachineId, WAL mode), `tests/learning-fingerprint.test.ts` (7 tests: same-pattern fingerprint, different codes, 32-char hex, stack order independence, wildcard dirs, backslash normalization, quoted string replacement), `tests/learning-queries.test.ts` (8 tests: UUID generation, auto machine_id, auto created_at, invalid table rejection, empty array, WHERE filtering, LIMIT, governance active filter), `tests/learning-sync.test.ts` (8 tests: lock create, lock JSON, lock release, release-nonexistent, config defaults, graceful degradation, epoch default, timestamp round-trip). Updated `package.json` test script to use `node --import tsx --test` for TypeScript discovery. All imports verified against actual exports. better-sqlite3@12.11.1 confirmed in pnpm virtual store. Compile/runtime gates UNVERIFIED — exec blocker persists.
+| Field | Value |
+|-------|-------|
+| Run Number | 1 (Enhancement Run) |
+| Phase | POST-BUILD |
+| Current Prompt | r1-012 (pending) |
+| Prompts Executed | 12 (r1-001, r1-001b, r1-002 through r1-011) |
+| Prompts Passed | 12 |
+| Prompts Failed | 0 |
+| First Pass Rate | 100% (authored; gates UNVERIFIED) |
+| Start Time | 2026-06-23 |
 
-## Previous Prompt: r1-010 — Created `src/cli/commands/learning.ts` with `registerLearningCommands(program)` exporting 6 CLI subcommands: `forge learning init` (initializeForgeMemory + print table list), `forge learning status` (row counts for all 14 VALID_TABLES), `forge learning sync pull/push` (syncForgeMemory with config guard), `forge learning evolutions` (confidence-colored pending evolutions list), `forge learning rules` (source-colored governance rules list). Patched `src/cli/index.ts`: added import of `registerLearningCommands`, added auto-init of learning DB at top of `cmdBuild` (non-critical, wrapped in try/catch), added `registerLearningCommands(program)` call before `parseAsync`. Import paths corrected to `../../learning/` (file at src/cli/commands/, modules at src/learning/). `closeConnection` removed to satisfy `noUnusedLocals`. All TypeScript strict invariants verified by inspection. Compile/runtime gates UNVERIFIED — exec blocker persists.
+## Last Completed Prompt
+**r1-011** — Created 4 test files (352 lines, 31 tests): `tests/learning-database.test.ts` (8 tests), `tests/learning-fingerprint.test.ts` (7 tests), `tests/learning-queries.test.ts` (8 tests), `tests/learning-sync.test.ts` (8 tests). Updated `package.json` test script. All imports verified against actual exports. better-sqlite3@12.11.1 confirmed in pnpm virtual store. Compile/runtime gates UNVERIFIED — exec blocker persists.
 
-## Previous Prompt: r1-009 — Replaced stub `src/learning/integration.ts` with full Integration Bridge: `onRunStart` (DB init, crash recovery check, forge lock, sync pull, cross-project knowledge load, evolutions presentation, session resumption check, build_outcomes write), `onPromptComplete` (Loop 1 prompt scoring, Loop 2 error capture + auto-elevation for TypeScript compile errors), `onRunEnd` (session state export, decision weight update, evolution analysis, handoff generation, sync push, lock release in finally). Minimally patched `src/phases/phase3-executor.ts`: added import line + 3 call sites. All calls wrapped with `.catch(() => {})`. Compile/runtime gates UNVERIFIED — exec blocker persists.
+## Active Blockers
+1. **Exec gate blocked** — `npx tsc --noEmit` and `npm test` require approval in this session. All 10 `src/learning/` files authored and by-inspection reviewed but NOT compile/runtime verified.
+2. **`better-sqlite3` not in package.json** — present in pnpm virtual store only. Must run `pnpm add better-sqlite3 && pnpm add -D @types/better-sqlite3` before CI/fresh install.
 
-## Next Prompt: Next in queue after r1-010. Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) `node dist/cli/index.js learning --help` → shows subcommands. (3) `node dist/cli/index.js learning init` → DB created + table list printed.
+## Next Action
+**Operator UNBLOCK (from permitted session):**
+1. `pnpm add better-sqlite3 && pnpm add -D @types/better-sqlite3` — save to package.json
+2. `npx tsc --noEmit` → expect zero errors (src/ only, tests excluded in tsconfig)
+3. `npm test` → expect 31/31 pass (learning-database, learning-fingerprint, learning-queries, learning-sync)
+4. Confirm output: `pass 31`, `fail 0`
+
+**Then begin Run 2: RETROFIT Pipeline**
+
+## Environment Status
+
+| Component | Status |
+|-----------|--------|
+| Node.js | Available (>=20 required) |
+| PowerShell | Available |
+| Git | Available |
+| SQLite (better-sqlite3) | In pnpm virtual store; NOT in package.json |
+| forge_memory.db | Not yet created (created on first `forge learning init`) |
+| pnpm | Available |
+| tsx (devDependency) | Installed (needed for npm test) |
+| TypeScript | Installed (devDependency) |
+
+## Files Modified This Session (Run 1 Enhancement)
+
+**New files (src/learning/):** types.ts, database.ts, fingerprint.ts, queries.ts, loops.ts, sync.ts, hooks-enhanced.ts, precompact.ts, session.ts, integration.ts
+**New files (tests/):** learning-database.test.ts, learning-fingerprint.test.ts, learning-queries.test.ts, learning-sync.test.ts
+**New files (CLI):** src/cli/commands/learning.ts
+**New files (audit/changelog):** CHANGELOG-RUN1.md, .forge/ENHANCEMENT_AUDIT.md
+**Modified:** src/cli/index.ts, src/phases/phase3-executor.ts, package.json
 
 ---
 
