@@ -2,6 +2,39 @@
 
 ---
 
+# r1-003 — FORGE 2.0 Learning Engine: `src/learning/queries.ts` full implementation, 2026-06-23 (session #58)
+
+## Build Status: r1-003 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/queries.ts`** (REPLACED stub with FULL implementation) — Complete 15-function query layer:
+  - `generateId()` — `crypto.randomUUID()`
+  - `saveToForgeMemory(table, data, dbPath?)` — validates table, auto-injects id/machine_id/created_at, parameterized INSERT, returns id
+  - `getForgeMemory(table, opts?, dbPath?)` — SELECT with optional WHERE/ORDER BY/LIMIT; always returns `[]` never null
+  - `updateForgeMemory(table, id, data, dbPath?)` — parameterized UPDATE WHERE id; returns bool (changes > 0)
+  - `savePromptScore(score, dbPath?)` — converts bool→0/1 and array→JSON, calls saveToForgeMemory
+  - `getBestPromptTemplates(taskType, _techStackTags, minSamples, dbPath?)` — AVG/COUNT aggregation on prompt_scores, maps to `{ template_hash }` shape
+  - `getFixPattern(fingerprint, dbPath?)` — SELECT from fix_patterns WHERE error_fingerprint = ?; null if not found
+  - `registerError(error, dbPath?)` — fingerprint via getErrorFingerprint; UPDATE occurrence_count+1 if known; INSERT new otherwise
+  - `registerFix(fingerprint, fix, dbPath?)` — UPDATE fix_diff/fix_description/fix_files_modified + recalc success_rate
+  - `getGovernanceRules(techStackTags, projectName?, dbPath?)` — GLOBAL-only or GLOBAL+PROJECT_SPECIFIC query; JS-side tag filter
+  - `incrementGovernanceEnforcement(ruleId, dbPath?)` — UPDATE enforcement_count+1 + last_enforced = datetime('now')
+  - `getDecisionWeights(decisionType, minBuilds, dbPath?)` — AVG/SUM aggregation; maps `option_chosen` → `option`
+  - `getRelevantSkills(techStackTags, dbPath?)` — top-20 by effectiveness_rate; JS-side tag overlap filter
+  - `getPendingEvolutions(dbPath?)` — SELECT WHERE status = 'PENDING' ORDER BY confidence DESC
+  - `updateEvolutionStatus(id, status, reviewNote?, dbPath?)` — UPDATE status + reviewed_at + review_note
+- **`src/learning/fingerprint.ts`** (EXTENDED stub) — Added `getErrorFingerprint(error)`: normalizes path (strip line:col, leading dirs), templates message (numbers→<N>, quoted tokens→<TOKEN>), SHA-256 hash of category|errorCode|normalizedPath|normalizedMessage, returns 32-char hex. `FP_VERSION` preserved.
+
+### Security: parameterized queries
+All 15 functions use `?` placeholder parameterized queries. Table names are whitelisted against `VALID_TABLES` (14 valid tables). No value is ever string-interpolated into SQL.
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-003 prompt spec (saveToForgeMemory, getForgeMemory, empty result, getGovernanceRules, getPendingEvolutions, table-validation throw).
+3. Proceed to r1-004: complete `src/learning/fingerprint.ts`.
+
+---
+
 # r1-001 — FORGE 2.0 Learning Engine scaffold: `src/learning/` created, 2026-06-23 (session #56)
 
 ## Build Status: r1-001 AUTHORED on disk. Compile gate UNVERIFIED — exec blocker (`pnpm tsc --noEmit` requires approval) persists this session. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

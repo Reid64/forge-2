@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-003 — `src/learning/queries.ts` full implementation (session #58)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-003 — Replaced stub `src/learning/queries.ts` with all 15 query functions: `generateId`, `saveToForgeMemory`, `getForgeMemory`, `updateForgeMemory`, `savePromptScore`, `getBestPromptTemplates`, `getFixPattern`, `registerError`, `registerFix`, `getGovernanceRules`, `incrementGovernanceEnforcement`, `getDecisionWeights`, `getRelevantSkills`, `getPendingEvolutions`, `updateEvolutionStatus`. Also extended `src/learning/fingerprint.ts` stub with `getErrorFingerprint` (SHA-256 of normalized category|errorCode|path|message, 32-hex fingerprint). All SQL uses `?` parameterized placeholders — zero value string interpolation. Table names validated against `VALID_TABLES` whitelist (throws for unknowns). JS-side tag filtering in `getGovernanceRules` + `getRelevantSkills`. Compile/runtime gates UNVERIFIED — exec blocker persists. Verified by inspection: all 15 exports present, parameterized queries confirmed, no SQL injection vectors.
+
+## Next Prompt: r1-004 — Implement full `src/learning/fingerprint.ts` (complete error normalization pipeline). Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-003 verification tests → all PASS.
+
+---
+
+# PRIOR SESSION (#57)
+
 ## Current Session: r1-002 — `src/learning/database.ts` full implementation (session #57)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23
