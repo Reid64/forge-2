@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-007** — Confirmed `adversary_findings` and `build_fingerprints` CREATE TABLE statements present in `src/learning/database.ts` (lines 296–322). `AdversaryFindingRecord` and `BuildFingerprintRecord` interfaces confirmed present in `src/learning/types.ts` (lines 159–182). No code changes required — both were already added. Governance updated: SCHEMA_REGISTRY.md + STATE_OF_THE_BUILD.md.
+**r4-008** — Verified Learning CLI COMPLETE by full file inspection of `src/cli/commands/learning.ts`. All 4 required subcommands (`learn status`, `learn patterns`, `learn sync`, `learn evolutions`) confirmed fully implemented with real DB/sync logic (lines 44–205). No stubs present. No code changes required. Governance updated: STATE_OF_THE_BUILD.md + SESSION_STATE.md.
 
 ---
 

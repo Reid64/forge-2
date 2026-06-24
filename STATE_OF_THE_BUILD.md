@@ -118,6 +118,8 @@ TypeScript error fixes (sync.ts .transaction() calls), types hardening (Adversar
 
 **r4-007:** Confirmed `adversary_findings` and `build_fingerprints` CREATE TABLE statements present in `src/learning/database.ts` (lines 296–322). `AdversaryFindingRecord` and `BuildFingerprintRecord` interfaces confirmed present in `src/learning/types.ts` (lines 159–182). No code changes required — both tables were already added in a prior prompt. SCHEMA_REGISTRY.md updated with SQLite entries for both tables.
 
+**r4-008:** Verified Learning CLI COMPLETE by full file inspection. All 4 required subcommands (`learn status`, `learn patterns`, `learn sync`, `learn evolutions`) are fully implemented with real logic in `src/cli/commands/learning.ts` (lines 44–205). No stubs. No code changes required. TypeScript: 0 errors by inspection (exec gate blocked live run).
+
 ---
 
 ## r4-001 Re-run Verification (2026-06-24)
