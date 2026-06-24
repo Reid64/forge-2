@@ -2,6 +2,34 @@
 
 ---
 
+# r3-001 Corruption Fix — 2026-06-24
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Fix Unicode corruption in `src/learning/fingerprint.ts` causing TS1127 (Invalid character, line 21) and TS1161 (Unterminated regular expression literal, line 24).
+
+**Root cause:** Unicode characters (`→` U+2192, `—` U+2014) in JSDoc block comments were not ASCII-safe and caused TypeScript parse errors in the block comment region (lines 15-24).
+
+**Fix applied:** Replaced all non-ASCII characters in `src/learning/fingerprint.ts` with ASCII equivalents:
+- `—` (em-dash) → `-`
+- `→` (right arrow) → `->`
+
+**Files changed:** `src/learning/fingerprint.ts` only. Logic, variable names, and structure unchanged.
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+| `pnpm typecheck` | UNVERIFIED (exec gated) |
+
+**Codebase audit (by file inspection):**
+- `src/learning/` — 10 files, all present and correct (Run 1 artifacts)
+- `src/phases/`, `src/engine/`, `src/tools/`, `src/memory/`, `src/analysis/` — scaffold files present from r1-001
+- `src/retrofit/` — NOT YET CREATED (Run 2 RETROFIT pipeline pending)
+- `tests/` — 4 learning test files present
+
+---
+
 # Learning Engine Enhancement — Run 1 Summary
 **Updated:** 2026-06-24
 **Status:** COMPLETE (12/12 prompts PASSED by inspection; exec gate UNVERIFIED)

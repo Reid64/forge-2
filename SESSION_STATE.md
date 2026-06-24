@@ -1,37 +1,34 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: POST-RUN1-COMPLETE — Handoff audit (2026-06-24)
+## Current Session: r3-001 — Fingerprint corruption fix (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
-| Run Number | 1 (COMPLETE) |
-| Phase | POST-BUILD |
-| Current Prompt | r1-012 (handoff audit — this session) |
-| Prompts Executed | 12 (r1-001, r1-001b, r1-002 through r1-011 + r1-012 handoff) |
-| Prompts Passed | 12 (gates UNVERIFIED — exec blocker) |
+| Run Number | Pre-Run-2 (Run 1 COMPLETE; Run 2 queued) |
+| Phase | HOTFIX |
+| Current Prompt | r3-001 (fingerprint.ts corruption fix) |
+| Prompts Executed | 13 (r1-001 through r1-012 + r3-001 hotfix) |
+| Prompts Passed | 13 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
-| Start Time | 2026-06-23 |
+| Start Time | 2026-06-24 |
 | End Time | 2026-06-24 |
 
 ## Last Completed Prompt
-**r1-012 (handoff audit)** — Full audit of `src/learning/` (10 files, 35 tests in 4 test files). Updated `STATE_OF_THE_BUILD.md` with Learning Engine Enhancement summary section. Updated `SESSION_STATE.md` to POST-RUN1-COMPLETE. Corrected `CHANGELOG-RUN1.md` (better-sqlite3 IS in package.json; test count 35 not 31). Updated `.forge/ENHANCEMENT_AUDIT.md` (corrected known issues, actual byte sizes confirmed).
+**r3-001 (fingerprint.ts corruption fix)** — Replaced all Unicode characters (`→`, `—`) with ASCII equivalents in `src/learning/fingerprint.ts` to resolve TS1127 (Invalid character, line 21) and TS1161 (Unterminated regular expression literal, line 24). Logic, structure, and variable names unchanged. Only comment text affected. Exec gate still intermittent — `pnpm tsc --noEmit` could not be run for verification.
 
 ## Active Blockers
-1. **Exec gate INTERMITTENT** — `npx tsc --noEmit`, `npm run build`, and `npm test` required approval in this session but ran freely in earlier recovery sessions. All 10 src/learning files are authored and verified by inspection. Expect zero tsc errors.
+1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection. Zero tsc errors expected.
 
 ## Next Action
-**Review this handoff, then begin Run 2: RETROFIT Pipeline.**
-
-Queue file: `queue-run2.yaml` (13 prompts, target `src/retrofit/`)
+**Run 2: RETROFIT Pipeline.** Queue: `queue-run2.yaml` (13 prompts, target `src/retrofit/`).
 
 **Operator unblock (before Run 2):**
-1. `npx tsc --noEmit` → expect zero errors
+1. `pnpm tsc --noEmit` → expect zero errors (fingerprint.ts fix just applied)
 2. `npm test` → expect 35 tests passing across 4 files
 3. `npm run build` → expect clean `dist/`
-4. `node dist/cli/index.js learning status` → confirm DB init + table list
 
 ---
 

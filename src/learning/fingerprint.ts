@@ -1,4 +1,4 @@
-// FORGE 2.0 Learning Engine — Error Fingerprinting
+// FORGE 2.0 Learning Engine - Error Fingerprinting
 import { createHash } from 'node:crypto';
 
 /**
@@ -17,10 +17,10 @@ const FRAMEWORK_DIRS = new Set([
  * Keeps framework directories and filenames intact.
  *
  * Examples:
- *   app/api/storms/route.ts → app/api/*/route.ts
- *   components/dashboard/StormMap.tsx → components/*/StormMap.tsx
- *   src/utils/helpers.ts → src/utils/helpers.ts (no dynamic segment)
- *   app/api/storms/[id]/route.ts → app/api/*/[id]/route.ts
+ *   app/api/storms/route.ts -> app/api/*/route.ts
+ *   components/dashboard/StormMap.tsx -> components/*/StormMap.tsx
+ *   src/utils/helpers.ts -> src/utils/helpers.ts (no dynamic segment)
+ *   app/api/storms/[id]/route.ts -> app/api/*/[id]/route.ts
  */
 export function generalizeFilePath(filePath: string): string {
   // Normalize separators
@@ -29,7 +29,7 @@ export function generalizeFilePath(filePath: string): string {
 
   if (parts.length <= 1) return normalized;
 
-  // Last part is the filename — keep it
+  // Last part is the filename - keep it
   const filename = parts[parts.length - 1];
   const dirs = parts.slice(0, -1);
 
@@ -40,7 +40,7 @@ export function generalizeFilePath(filePath: string): string {
     if (dir.startsWith('[') && dir.endsWith(']')) return dir;
     // Keep single-char dirs
     if (dir.length <= 2) return dir;
-    // Everything else is potentially an entity name — wildcard it
+    // Everything else is potentially an entity name - wildcard it
     return '*';
   });
 
@@ -52,21 +52,21 @@ export function generalizeFilePath(filePath: string): string {
  * Keeps structural/grammatical words intact.
  *
  * Examples:
- *   "Module './StormMap' not found" → "Module '*' not found"
- *   "Property 'name' does not exist on type 'Storm'" → "Property '*' does not exist on type '*'"
- *   "Cannot find name 'fetchStorms'" → "Cannot find name '*'"
- *   "Argument of type 'string' is not assignable to parameter of type 'number'" → preserves type names
+ *   "Module './StormMap' not found" -> "Module '*' not found"
+ *   "Property 'name' does not exist on type 'Storm'" -> "Property '*' does not exist on type '*'"
+ *   "Cannot find name 'fetchStorms'" -> "Cannot find name '*'"
+ *   "Argument of type 'string' is not assignable to parameter of type 'number'" -> preserves type names
  */
 export function generalizeErrorMessage(message: string): string {
   let result = message;
 
-  // Replace single-quoted strings: 'anything' → '*'
+  // Replace single-quoted strings: 'anything' -> '*'
   result = result.replace(/'[^']+'/g, "'*'");
 
-  // Replace double-quoted strings: "anything" → "*"
+  // Replace double-quoted strings: "anything" -> "*"
   result = result.replace(/"[^"]+"/g, '"*"');
 
-  // Replace backtick strings: `anything` → `*`
+  // Replace backtick strings: `anything` -> `*`
   result = result.replace(/`[^`]+`/g, '`*`');
 
   // Replace PascalCase identifiers (likely component/class names)
