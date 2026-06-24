@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-001 (re-run)** — TypeScript error fixes verified; all 8 errors confirmed fixed in current HEAD (de60f42). tsc clean.
+**r4-002** — session-lifecycle.ts verified complete (212 lines, all 8 exports present). integration.ts already re-exports from session-lifecycle.js. No changes needed — file was complete from prior execution.
 
 ---
 
