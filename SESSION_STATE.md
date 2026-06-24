@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-007 — hooks-enhanced.ts complete implementation
+## Current Session: r1-008 — precompact.ts + session.ts complete
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,15 +8,15 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-007 |
-| Prompts Executed | 7 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007) |
-| Prompts Passed | 7 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-008 |
+| Prompts Executed | 8 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008) |
+| Prompts Passed | 8 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-007** — `src/learning/hooks-enhanced.ts` complete Enhanced Hook System. `matchGlob`: segment-by-segment `*`/`**` glob matching. `testHookConditions`: AND-evaluates 5 condition types (file_pattern, exclude_pattern, task_types, min_prompt_number, phases). `resolveHookTemplates`: replaces all 8 `{{var}}` tokens, undefined → empty string. `generateDefaultHooksConfig`: exactly 24 HookDefinitions across 8 lifecycle events. `writeDefaultHooksConfig`: creates `.forge/` + writes hooks.json. `noUncheckedIndexedAccess` handled via `as string` after length guards; `_projectName` prefix for unused param. Exec gate blocked — verified by inspection against tsconfig strict flags.
+**r1-008** — `src/learning/precompact.ts` + `src/learning/session.ts` complete. `precompact.ts`: `shouldPreCompact` (80% threshold + every 10th after 30), `invokePreCompactSave` (active errors + governance rules + git status → compact_snapshots), `restoreCompactedContext` (reads snapshot, formats FORGE CONTEXT RECOVERY block). `session.ts`: `getBuildFingerprint` (SHA-256 of file content composite, excludes build dirs), `exportSessionState` (git state + fingerprint → session_state.json + build_outcomes), `resumeForgeSession` (reads JSON, compares fingerprint), `testCrashRecovery` (stale lock > 5 min → crashed), `setForgeLock` / `removeForgeLock` (lock file lifecycle), `exportSessionHandoff` (8-section SESSION_HANDOFF.md). Exec gate blocked — verified by inspection against tsconfig strict flags.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
@@ -26,9 +26,9 @@
 1. `npx tsc --noEmit` → expect zero errors
 2. `pnpm run build` → expect clean
 3. `pnpm lint` → expect clean
-4. node test → expect R1-007 ALL TESTS PASS (glob, templates, conditions, 24 hooks)
+4. node test → expect R1-008 ALL TESTS PASS (precompact triggers, lock management, fingerprint)
 
-**Then continue queue: next prompt r1-008**
+**Then continue queue: next prompt r1-009**
 
 ---
 

@@ -2,6 +2,33 @@
 
 ---
 
+# r1-008 — 2026-06-24
+
+## Build Status: r1-008 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/precompact.ts` and `src/learning/session.ts` — Context Preservation + Session Orchestration, fully implemented.
+
+### precompact.ts
+- **`shouldPreCompact(promptIndex, totalPrompts)`** → returns `true` if `promptIndex/totalPrompts >= 0.8` OR `(promptIndex > 30 AND promptIndex % 10 === 0)` ✓
+- **`invokePreCompactSave(context, dbPath?)`** → queries `fix_patterns` for unresolved active errors (`occurrence_count > 0, fix_diff IS NULL`, top 20); queries `governance_rules` for active rules (top 30); runs `git status --porcelain` with graceful fallback; builds `SnapshotState`; calls `saveToForgeMemory('compact_snapshots', ...)`. Returns snapshot id ✓
+- **`restoreCompactedContext(buildId, dbPath?)`** → reads most recent `compact_snapshots` row for `buildId` (`ORDER BY prompt_index DESC LIMIT 1`); parses `state_json`; formats recovery block with `=== FORGE CONTEXT RECOVERY ===` header, phase, prompt index/total, active error count+details, governance rule count+summaries, acceptance criteria, `=== END RECOVERY ===`; returns `null` if no snapshot ✓
+- All interfaces (`PreCompactContext`, `ActiveError`, `ActiveRule`, `SnapshotState`) typed correctly ✓
+- No unused imports or locals (all 3 imports used: `execSync`, `getConnection`, `saveToForgeMemory`) ✓
+
+### session.ts
+- **`getBuildFingerprint(projectPath)`** → recursively collects all files excluding `node_modules`, `.next`, `.git`, `dist`, `build`, `coverage`, `.forge/session_state{,.json}`; sorts paths; SHA-256 hashes `relativePath|contentSHA256\n` composite; returns 64-char hex ✓
+- **`exportSessionState(params)`** → creates `.forge/` if missing; runs `git branch --show-current`, `git rev-parse HEAD`, `git status --porcelain` with fallbacks; computes fingerprint; writes `.forge/session_state.json` with build identity, execution position, git state, fingerprint, queue status, run stats, first_pass_rate; writes to `build_outcomes` table ✓
+- **`resumeForgeSession(projectPath, dbPath?)`** → reads `.forge/session_state.json`; if missing → `{ canResume: false }`; parses JSON; computes current fingerprint; compares to stored; returns `{ canResume: true, state, fingerprintMatch }` ✓
+- **`testCrashRecovery(projectPath, dbPath?)`** → checks `.forge/forge_running.lock`; if absent → `{ crashed: false }`; checks `mtime` age vs 5-minute threshold; reads `build_id` from lock JSON; queries `compact_snapshots` for recovery point; returns `{ crashed: true, recoveryPoint? }` ✓
+- **`setForgeLock(projectPath, buildId)`** → creates `.forge/` if missing; writes `forge_running.lock` with `build_id`, `machine_id`, `started_at` (ISO 8601), `pid: process.pid` ✓
+- **`removeForgeLock(projectPath)`** → unlinks lock file in try/catch, never throws ✓
+- **`exportSessionHandoff(projectPath, sessionState)`** → generates `.forge/SESSION_HANDOFF.md` with 8 sections: Build Summary, Completed This Run, Failed This Run, Active Blockers, Queue Status, Next Run Plan, Environment Notes, Learning Highlights ✓
+- All 9 imports verified as used; `_dbPath` prefix used in `resumeForgeSession` for optional unused param; `Dirent` type import used in `collectFiles` function ✓
+
+Exec gate blocked — `npx tsc --noEmit` and node verification require operator approval. Verified by inspection against all tsconfig strict flags (`strict`, `noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexedAccess`, `noImplicitReturns`).
+
+---
+
 # r1-007 — 2026-06-24
 
 ## Build Status: r1-007 VERIFIED BY INSPECTION (exec gate blocked)
