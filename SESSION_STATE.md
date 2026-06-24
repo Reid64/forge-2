@@ -1,35 +1,35 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-008 — RETROFIT RECONCILE + QUEUE + PIPELINE
+## Current Session: r3-009 — CLI RETROFIT COMMAND + PIPELINE SHIM
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 |
-| Phase | RETROFIT-RECONCILE |
-| Current Prompt | r3-008 (COMPLETE) |
-| Prompts Executed | 32 (r1-001…r1-012 + r3-001…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008) |
-| Prompts Passed | 32 (exec gate UNVERIFIED — verified by inspection) |
+| Phase | CLI-INTEGRATION |
+| Current Prompt | r3-009 (COMPLETE) |
+| Prompts Executed | 33 (r1-001…r1-012 + r3-001…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009) |
+| Prompts Passed | 33 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
 
-## r3-008 Result — RETROFIT RECONCILE + QUEUE + PIPELINE verified present and correct
+## r3-009 Result — CLI retrofit command + pipeline shim verified present and correct
 
-`src/retrofit/reconcile.ts` exists (117 lines) with all required elements:
-- `ReconcileInput`, `ReconcileOutput`, `QueuePrompt`, `GeneratedQueue`, `RetrofitPipelineOptions` interfaces exported
-- `runReconcile` — interactive (readline) + non-interactive mode; loads prior decisions from SQLite; persists each decision; handles CRITICAL/UNBUILT/WARN/ENTERPRISE_PATTERN flows
-- `generateRetrofitQueue` — builds tier-ordered prompt list (RC-xxx CRITICAL, RW-xxx WARN, RE-xxx ENTERPRISE), writes `queue.yaml` to output path
-- `runRetrofitPipeline` — full pipeline: `runScan` → `generateArchitectureHealthReport` → `buildGovernanceReconciliationReport` → `buildEnterprisePatternsGapReport` → `runReconcile` → `generateRetrofitQueue`; ANSI progress bar during scan
+`src/cli/index.ts` lines 1245-1266 — `retrofit` command registered with all 6 options:
+- `--scope <scope>` (default 'C'), `--skip-dynamic`, `--resume`, `--non-interactive`, `--queue-output <path>`, `--api-key <key>`
+- Dynamic import of `../retrofit/pipeline.js`; passes all fields to `runRetrofitPipeline` with correct camelCase mapping
 
-`src/retrofit/index.ts` lines 11-12 already export all 3 functions + 5 types from `./reconcile.js`.
+`src/retrofit/pipeline.ts` — 3-line re-export shim:
+- `export { runRetrofitPipeline } from './reconcile.js'`
+- `export type { RetrofitPipelineOptions } from './reconcile.js'`
 
-Exec gate (`pnpm tsc --noEmit`) blocked per recorded history. No code changes required.
+Exec gate (`pnpm tsc --noEmit`) blocked per recorded history. No code changes required — all artifacts were pre-existing and correct.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-Continue with next prompt in queue (r3-009 or next per queue.yaml).
+Continue with next prompt in queue (r3-010 or next per queue.yaml).
 
 ---
 
