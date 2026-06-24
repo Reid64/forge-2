@@ -2,6 +2,38 @@
 
 ---
 
+# r1-006 — FORGE 2.0 Learning Engine: `src/learning/sync.ts` complete implementation, 2026-06-23 (session #61)
+
+## Build Status: r1-006 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/sync.ts`** (REPLACED stub with FULL implementation) — Cross-Machine Sync Protocol:
+  - **`acquireSyncLock(lockPath, machineId, maxWaitMs, retryIntervalMs)`** — atomic lock acquisition with stale-lock detection (>2 min = remove + reacquire), busy-wait retry loop, timeout, directory auto-creation. Returns `true` on success, `false` on timeout. Never throws.
+  - **`releaseSyncLock(lockPath)`** — unconditional unlink, swallows all errors. Safe to call even if lock file is already gone.
+  - **`loadSyncConfig(configPath?)`** — reads `~/.forge/sync_config.json`; returns defaults (`master_path: ''`, `lock_file: 'forge_sync.lock'`, `max_wait_seconds: 30`, `retry_interval_seconds: 5`) if file missing or malformed.
+  - **`getLastSyncTimestamp(dbPath)`** — reads `forge_meta WHERE key = 'last_sync_timestamp'`; returns epoch `'1970-01-01T00:00:00.000Z'` if not set. Never throws.
+  - **`setLastSyncTimestamp(dbPath, timestamp)`** — `INSERT OR REPLACE` into `forge_meta`. Logs error and returns on failure.
+  - **`syncForgeMemory(direction, localDbPath, masterDbPath, machineId)`** — graceful degradation if master path is empty or does not exist (returns `{ synced: 0, tables: [] }` silently or with a WARN). Delegates to `syncPull` or `syncPush`.
+  - **`syncPull(localDbPath, masterDbPath, machineId, lastSync)`** — opens master as read-only; for each syncable table, `SELECT * WHERE machine_id != ? AND created_at > ?`, then `INSERT OR IGNORE` into local via a transaction. Continues past per-table errors. Closes master DB. Updates local timestamp.
+  - **`syncPush(localDbPath, masterDbPath, machineId, lastSync)`** — acquires file lock before opening master for write. `SELECT * WHERE machine_id = ? AND created_at > ?` from local; `INSERT OR IGNORE` into master via transaction. Continues past per-table errors. Closes master DB. Updates local timestamp. Releases lock in `finally` block — guaranteed even on error.
+  - **`SYNCABLE_TABLES`** — `VALID_TABLES` minus `forge_meta` (machine-specific, never synced).
+
+### Design invariants verified by inspection
+- Lock released in `finally` in `syncPush` — a crash or thrown error during push cannot leave an orphaned lock
+- All sync operations are `INSERT OR IGNORE` — append-only; no UPDATE on master records
+- `forge_meta` excluded from `SYNCABLE_TABLES` via `.filter(t => t !== 'forge_meta')`
+- Per-table errors logged with `console.error` and skipped; sync continues with remaining tables
+- Graceful degradation: missing/empty `masterDbPath` returns `{ synced: 0, tables: [] }` immediately
+- Imports use `.js` ESM extensions: `./database.js` and `./types.js`
+- All symbols imported from `database.ts` (`getConnection`, `getMachineId`) and `types.ts` (`VALID_TABLES`, `SyncConfig`) are confirmed exported
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-006 prompt spec (5 tests: lock acquire/release, release-nonexistent, graceful degradation, config defaults, timestamps) → all PASS.
+3. Proceed to r1-007 (next in queue).
+
+---
+
 # r1-005 — FORGE 2.0 Learning Engine: `src/learning/loops.ts` complete implementation, 2026-06-23 (session #60)
 
 ## Build Status: r1-005 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

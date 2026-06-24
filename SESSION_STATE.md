@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-006 — `src/learning/sync.ts` complete implementation (session #61)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-006 — Replaced stub `src/learning/sync.ts` with the full Cross-Machine Sync Protocol implementation. `acquireSyncLock`: stale-lock detection (>2 min), busy-wait retry, timeout, directory auto-creation, returns bool. `releaseSyncLock`: unconditional unlink, swallows all errors. `loadSyncConfig`: reads `~/.forge/sync_config.json` with safe defaults fallback. `getLastSyncTimestamp`/`setLastSyncTimestamp`: read/write `forge_meta` key; epoch default if missing. `syncForgeMemory`: graceful degradation for missing master, delegates to `syncPull`/`syncPush`. `syncPull`: master opened read-only, `INSERT OR IGNORE` per-table, per-table error isolation, updates local timestamp. `syncPush`: acquires file lock, `INSERT OR IGNORE` to master, lock ALWAYS released in `finally`, updates local timestamp. `SYNCABLE_TABLES` excludes `forge_meta`. All operations append-only. Compile/runtime gates UNVERIFIED — exec blocker persists. Verified by inspection: all exports present, imports resolve, finally-block lock release confirmed, append-only invariant confirmed.
+
+## Next Prompt: r1-007 (next in queue). Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-006 verification tests (5 tests: lock acquire/release, release-nonexistent, graceful degradation, config defaults, timestamps) → all PASS.
+
+---
+
+# PRIOR SESSION (#60)
+
 ## Current Session: r1-005 — `src/learning/loops.ts` complete implementation (session #60)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23
