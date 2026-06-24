@@ -243,3 +243,5 @@ export { setForgeLock as setForgeLockV2, removeForgeLock as removeForgeLockV2 } 
 export type { LockFileContent, CrashRecoveryResult, RunStartResult, RunEndOptions } from './session-lifecycle.js';
 export { generateSessionHandoff } from './handoff-generator.js';
 export type { HandoffOptions } from './handoff-generator.js';
+export { handleSessionStart, handleSessionEnd } from './session-hooks.js';
+export type { SessionStartResult, SessionEndResult } from './session-hooks.js';

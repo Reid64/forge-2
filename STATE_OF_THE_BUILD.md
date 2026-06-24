@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-005 COMPLETE
-**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005 complete)
+**Current Run:** Run 5 — r5-006 COMPLETE
+**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005, r5-006 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -106,7 +106,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 
 ---
 
-## src/learning/ — 12 files
+## src/learning/ — 13 files
 
 | File | Size | Purpose |
 |------|------|---------|
@@ -122,6 +122,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | precompact.ts | ~3,600 bytes | PreCompact handler — handlePreCompact, loadLatestCompactSnapshot, buildPreCompactContextBlock (r5-005) |
 | session-lifecycle.ts | 8,299 bytes | Session lifecycle (212 lines) |
 | handoff-generator.ts | 5,032 bytes | Handoff document generator (155 lines) |
+| session-hooks.ts | ~5,100 bytes | SessionStart/SessionEnd hook implementations (r5-006) |
 
 ---
 
@@ -265,6 +266,15 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 
 TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
 
+### r5-006 — COMPLETE (2026-06-24)
+
+Created `src/learning/session-hooks.ts` with `handleSessionStart` and `handleSessionEnd` exports. `handleSessionStart` queries `governance_rules`, `fix_patterns`, and `skill_library` counts, checks for interrupted prior sessions, logs to `hook_execution_log`, and returns a `contextBlock` string. `handleSessionEnd` delegates to `session-lifecycle.onRunEnd`, `handoff-generator.generateSessionHandoff`, `loops.updateDecisionWeights`, and `loops.analyzeForEvolutions` — all non-fatal. Fixed spec bug: spec called `analyzeForEvolutions(id, false, dbPath)` (3 args) but function signature is `(buildId, dbPath?)` — corrected to `analyzeForEvolutions(opts.buildId, opts.dbPath)`. Removed unused `writeFileSync`/`mkdirSync` imports that would fail ESLint. Added two re-exports to `integration.ts`: `handleSessionStart`, `handleSessionEnd` + their types. TSC: exec gate blocked; 0 errors by inspection (all imports verified exported, all types match, all optional params handled).
+
+| File | Change |
+|------|--------|
+| src/learning/session-hooks.ts | Created — `handleSessionStart`, `handleSessionEnd`, `SessionStartResult`, `SessionEndResult` |
+| src/learning/integration.ts | Added `handleSessionStart`, `handleSessionEnd`, `SessionStartResult`, `SessionEndResult` re-exports |
+
 ### r5-004 — COMPLETE (2026-06-24)
 
 `handlePostToolUse` function added to `src/learning/hooks-enhanced.ts` and re-exported from `src/learning/integration.ts`. The function writes prompt execution scores to `prompt_scores`, upserts TypeScript error fingerprints into `fix_patterns`, and logs modified files to `hook_execution_log` — all non-fatal (wrapped in try/catch). Dropped unused `computeFingerprint` import from spec to satisfy `noUnusedLocals: true`.
@@ -284,5 +294,5 @@ TSC: exec gate blocked; 0 errors by inspection (all destructured regex match gro
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 4/? prompts complete (r5-001, r5-002, r5-003, r5-004 PASSED)
+- **Run 5:** IN PROGRESS — 6/? prompts complete (r5-001, r5-002, r5-003, r5-004, r5-005, r5-006 PASSED)
 - **Overall:** ~97% of planned scope complete

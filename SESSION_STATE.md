@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-005 COMPLETE
+## Current Session: RUN 5 — r5-006 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-005 COMPLETE |
-| Current Prompt | r5-005 done; awaiting next prompt |
-| Prompts Executed This Run | 5 (r5-001…r5-005) |
+| Phase | r5-006 COMPLETE |
+| Current Prompt | r5-006 done; awaiting next prompt |
+| Prompts Executed This Run | 6 (r5-001…r5-006) |
 | Prompts Passed | 5 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
@@ -27,10 +27,14 @@
 | handlePreToolUse | ADDED — src/learning/hooks-enhanced.ts; exported from integration.ts (r5-003) |
 | handlePostToolUse | ADDED — src/learning/hooks-enhanced.ts; exported from integration.ts (r5-004) |
 | handlePreCompact | REPLACED — precompact.ts full rewrite; 4 exports; integration.ts re-exports added (r5-005) |
+| handleSessionStart | ADDED — src/learning/session-hooks.ts; exported from integration.ts (r5-006) |
+| handleSessionEnd | ADDED — src/learning/session-hooks.ts; exported from integration.ts (r5-006) |
 
 ---
 
 ## Last Completed Prompt
+
+**r5-006** — Created `src/learning/session-hooks.ts`. `handleSessionStart` queries learning db for governance rule count, fix pattern count, and skill count; checks for interrupted prior sessions; logs to `hook_execution_log`; returns `SessionStartResult`. `handleSessionEnd` delegates to `session-lifecycle.onRunEnd`, `handoff-generator.generateSessionHandoff`, `loops.updateDecisionWeights`, and `loops.analyzeForEvolutions` — all wrapped in non-fatal try/catch. Fixed spec bug: `analyzeForEvolutions(id, false, dbPath)` → `analyzeForEvolutions(id, dbPath)` (function only accepts 2 params). Removed unused fs imports. `integration.ts` updated with 2 new re-exports + 2 type re-exports. TSC: exec gate blocked; 0 errors by inspection.
 
 **r5-005** — `src/learning/precompact.ts` replaced in full. Old API (`invokePreCompactSave`, `restoreCompactedContext`, `shouldPreCompact`) removed — grep confirmed zero external callers. New API: `PreCompactState` interface, `handlePreCompact` (async, writes to `compact_snapshots` via `getConnection`, uses `existsSync` guard, returns `{saved,snapshotId}`), `loadLatestCompactSnapshot` (async, reads latest row by `build_id`), `buildPreCompactContextBlock` (sync, formats restored-context block). `integration.ts` updated to re-export all 3 functions + `PreCompactState` type from `./precompact.js`. 4 exports verified (≥4 required). TSC: exec gate blocked; 0 errors by inspection.
 
@@ -83,7 +87,8 @@
 | src/learning/types.ts | Added HookExecutionLog, CompactSnapshot, DecisionWeight interfaces (r5-001) |
 | .forge/hooks.json | Created — 24-hook default configuration (r5-002) |
 | src/learning/hooks-enhanced.ts | Added handlePreToolUse function + 3 imports (r5-003); handlePostToolUse function (r5-004) |
-| src/learning/integration.ts | Added handlePreToolUse re-export (r5-003); handlePostToolUse re-export (r5-004); handlePreCompact/loadLatestCompactSnapshot/buildPreCompactContextBlock/PreCompactState re-exports (r5-005) |
+| src/learning/integration.ts | Added handlePreToolUse re-export (r5-003); handlePostToolUse re-export (r5-004); handlePreCompact/loadLatestCompactSnapshot/buildPreCompactContextBlock/PreCompactState re-exports (r5-005); handleSessionStart/handleSessionEnd + types re-exports (r5-006) |
+| src/learning/session-hooks.ts | Created — SessionStartResult, SessionEndResult interfaces; handleSessionStart, handleSessionEnd async functions (r5-006) |
 | src/learning/precompact.ts | Full replacement — new API: PreCompactState interface + handlePreCompact + loadLatestCompactSnapshot + buildPreCompactContextBlock (r5-005) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
