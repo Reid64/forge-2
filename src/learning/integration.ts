@@ -234,3 +234,7 @@ export async function onRunEnd(
     removeForgeLock(projectPath);
   }
 }
+
+export { detectStaleLock, checkCrashRecovery } from './session-lifecycle.js';
+export { setForgeLock as setForgeLockV2, removeForgeLock as removeForgeLockV2 } from './session-lifecycle.js';
+export type { LockFileContent, CrashRecoveryResult, RunStartResult, RunEndOptions } from './session-lifecycle.js';

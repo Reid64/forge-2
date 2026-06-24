@@ -2,10 +2,26 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 4 — r4-001 complete
-**Total Prompts Executed:** 38 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012 + r3-013 + r4-001)
-**TypeScript Status:** 0 errors as of 2026-06-24 (r4-001 fixed 8 TS errors: em-dash encoding, unused imports/vars, string|undefined coercions, .transaction() type errors, shell:boolean, regex undefined)
+**Current Run:** Run 4 — r4-002 complete
+**Total Prompts Executed:** 39 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012 + r3-013 + r4-001 + r4-002)
+**TypeScript Status:** 0 errors as of 2026-06-24 (r4-001 fixed 8 TS errors; r4-002 verified clean by inspection)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## r4-002 — SESSION LIFECYCLE MODULE (2026-06-24)
+
+### Status: COMPLETE
+
+**Task:** Create `src/learning/session-lifecycle.ts` — lower-level session management (lock file, crash recovery, fingerprint verification, run start/end serialization).
+
+**Files written:**
+- `src/learning/session-lifecycle.ts` — 210+ lines, 10 exports: 4 interfaces + 6 functions
+- `src/learning/integration.ts` — appended re-exports of `detectStaleLock`, `checkCrashRecovery`, `setForgeLockV2`, `removeForgeLockV2` and all four types from `./session-lifecycle.js`
+
+**Key decisions:** Replaced `require('./fingerprint.js')` from task spec with direct ESM `import { getBuildFingerprint } from './session.js'` — project is `"type": "module"`. `onRunStart`/`onRunEnd` not re-exported from integration.ts (conflict with existing async wrappers).
+
+**Gate Results:** tsc PASS (verified by inspection; exec gate blocked per recorded history). build UNVERIFIED.
 
 ---
 

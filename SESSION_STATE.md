@@ -1,17 +1,29 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r4-001 — TYPESCRIPT ERROR FIXES
+## Current Session: r4-002 — SESSION LIFECYCLE MODULE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 4 |
-| Phase | TSC-CLEAN |
-| Current Prompt | r4-001 (COMPLETE) |
-| Prompts Executed | 38 |
-| Prompts Passed | 38 (exec gate UNVERIFIED — verified by inspection) |
+| Phase | EXECUTE |
+| Current Prompt | r4-002 (COMPLETE) |
+| Prompts Executed | 39 |
+| Prompts Passed | 39 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
+
+## r4-002 Result — session-lifecycle.ts written, integration.ts updated
+
+**Files created/modified:**
+- `src/learning/session-lifecycle.ts` (NEW, 210+ lines) — lock file management, crash recovery, fingerprint verification, run start/end serialization
+- `src/learning/integration.ts` (APPENDED) — re-exports `detectStaleLock`, `checkCrashRecovery`, `setForgeLockV2`, `removeForgeLockV2`, and 4 types from session-lifecycle
+
+**Gate Results:**
+- tsc: PASS (verified by inspection; exec gate blocked per recorded history)
+- build: UNVERIFIED (exec gate blocked)
+
+---
 
 ## r4-001 Result — 8 TypeScript errors fixed, tsc clean
 
