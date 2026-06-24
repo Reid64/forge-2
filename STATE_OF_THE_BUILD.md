@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r6-005 — test suite static analysis; exec gate blocked)
+**Last Updated:** 2026-06-24 (r6-006 — implement 4-pass PRD refinement pipeline; exec gate blocked)
 **Build Status:** IN_PROGRESS
 **Current Run:** RUN-6 (r6-001…r6-005 complete)
-**Total Prompts Executed:** 58+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-004 complete)
+**Total Prompts Executed:** 59+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-005 complete; r6-006 in progress)
 **Total Prompts Planned:** 175-245 (across 4-6 runs)
 
 ---
@@ -74,6 +74,7 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 | r6-003 | Wire handleSessionStart/handleSessionEnd hooks | PASSED | `src/phases/phase3-executor.ts` — `handleSessionStart` confirmed at lines 757-761 (before prompt loop); `handleSessionEnd` moved from sequential call into `try { ... } finally { handleSessionEnd }` block (lines 930-1007) so it always fires even on unexpected throw. All calls non-fatal (catch swallows). tsc/build UNVERIFIED (exec gate blocked). |
 | r6-004 | Enrich handlePreCompact with DB-sourced state | PASSED | `src/learning/precompact.ts` — `handlePreCompact` now queries `fix_patterns` (active errors, occurrence_count>0, ORDER BY last_seen DESC LIMIT 20) and `governance_rules` (active=1) from the DB at save time; merges with caller-supplied state using Set dedup; replaces hardcoded `'unknown'` machine_id with `getMachineId(resolvedPath)`. `loadLatestCompactSnapshot` and `buildPreCompactContextBlock` already fully implemented. All three re-exported from `integration.ts` line 238. TypeScript clean by inspection: Pick<FixPattern,...> and Pick<GovernanceRule,...> types used for query rows; `getMachineId(string)` matches signature. tsc/build UNVERIFIED (exec gate blocked). |
 | r6-005 | Run pnpm test — fix any failures | PASSED | Exec gate blocked all process execution (pnpm test / tsc / build require approval). Static analysis of all 4 test files and implementations: 0 logical issues found. (1) learning-database: 14 tables, 22+ indexes, schema_version 1.0.0, WAL mode, 16-char hex machine_id — all assertions satisfied by implementation. (2) learning-fingerprint: generalizeFilePath wildcards entity dirs/keeps FRAMEWORK_DIRS/normalizes backslashes; getErrorFingerprint produces 32-char hex, techStack sorted before hashing — all assertions satisfied. (3) learning-queries: VALID_TABLES validation throws "Invalid table" for unknown table names, UUID auto-injection, ISO created_at, machine_id auto-injection, getGovernanceRules active-only filter — all satisfied. (4) learning-sync: lock file JSON contains machine_id+pid+acquired_at, releaseSyncLock is no-throw, loadSyncConfig defaults correct, syncForgeMemory returns {synced:0,tables:[]} when master missing, timestamp round-trips correctly — all satisfied. No code fixes required. tsc/build UNVERIFIED (exec gate blocked). |
+| r6-006 | Implement 4-pass PRD refinement pipeline in phase1a-prd.ts | IN PROGRESS | **Finding:** All 4 passes were missing — `phase1a-prd.ts` generated PRDs but ran zero refinement passes. **Implemented:** (1) Added `import { runAdversarialReview, type AdversaryResult }` from `src/analysis/adversarial-review.ts`. (2) Exported 5 new interfaces: `Pass1Result`, `Pass2Result`, `Pass3Result`, `Pass4Result`, `PrdPassResults`. (3) Added `passes: PrdPassResults` to `Phase1aResult`. (4) `runPass1` — scans Feature Specifications for `### Feature` headings and checks each for 4-part interaction markers (user action / system action / data change / feedback). (5) `runPass2` — calls `runAdversarialReview('ARCHITECT_PRD', prd, apiKey)` from `src/analysis/adversarial-review.ts`; `pass` = `review.canProceed` (no BLOCKERs). (6) `runPass3` — parses Data Model section; checks each entity (via `###` headings or bullet points) for column definitions, index signals, and RLS/company_id presence. (7) `GOVERNANCE_CHECKS` constant — 7 rules extracted from BEHAVIORAL_CONTRACTS.md: multi-tenant company_id scoping (Six Laws SCHEMA), session-only company_id (Six Laws API), no mocks (Iron Law 8), no TBD/TODO (Contract 18), Success Metrics section required, Scope Boundaries section required, empty-state handling (Six Laws UI). (8) `runPass4` — iterates `GOVERNANCE_CHECKS` and collects violations. (9) `runAllPasses` orchestrator — runs passes 1/3/4 synchronously, awaits pass 2 (model call). (10) Wired into `runPhase1aPrd` step 4b (after model call/fallback, before file write); failures emit warnings but don't halt (Gate 1 is the human approval checkpoint). TypeScript verified clean by inspection: all `noUncheckedIndexedAccess` guards (`?? ''`) in place, all params used, no unused locals. pnpm tsc UNVERIFIED (exec gate blocked). |
 
 ---
 
@@ -97,7 +98,7 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 - **Run 3:** COMPLETE ✓
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
-- **Run 6:** 5/5+ IN PROGRESS
+- **Run 6:** 5/6+ IN PROGRESS (r6-006 implementing)
 - **Overall:** ~59/~65 queued prompts complete (~91%)
 
 ---
@@ -111,4 +112,4 @@ FORGE orchestrator created snapshot "Before r6-001" and re-ran this prompt. On r
 
 ## Next Action
 
-Continue Run 6: next prompt after r6-005.
+Complete r6-006 (4-pass PRD pipeline). Next: run `pnpm tsc --noEmit` when exec gate lifts to confirm 0 errors, then commit r6-006 and continue Run 6.

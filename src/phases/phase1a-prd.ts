@@ -52,6 +52,7 @@ import { BuildMemory, nowIso } from '../memory/index.js';
 import { providerCallModel } from '../engine/provider-router.js';
 import { z, validateApiResponse } from '../tools/schema-validator.js';
 import { logLine } from '../tools/forge-logger.js';
+import { runAdversarialReview, type AdversaryResult } from '../analysis/adversarial-review.js';
 import type {
   BuildRun,
   CrossProjectInsight,
@@ -92,6 +93,51 @@ export interface GateStatus {
   detail: string;
 }
 
+// ---------------------------------------------------------------------------
+// 4-pass PRD refinement result types
+// ---------------------------------------------------------------------------
+
+/** Pass 1 — completeness: every feature has the 4-part interaction decomposition. */
+export interface Pass1Result {
+  /** Feature names (from `### <name>` in Feature Specifications) that lack acceptance criteria. */
+  featuresWithoutCriteria: string[];
+  /** True when every feature specifies user action / system action / data change / feedback. */
+  pass: boolean;
+}
+
+/** Pass 2 — adversarial PRD review via {@link runAdversarialReview} with phase ARCHITECT_PRD. */
+export interface Pass2Result {
+  adversarialReview: AdversaryResult;
+  /** True when the adversarial review found no BLOCKER findings. */
+  pass: boolean;
+}
+
+/** Pass 3 — schema completeness: every Data Model entity has columns, indexes, and RLS. */
+export interface Pass3Result {
+  entitiesMissingColumns: string[];
+  entitiesMissingIndexes: string[];
+  entitiesMissingRls: string[];
+  /** True when every entity in the Data Model section specifies columns, indexes, and RLS. */
+  pass: boolean;
+}
+
+/** Pass 4 — governance alignment against the key contracts in BEHAVIORAL_CONTRACTS.md. */
+export interface Pass4Result {
+  violations: Array<{ rule: string; detail: string }>;
+  /** True when no governance contract violations are detected in the PRD. */
+  pass: boolean;
+}
+
+/** Combined results of all four PRD refinement passes. */
+export interface PrdPassResults {
+  pass1: Pass1Result;
+  pass2: Pass2Result;
+  pass3: Pass3Result;
+  pass4: Pass4Result;
+  /** True when every individual pass resolves with `pass: true`. */
+  allPassesClear: boolean;
+}
+
 /** The complete result of {@link runPhase1aPrd}. */
 export interface Phase1aResult {
   /** The generated PRD as Markdown (the `prd` half of the s3-p04 contract). */
@@ -115,6 +161,8 @@ export interface Phase1aResult {
   warnings: string[];
   /** Gate 1 — the build halts here until a human approves the PRD. */
   gate: GateStatus;
+  /** Results of all four PRD refinement passes. */
+  passes: PrdPassResults;
   generatedAt: string;
 }
 
@@ -800,6 +848,254 @@ function buildFallbackPrd(
 }
 
 // ---------------------------------------------------------------------------
+// Pass 1 — PRD completeness (interaction-level acceptance criteria)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan the PRD for ### feature headings inside the Feature Specifications section
+ * and verify each one contains at least one interaction-level acceptance criterion
+ * marker (user action, system action, data change, or feedback).
+ */
+function runPass1(prd: string): Pass1Result {
+  const lines = prd.split(/\r?\n/);
+  let inFeatureSpec = false;
+  let currentFeature: string | null = null;
+  let currentFeatureHasCriteria = false;
+  const featuresWithoutCriteria: string[] = [];
+
+  const flushFeature = (): void => {
+    if (currentFeature !== null && !currentFeatureHasCriteria) {
+      featuresWithoutCriteria.push(currentFeature);
+    }
+  };
+
+  for (const line of lines) {
+    const h2 = /^##\s+(.*)$/.exec(line);
+    if (h2 !== null) {
+      flushFeature();
+      currentFeature = null;
+      currentFeatureHasCriteria = false;
+      inFeatureSpec = /feature/i.test(h2[1] ?? '');
+      continue;
+    }
+    if (!inFeatureSpec) continue;
+
+    const h3 = /^###\s+(.+)$/.exec(line);
+    if (h3 !== null) {
+      flushFeature();
+      currentFeature = (h3[1] ?? '').trim();
+      currentFeatureHasCriteria = false;
+      continue;
+    }
+
+    if (currentFeature !== null) {
+      if (
+        /acceptance.criteria/i.test(line) ||
+        /\*\*(?:ac|acceptance)\*\*/i.test(line) ||
+        /- \[ \]/.test(line) ||
+        /\*\*user action\*\*/i.test(line) ||
+        /\*\*system action\*\*/i.test(line) ||
+        /\*\*data change\*\*/i.test(line) ||
+        /\*\*feedback\*\*/i.test(line) ||
+        /user action:/i.test(line) ||
+        /system action:/i.test(line) ||
+        /data change:/i.test(line) ||
+        /feedback:/i.test(line)
+      ) {
+        currentFeatureHasCriteria = true;
+      }
+    }
+  }
+  flushFeature();
+
+  return { featuresWithoutCriteria, pass: featuresWithoutCriteria.length === 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2 — adversarial PRD review (runAdversarialReview with ARCHITECT_PRD)
+// ---------------------------------------------------------------------------
+
+async function runPass2(prd: string, apiKey: string): Promise<Pass2Result> {
+  const review = await runAdversarialReview('ARCHITECT_PRD', prd, apiKey || undefined);
+  return { adversarialReview: review, pass: review.canProceed };
+}
+
+// ---------------------------------------------------------------------------
+// Pass 3 — schema entity completeness (columns, indexes, RLS per entity)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the Data Model Overview section, enumerate entities (via ### headings or
+ * top-level bullet points), and check each for column definitions, at least one
+ * index signal, and RLS / company_id scoping.
+ */
+function runPass3(prd: string): Pass3Result {
+  const lines = prd.split(/\r?\n/);
+  let inDataModel = false;
+  let currentEntity: string | null = null;
+  const entities: string[] = [];
+  const entityContent = new Map<string, string>();
+
+  for (const line of lines) {
+    const h2 = /^##\s+(.*)$/.exec(line);
+    if (h2 !== null) {
+      inDataModel = /data model|schema|database/i.test(h2[1] ?? '');
+      if (!inDataModel) currentEntity = null;
+      continue;
+    }
+    if (!inDataModel) continue;
+
+    const h3 = /^###\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?/i.exec(line);
+    if (h3 !== null) {
+      currentEntity = (h3[1] ?? '').trim().toLowerCase();
+      if (!entities.includes(currentEntity)) entities.push(currentEntity);
+      entityContent.set(currentEntity, '');
+      continue;
+    }
+
+    // Capture top-level bullet-style entity definitions (only outside a ### block).
+    const bullet = /^\s*[-*]\s*\*?\*?`?([a-z][a-z0-9_]{2,})`?\*?\*?/i.exec(line);
+    if (bullet !== null && currentEntity === null) {
+      const name = (bullet[1] ?? '').toLowerCase();
+      if (!entities.includes(name) && name.length >= 3) {
+        entities.push(name);
+        entityContent.set(name, line);
+      }
+    }
+
+    if (currentEntity !== null) {
+      const prev = entityContent.get(currentEntity) ?? '';
+      entityContent.set(currentEntity, prev + '\n' + line);
+    }
+  }
+
+  const entitiesMissingColumns: string[] = [];
+  const entitiesMissingIndexes: string[] = [];
+  const entitiesMissingRls: string[] = [];
+
+  for (const entity of entities) {
+    const content = (entityContent.get(entity) ?? '').toLowerCase();
+    if (!/column|field|varchar|text|uuid|integer|boolean|timestamp|bigint|primary key/.test(content)) {
+      entitiesMissingColumns.push(entity);
+    }
+    if (!/index|indexed|primary key|pk\b|foreign key|fk\b/.test(content)) {
+      entitiesMissingIndexes.push(entity);
+    }
+    if (!/rls|row.level security|polic|company_id/.test(content)) {
+      entitiesMissingRls.push(entity);
+    }
+  }
+
+  return {
+    entitiesMissingColumns,
+    entitiesMissingIndexes,
+    entitiesMissingRls,
+    pass:
+      entitiesMissingColumns.length === 0 &&
+      entitiesMissingIndexes.length === 0 &&
+      entitiesMissingRls.length === 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Pass 4 — governance alignment (BEHAVIORAL_CONTRACTS.md key rules)
+// ---------------------------------------------------------------------------
+
+/**
+ * Key governance rules extracted from BEHAVIORAL_CONTRACTS.md, embedded here so
+ * the pass runs without a file-system dependency. Each check tests the PRD for a
+ * concrete violation; a failing `test` produces a violation entry.
+ */
+const GOVERNANCE_CHECKS: ReadonlyArray<{
+  rule: string;
+  test: (prd: string) => boolean;
+  detail: string;
+}> = [
+  {
+    rule: 'Six Laws SCHEMA — company_id scoping on multi-tenant entities',
+    test: (prd) => {
+      const hasTenant = /\b(?:company|tenant|organization|workspace)\b/i.test(prd);
+      const hasScope = /\bcompany_id\b|\btenant_id\b|\borg_id\b/i.test(prd);
+      return !hasTenant || hasScope;
+    },
+    detail:
+      'PRD references multi-tenant concepts (company/tenant/organization) but does not specify ' +
+      'company_id column for data isolation (Six Laws SCHEMA, BEHAVIORAL_CONTRACTS §global).',
+  },
+  {
+    rule: 'Six Laws API — company_id must be derived from session, never from request body',
+    test: (prd) => !/request[\s_-]?body.*company_id|company_id.*request[\s_-]?body/i.test(prd),
+    detail:
+      'PRD specifies company_id from the request body, which is forbidden. It must be derived ' +
+      'from the authenticated session only (Six Laws API, BEHAVIORAL_CONTRACTS §global).',
+  },
+  {
+    rule: 'Iron Law 8 — No mocks or placeholder data in production code',
+    test: (prd) => !/\b(?:mock|placeholder|fake data|dummy data|stub data)\b/i.test(prd),
+    detail:
+      'PRD references mock, placeholder, or dummy data. All data must come from real API calls ' +
+      'to real tables. No mocks or placeholder data in production code (Iron Law 8).',
+  },
+  {
+    rule: 'Contract 18 — No TBD/TODO/unresolved markers in PRD specifications',
+    test: (prd) => !/\bTBD\b|\bTODO\b|\bto be determined\b/i.test(prd),
+    detail:
+      'PRD contains unresolved TBD/TODO markers. Every element must be fully specified before ' +
+      'Gate 1 approval — no element may be left as "TBD" or "TODO" (Contract 18).',
+  },
+  {
+    rule: 'PRD structure — ## Success Metrics section required',
+    test: (prd) => /^##\s+success.metrics/im.test(prd),
+    detail:
+      'PRD is missing the required ## Success Metrics section ' +
+      '(mandatory by the s3-p04 PRD structure contract).',
+  },
+  {
+    rule: 'PRD structure — ## Scope Boundaries section required',
+    test: (prd) => /^##\s+scope.boundar|out.of.scope|non.goal/im.test(prd),
+    detail:
+      'PRD is missing the required ## Scope Boundaries section with explicit in-scope / ' +
+      'out-of-scope definitions (mandatory by the s3-p04 PRD structure contract).',
+  },
+  {
+    rule: 'Six Laws UI — Empty states must be specified for every feature',
+    test: (prd) => /empty.state|no results|zero.state|nothing.here/i.test(prd),
+    detail:
+      'PRD does not mention empty-state handling. Every feature must specify its empty / ' +
+      'zero-state UI (Six Laws UI; adversarial-review ARCHITECT_PRD UX vector).',
+  },
+];
+
+function runPass4(prd: string): Pass4Result {
+  const violations: Array<{ rule: string; detail: string }> = [];
+  for (const check of GOVERNANCE_CHECKS) {
+    if (!check.test(prd)) {
+      violations.push({ rule: check.rule, detail: check.detail });
+    }
+  }
+  return { violations, pass: violations.length === 0 };
+}
+
+// ---------------------------------------------------------------------------
+// 4-pass orchestrator
+// ---------------------------------------------------------------------------
+
+async function runAllPasses(prd: string, apiKey: string): Promise<PrdPassResults> {
+  const pass1 = runPass1(prd);
+  const pass3 = runPass3(prd);
+  const pass4 = runPass4(prd);
+  // Pass 2 is the only async pass (makes a model call).
+  const pass2 = await runPass2(prd, apiKey);
+  return {
+    pass1,
+    pass2,
+    pass3,
+    pass4,
+    allPassesClear: pass1.pass && pass2.pass && pass3.pass && pass4.pass,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -888,6 +1184,41 @@ export async function runPhase1aPrd(
     usedFallback = true;
   }
 
+  // 4b. Run the 4-pass PRD refinement pipeline.
+  log('running 4-pass PRD refinement pipeline');
+  const passes = await runAllPasses(prd, apiKey);
+  if (!passes.pass1.pass) {
+    const missing = passes.pass1.featuresWithoutCriteria.join(', ');
+    warnings.push(
+      `Pass 1 (completeness): ${passes.pass1.featuresWithoutCriteria.length} feature(s) missing acceptance criteria — ${missing}`
+    );
+  }
+  if (!passes.pass2.pass) {
+    warnings.push(
+      `Pass 2 (adversarial): ${passes.pass2.adversarialReview.blockers.length} BLOCKER finding(s) — review passes.pass2.adversarialReview before Gate 1 approval`
+    );
+  }
+  if (!passes.pass3.pass) {
+    const schemaIssues: string[] = [
+      ...passes.pass3.entitiesMissingColumns.map((e) => `${e}:no-columns`),
+      ...passes.pass3.entitiesMissingIndexes.map((e) => `${e}:no-indexes`),
+      ...passes.pass3.entitiesMissingRls.map((e) => `${e}:no-rls`),
+    ];
+    warnings.push(`Pass 3 (schema completeness): ${schemaIssues.join(', ')}`);
+  }
+  if (!passes.pass4.pass) {
+    const rules = passes.pass4.violations.map((v) => v.rule).join('; ');
+    warnings.push(
+      `Pass 4 (governance): ${passes.pass4.violations.length} violation(s): ${rules}`
+    );
+  }
+  log(
+    `passes: 1=${passes.pass1.pass ? 'PASS' : 'FAIL'} ` +
+      `2=${passes.pass2.pass ? 'PASS' : 'FAIL'} ` +
+      `3=${passes.pass3.pass ? 'PASS' : 'FAIL'} ` +
+      `4=${passes.pass4.pass ? 'PASS' : 'FAIL'}`
+  );
+
   // 5. Write PRD.md to the target project.
   let prdPath: string | null = null;
   if (writePrdFile) {
@@ -925,6 +1256,7 @@ export async function runPhase1aPrd(
     usedFallback,
     warnings,
     gate,
+    passes,
     generatedAt: nowIso(),
   };
 }
