@@ -289,3 +289,50 @@ The following error patterns are seeded into error_patterns on initialization:
 9. **missing_env_vars** — Application crashes at runtime due to missing environment variables. Prevention: Phase 0 verifies every required env var is present before build starts. Success rate: 100%.
 
 10. **pnpm_lockfile_conflict** — pnpm lockfile conflicts when switching between machines. Prevention: Delete lockfile and run fresh pnpm install in Phase 0 on each machine. Success rate: 95%.
+
+---
+
+## SQLite Learning Database Tables (forge_memory.db)
+
+The following tables live in `~/.forge/forge_memory.db` (local SQLite, not Supabase). Added in Run 4.
+
+### Table: adversary_findings
+Tracks adversarial review findings for resolution and accuracy measurement.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | UUID record identifier |
+| build_id | TEXT | NOT NULL | Build that triggered the review |
+| phase | TEXT | NOT NULL | Review phase (SCAN, DIAGNOSE, etc.) |
+| severity | TEXT | NOT NULL, CHECK IN ('BLOCKER','SIGNIFICANT','MINOR','DISMISSED') | Finding severity |
+| vector | TEXT | | Attack or failure vector (nullable) |
+| issue | TEXT | NOT NULL | Description of the finding |
+| fix | TEXT | | Proposed or applied fix (nullable) |
+| resolution | TEXT | NOT NULL DEFAULT 'PENDING', CHECK IN ('PENDING','FIXED','DISMISSED','DEFERRED') | Current resolution status |
+| resolved_at | TEXT | | ISO 8601 timestamp when resolved (nullable) |
+| machine_id | TEXT | NOT NULL | Machine that generated the finding |
+| created_at | TEXT | NOT NULL DEFAULT (datetime('now')) | Record creation timestamp |
+
+#### Indexes:
+- `idx_adversary_build` ON (build_id)
+- `idx_adversary_severity` ON (severity)
+
+---
+
+### Table: build_fingerprints
+Tracks project state hashes for integrity verification between runs.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | UUID record identifier |
+| build_id | TEXT | NOT NULL | Build run this fingerprint belongs to |
+| project_name | TEXT | NOT NULL | Project being fingerprinted |
+| fingerprint | TEXT | NOT NULL | SHA-256 hash of project file state |
+| file_count | INTEGER | NOT NULL DEFAULT 0 | Number of files in the project |
+| total_size_kb | REAL | NOT NULL DEFAULT 0 | Total project size in kilobytes |
+| computed_at | TEXT | NOT NULL DEFAULT (datetime('now')) | When the fingerprint was computed |
+| machine_id | TEXT | NOT NULL | Machine that computed the fingerprint |
+
+#### Indexes:
+- `idx_fingerprints_build` ON (build_id)
+- `idx_fingerprints_project` ON (project_name)

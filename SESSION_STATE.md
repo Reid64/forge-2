@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-006** — sync.ts verified: .transaction() errors already resolved (BEGIN/COMMIT/ROLLBACK pattern confirmed). All four exports present: loadSyncConfig, acquireSyncLock, releaseSyncLock, syncForgeMemory. No code changes required — fixes were applied in r4-001. Cross-Machine Sync COMPLETE.
+**r4-007** — Confirmed `adversary_findings` and `build_fingerprints` CREATE TABLE statements present in `src/learning/database.ts` (lines 296–322). `AdversaryFindingRecord` and `BuildFingerprintRecord` interfaces confirmed present in `src/learning/types.ts` (lines 159–182). No code changes required — both were already added. Governance updated: SCHEMA_REGISTRY.md + STATE_OF_THE_BUILD.md.
 
 ---
 
