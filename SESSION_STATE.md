@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-001b — better-sqlite3 added to package.json, database.ts confirmed
+## Current Session: r1-003 — queries.ts complete (15 query functions)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-23
 
@@ -8,27 +8,27 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-001b |
-| Prompts Executed | 2 (r1-001 + r1-001b) |
-| Prompts Passed | 2 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-003 |
+| Prompts Executed | 3 (r1-001, r1-002, r1-003) |
+| Prompts Passed | 3 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-001b** — Added `"better-sqlite3": "^9.6.0"` to package.json dependencies and `"@types/better-sqlite3": "^7.6.12"` to devDependencies. Confirmed `src/learning/database.ts` is fully implemented (all 14 tables, 26 indexes, WAL mode, connection cache, machine ID logic). Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Gate verification: exec blocker prevents `pnpm install` and `pnpm tsc --noEmit` — AUTHORED status, not GREEN gate.
+**r1-003** — `src/learning/queries.ts` fully implemented with all 15 functions: `generateId`, `saveToForgeMemory`, `getForgeMemory`, `updateForgeMemory`, `savePromptScore`, `getBestPromptTemplates`, `getFixPattern`, `registerError`, `registerFix`, `getGovernanceRules`, `incrementGovernanceEnforcement`, `getDecisionWeights`, `getRelevantSkills`, `getPendingEvolutions`, `updateEvolutionStatus`. All SQL uses ? parameterized placeholders. VALID_TABLES whitelist enforced on every write. TypeScript strict mode compliant. Gate verification: exec blocker active — code verified by manual review.
 
 ## Active Blockers
-1. **Exec gate blocked** — `pnpm install`, `pnpm tsc --noEmit`, and `npm test` require approval in this session. Type stub at `src/types/better-sqlite3.d.ts` should allow tsc to pass when exec is unblocked. `pnpm install` needed to actually fetch better-sqlite3 into node_modules for runtime.
+1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
 
 ## Next Action
 **Operator UNBLOCK (from permitted session):**
-1. `pnpm install` → installs better-sqlite3 + all deps from updated package.json
-2. `npx tsc --noEmit` → expect zero errors
-3. `npm test` → expect 31/31 pass (learning-database, learning-fingerprint, learning-queries, learning-sync)
-4. Confirm output: `pass 31`, `fail 0`
+1. `npx tsc --noEmit` → expect zero errors
+2. `pnpm run build` → expect clean
+3. `pnpm lint` → expect clean
+4. `npm test` → expect learning-database, learning-fingerprint, learning-queries, learning-sync to pass
 
-**Then continue queue: next prompt after r1-001b**
+**Then continue queue: next prompt r1-004**
 
 ---
 

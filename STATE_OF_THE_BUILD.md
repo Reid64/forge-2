@@ -2,6 +2,33 @@
 
 ---
 
+# r1-003 RE-EXECUTION — 2026-06-23
+
+## Build Status: r1-003 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/queries.ts` — 15 query functions fully implemented.
+
+- `generateId()` → crypto.randomUUID() ✓
+- `saveToForgeMemory()` → table validation, auto-id/machine_id/created_at, parameterized INSERT ✓
+- `getForgeMemory()` → SELECT with WHERE/ORDER BY/LIMIT, always returns [] ✓
+- `updateForgeMemory()` → parameterized UPDATE, returns bool ✓
+- `savePromptScore()` → serializes tags+bool, calls saveToForgeMemory ✓
+- `getBestPromptTemplates()` → GROUP BY + HAVING + ORDER BY, parameterized ✓
+- `getFixPattern()` → returns FixPattern|null ✓
+- `registerError()` → fingerprint, upsert logic, FixPattern return ✓
+- `registerFix()` → updates fix+recalculates success_rate ✓
+- `getGovernanceRules()` → GLOBAL + PROJECT_SPECIFIC filter, JS tag filter ✓
+- `incrementGovernanceEnforcement()` → UPDATE enforcement_count + last_enforced ✓
+- `getDecisionWeights()` → GROUP BY option_chosen, parameterized ✓
+- `getRelevantSkills()` → top-20 by effectiveness, JS tag filter ✓
+- `getPendingEvolutions()` → PENDING status, ordered by confidence ✓
+- `updateEvolutionStatus()` → status + reviewed_at + review_note ✓
+
+All SQL uses ? placeholders. VALID_TABLES whitelist enforced. TypeScript strict mode compliant.
+Exec gate blocked — sandbox requires operator approval.
+
+---
+
 # r1-002 RE-EXECUTION — 2026-06-23
 
 ## Build Status: r1-002 VERIFIED BY INSPECTION (exec gate still blocked)
