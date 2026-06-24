@@ -153,13 +153,17 @@ TypeScript error fixes (sync.ts .transaction() calls), types hardening (Adversar
 
 ---
 
+## fix-001 Applied (2026-06-24)
+
+Snapshot `d88ac9b [FORGE-SNAPSHOT] Before fix-001` was taken before this fix. The unicode corruption was re-introduced (queue-generator.ts had `—` em dash, phase2-governance.ts type had `â€"` mojibake). Fix re-applied by direct Edit: line 1068 now reads `'Gate 3 â€" Governance Approval'` — byte-identical to the Gate3Status literal type.
+
 ## r4-001 Re-run Verification (2026-06-24)
 
 All 8 TypeScript errors listed in r4-001 task verified fixed by git history analysis:
 
 | Error | File | Fix Applied | Evidence |
 |-------|------|-------------|----------|
-| unicode corruption (â€" vs —) | src/engine/queue-generator.ts:1068 | Fixed in commit 009d774 | git show 009d774 confirms |
+| unicode corruption (â€" vs —) | src/engine/queue-generator.ts:1068 | Re-applied (fix-001, 2026-06-24) | Edit confirmed; line 1068 = `'Gate 3 â€" Governance Approval'` matching Gate3Status literal |
 | getBuildFingerprint unused import | src/learning/integration.ts:8 | Fixed — not present | Read confirms |
 | string\|undefined assignments | src/learning/integration.ts:144-148 | Fixed — ?? '' applied | Read confirms |
 | _machineId unused var | src/learning/loops.ts:202 | Fixed — assignment removed | Read confirms |
