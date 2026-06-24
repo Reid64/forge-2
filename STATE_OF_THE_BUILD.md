@@ -2,6 +2,44 @@
 
 ---
 
+# r3-008 — RETROFIT RECONCILE + QUEUE + PIPELINE (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/reconcile.ts` implementing RECONCILE, QUEUE generator, and pipeline orchestrator. Add reconcile exports to `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/reconcile.ts` — NEW (4 exported functions + 5 exported interfaces)
+- `src/retrofit/index.ts` — MODIFIED (added reconcile re-exports)
+
+**Functions implemented:**
+| Function | Description |
+|----------|-------------|
+| `runReconcile` | Interactive (readline) or non-interactive RECONCILE session — presents CRITICAL/WARN/UNBUILT/ENTERPRISE findings, persists decisions to SQLite, returns `ReconcileOutput` |
+| `generateRetrofitQueue` | Converts `ReconcileOutput` into a tier-ordered `queue.yaml` (CRITICAL → WARN → ENTERPRISE) with dependency chains; writes to `outputPath/queue.yaml` |
+| `runRetrofitPipeline` | Full RETROFIT orchestrator: SCAN → DIAGNOSE → RECONCILE → QUEUE with ANSI progress display |
+
+**Types exported:** `ReconcileInput`, `ReconcileOutput`, `QueuePrompt`, `GeneratedQueue`, `RetrofitPipelineOptions`
+
+**TypeScript strict compliance verified by inspection:**
+- All imports resolve (node:readline, node:fs, node:path, node:child_process, node:os, ./types.js, ./diagnose.js, ./scan.js)
+- `ReconcileDecision['decision']` union `'BUILD'|'DEFER'|'ABANDON'|'APPROVE'|'SKIP'|'IGNORE'` — all branches covered
+- `filter((f): f is DiagnoseFinding => !!f)` — correct type guard for `.find()` returning `T | undefined`
+- `process.env['USERPROFILE'] ?? process.env['HOME'] ?? homedir()` — safe triple-fallback
+- `loadPrior` returns `ReconcileDecision[]` — `line.split('|')` result assigned with explicit cast, safe
+- No unused variables, no console.log in production paths, no empty interface declarations
+- `execSync` with `stdio: 'pipe'` — no stdout pollution; wrapped in try/catch
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts, diagnose.ts, reconcile.ts — 9 files present
+
+---
+
 # r3-007 — RETROFIT DIAGNOSE: All Three Reports (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

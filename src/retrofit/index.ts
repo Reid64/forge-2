@@ -8,4 +8,6 @@ export { runScan } from './scan.js';
 export type { ScanOptions } from './scan.js';
 export { generateArchitectureHealthReport, deriveFindingsFromScanReport, detectMaturityStage, buildGovernanceReconciliationReport, buildEnterprisePatternsGapReport } from './diagnose.js';
 export type { ArchitectureHealthReport, GovernanceReconciliationReport, EnterprisePatternsGapReport, MaturityStage } from './diagnose.js';
+export { runReconcile, generateRetrofitQueue, runRetrofitPipeline } from './reconcile.js';
+export type { ReconcileInput, ReconcileOutput, QueuePrompt, GeneratedQueue, RetrofitPipelineOptions } from './reconcile.js';
 export const RETROFIT_VERSION = '2.0.0';
