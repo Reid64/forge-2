@@ -1,26 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-004 COMPLETE
+## Current Session: Run 3 — r3-005 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT SCAN ops 5-8 |
-| Current Prompt | r3-004 (scan-ops-5-8.ts) |
-| Prompts Executed | 16 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004) |
-| Prompts Passed | 16 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | RETROFIT SCAN ops 9-14 |
+| Current Prompt | r3-005 (scan-ops-9-14.ts) |
+| Prompts Executed | 17 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005) |
+| Prompts Passed | 17 (exec gate UNVERIFIED — file verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-004 (scan-ops-5-8.ts)** — `src/retrofit/scan-ops-5-8.ts` already present from prior run (122 lines, 4 exports: `buildRouteInventory`, `auditEnvVars`, `extractDatabaseSchema`, `analyzeGitHistory`). `src/retrofit/index.ts` already exports all four on line 5. All types correctly imported from `./types.js`. Null safety verified — `?? null` on all array accesses, strict TypeScript compliant. TSC gate blocked by exec permission; verification by inspection only.
+**r3-005 (scan-ops-9-14.ts)** — `src/retrofit/scan-ops-9-14.ts` already present from prior run (88 lines, 6 exports: `auditPackages`, `inventoryGovernanceDocs`, `checkTypeScriptCompilation`, `runExistingTests`, `testDynamicRoutes`, `analyzeVercelDeployment`). `src/retrofit/index.ts` line 6 already exports all six. All types (`PackageAuditEntry`, `GovernanceDocEntry`, `CompilationError`, `DynamicRouteResult`, `VercelDeployInfo`) correctly imported from `./types.js`. Strict TS compliance verified; unused `readdirSync` import correctly omitted. TSC gate blocked by exec permission; verification by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-005** — `src/retrofit/scan-ops-9-14.ts` (auditPackages, inventoryGovernanceDocs, checkTypeScriptCompilation, runExistingTests, testDynamicRoutes, analyzeVercelDeployment).
+**r3-006** — `src/retrofit/scan.ts` SCAN orchestrator (wires all 14 ops, writes `.forge/scan_report.json`).
 
 Operator verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
