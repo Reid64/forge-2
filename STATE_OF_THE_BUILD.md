@@ -2,9 +2,37 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-011 COMPLETE (Ring 2 sentinel audit)
-**Total Prompts Executed:** 22 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-010 + r3-011)
+**Current Run:** Run 3 — r3-012 COMPLETE (Ring 3 sentinel audit)
+**Total Prompts Executed:** 23 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-011 + r3-012)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+## r3-012 — RING 3 SENTINEL AUDIT (2026-06-24)
+
+### Status: COMPLETE (verification by inspection — exec gate blocked)
+
+**Task:** Audit `src/phases/phase4-sentinel.ts` Ring 3 (end-of-run gate) implementation and harden if needed.
+
+**Finding: Ring 3 is ALREADY FULLY IMPLEMENTED — no code changes required.**
+
+| Check | Function | Location | Spec | Status |
+|-------|----------|----------|------|--------|
+| Ring 3a Trivy | `runRing3TrivyCheck` | line 1779 | `trivy fs --severity CRITICAL,HIGH --format json --quiet .`, parses `Results[].Vulnerabilities`, 0 CRITICAL+HIGH, skips if not in PATH | ✅ COMPLETE |
+| Ring 3b Gitleaks | `runRing3GitleaksCheck` | line 1889 | `gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0`, reads report file, 0 findings, skips if not in PATH | ✅ COMPLETE |
+| Ring 3c Lighthouse | `runRing3LighthouseCheck` | line 2020 | Starts dev server port 3099, `lighthouse http://localhost:3099 --chrome-flags="--headless --no-sandbox" --output=json --output-path=.forge/lighthouse.json`, ≥90 for performance/accessibility/best-practices/SEO, stops server, skips if not installed | ✅ COMPLETE |
+| Trigger logic | `shouldFireRing3` | line 1756 | `isFinalPrompt \|\| forceRun` | ✅ COMPLETE |
+| Integration | `runSentinel` | line 3162 | Fires after Ring 1/2 blocks; uses injectable overrides for tests | ✅ COMPLETE |
+| CLI entry | `runSentinelRing(3,...)` | line 3621 | `forge sentinel --ring 3` → `forceRun: true, isFinalPrompt: true` | ✅ COMPLETE |
+| DB logging | `tryRegisterRing1Error` | line 2202 | All failures register as `fix_patterns` entries | ✅ COMPLETE |
+
+**Ring 3a detail:** Trivy command is exact spec. Parses `Results[].Vulnerabilities[]` array. Filters by `.Severity === 'CRITICAL'` and `.Severity === 'HIGH'`. Threshold enforced: `critical.length > 0 || high.length > 0` → FAIL. Not-installed detection: `/command not found|is not recognized|no such file|ENOENT|not installed/i.test(combined)` with guard that stdout doesn't start with `{`. Exit-0 with no JSON → pass (some Trivy versions emit nothing for clean scans).
+
+**Ring 3b detail:** Uses `--exit-code 0` flag so gitleaks always exits 0; findings read exclusively from `.forge/gitleaks-report.json`. JSON parsed as `GitleaksFinding[]`. Threshold: `findings.length > 0` → FAIL. Report file absence (no findings) → 0 findings → PASS. Not-installed gracefully skipped.
+
+**Ring 3c detail:** Fast-path `lighthouse --version` check before spawning dev server. Spawns `pnpm dev --port 3099` with `spawn()` (not exec). Polls `http://localhost:3099` with `fetch()` every 1s up to 30s. Runs Lighthouse with exact spec command. Parses `categories[key].score * 100` for each key in `{performance, accessibility, best-practices, seo}`. SIGTERM kills dev server in all paths (success, failure, skip). Not-ready dev server → SKIP (never FAIL).
+
+**TSC status:** Cannot re-run (exec gate blocked). No code modifications made in r3-012 — zero regression risk.
+
+---
 
 ## r3-011 — RING 2 SENTINEL AUDIT (2026-06-24)
 
