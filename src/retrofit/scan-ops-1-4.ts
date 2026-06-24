@@ -1,7 +1,7 @@
 // FORGE 2.0 — SCAN Operations 1-4
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { join, extname, dirname, resolve, relative } from 'node:path';
-import type { FileTreeResult, DependencyGraph, BrokenImport, ImportEdge } from './types.js';
+import type { FileTreeResult, DependencyGraph, BrokenImport } from './types.js';
 
 const EXCLUDE = /node_modules|\.next|\.git|dist|build|\.cache/;
 
@@ -21,7 +21,7 @@ export function scanDirectoryTree(projectPath: string): FileTreeResult {
   let totalBytes = 0;
   for (const f of files) {
     if (!byExtension[f.extension]) byExtension[f.extension] = { count: 0, totalSizeKB: 0 };
-    byExtension[f.extension].count++; byExtension[f.extension].totalSizeKB += f.sizeBytes / 1024; totalBytes += f.sizeBytes;
+    const ext = byExtension[f.extension]; if (ext) { ext.count++; ext.totalSizeKB += f.sizeBytes / 1024; } totalBytes += f.sizeBytes;
   }
   return { totalFiles: files.length, byExtension, files, projectSizeKB: totalBytes / 1024 };
 }
@@ -35,7 +35,7 @@ function getExports(fp: string): string[] {
   if (/export\s+default\s+/.test(c)) ex.push('default');
   NAMED_EXPORT_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = NAMED_EXPORT_RE.exec(c)) !== null) ex.push(m[1]);
+  while ((m = NAMED_EXPORT_RE.exec(c)) !== null) ex.push(m[1] ?? '');
   return ex;
 }
 

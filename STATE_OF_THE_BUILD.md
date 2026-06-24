@@ -177,6 +177,20 @@ No diff exists between current HEAD (de60f42) and r4-001 commit (009d774) for an
 
 ---
 
+## fix-003 Applied (2026-06-24)
+
+Snapshot `[FORGE-SNAPSHOT] Before fix-003` was taken before this fix. Three TypeScript errors in `src/retrofit/scan-ops-1-4.ts` were fixed:
+
+| Error | Line | Fix |
+|-------|------|-----|
+| `ImportEdge` imported but never used | 4 | Removed `ImportEdge` from import statement |
+| Object possibly undefined (`byExtension[f.extension].count++` / `.totalSizeKB`) | 24 | Extracted to `const ext`; gated on `if (ext)` before property access |
+| Argument `string \| undefined` not assignable to `string` (`ex.push(m[1])`) | 38 | Changed to `ex.push(m[1] ?? '')` |
+
+TSC verification: exec gate blocked live run; 0 errors by inspection (all three error sites resolved).
+
+---
+
 ## Active Gaps (Blocking Run 5)
 
 1. **Build not executed** — dist/ is stale from Jun 23. `pnpm run build` must pass before CLI can be smoke-tested.

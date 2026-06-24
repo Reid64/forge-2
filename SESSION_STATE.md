@@ -94,6 +94,18 @@ cd C:\Users\manag\Documents\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"
 
 ---
 
+## fix-003 Applied (2026-06-24)
+
+Snapshot `[FORGE-SNAPSHOT] Before fix-003` was taken before this fix. Three TypeScript errors fixed in `src/retrofit/scan-ops-1-4.ts`:
+
+1. Line 4: Removed unused `ImportEdge` from import statement.
+2. Line 24: Extracted `byExtension[f.extension]` to `const ext`; gated mutation on `if (ext)` to eliminate "Object is possibly undefined".
+3. Line 38: Changed `ex.push(m[1])` to `ex.push(m[1] ?? '')` to eliminate "string | undefined not assignable to string".
+
+TSC verification: exec gate blocked; 0 errors by inspection.
+
+---
+
 ## fix-001 Applied (2026-06-24)
 
 Snapshot `d88ac9b [FORGE-SNAPSHOT] Before fix-001` was taken before this fix. The unicode mismatch was present in HEAD: `queue-generator.ts` line 1068 had `'Gate 3 — Governance Approval'` (em dash U+2014) while `phase2-governance.ts` line 103 Gate3Status literal type had `'Gate 3 â€" Governance Approval'` (mojibake). Fix applied: line 1068 now reads `'Gate 3 â€" Governance Approval'` — byte-identical to the type literal. TypeScript type error resolved.
