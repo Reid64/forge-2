@@ -1,5 +1,40 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r3-004 — SCAN OPS 5-8
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Last Updated: 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Run Number | Run 3 (Section 1 complete) |
+| Phase | RETROFIT-SCAN |
+| Current Prompt | r3-004 (COMPLETE) |
+| Prompts Executed | 29 (r1-001…r1-012 + r3-001…r3-015 + re-verify + r3-002 re-exec + r3-004) |
+| Prompts Passed | 29 (exec gate UNVERIFIED — verified by inspection) |
+| Prompts Failed | 0 |
+
+## r3-004 Result — SCAN Ops 5-8 verified present and correct
+
+`src/retrofit/scan-ops-5-8.ts` exists (121 lines) with all 4 required functions:
+- `buildRouteInventory` — walks app/src/app dir, classifies PAGE/LAYOUT/API/MIDDLEWARE
+- `auditEnvVars` — greps process.env.VAR refs, cross-refs .env.local + Vercel
+- `extractDatabaseSchema` — parses supabase/migrations/*.sql, checks database.types.ts
+- `analyzeGitHistory` — git log/status/branch queries, null-safe throughout
+
+`src/retrofit/index.ts` line 5 already exports all 4 functions from `./scan-ops-5-8.js`.
+
+Exec gate (`pnpm tsc --noEmit`) blocked per recorded history. No code changes required.
+
+## Active Blockers
+1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
+
+## Next Action
+Continue with next prompt in queue (r3-005 or next Section 2 prompt per queue.yaml).
+
+---
+
+# PRIOR SESSION — r3-002 RETROFIT SCAFFOLD VERIFICATION
+
 ## Current Session: r3-002 — RETROFIT Scaffold Verification
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24

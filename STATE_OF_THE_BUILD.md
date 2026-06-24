@@ -2,9 +2,25 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — Section 1 complete; r3-002 verified
-**Total Prompts Executed:** 28 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec)
+**Current Run:** Run 3 — r3-004 complete
+**Total Prompts Executed:** 29 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## r3-004 — SCAN OPS 5-8 VERIFICATION (2026-06-24)
+
+### Status: COMPLETE (file already present from prior run — verified by inspection)
+
+**Task:** Create `src/retrofit/scan-ops-5-8.ts` with `buildRouteInventory`, `auditEnvVars`, `extractDatabaseSchema`, `analyzeGitHistory`; add export to `src/retrofit/index.ts`.
+
+**Finding:** Both files already exist with correct, null-safe content:
+- `src/retrofit/scan-ops-5-8.ts` — 121 lines, all 4 functions present; includes undefined-guards (`if (k !== undefined)`, `if (t !== undefined)`) beyond the spec minimum
+- `src/retrofit/index.ts` — line 5 already exports all 4 functions from `./scan-ops-5-8.js`
+
+**No code changes required.** All exports verified by direct file read.
+
+**Exec gate:** `pnpm tsc --noEmit` blocked (intermittent per recorded history). Zero errors expected per prior confirmed state.
 
 ---
 
