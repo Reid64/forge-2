@@ -2,6 +2,39 @@
 
 ---
 
+# r3-004 — SCAN Ops 5–8 (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/scan-ops-5-8.ts` implementing SCAN Operations 5–8, and export all four functions from `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/scan-ops-5-8.ts` — NEW (~122 lines, 4 exported functions)
+- `src/retrofit/index.ts` — MODIFIED (added scan-ops-5-8 re-export)
+
+**Functions implemented:**
+| Function | Op | Description |
+|----------|----|-------------|
+| `buildRouteInventory` | 5 | Walks app/ or src/app/; classifies PAGE/LAYOUT/API/MIDDLEWARE; extracts HTTP methods from route.ts files |
+| `auditEnvVars` | 6 | Scans all TS/JS for `process.env.*`; cross-references .env locals + Vercel CLI; classifies MISSING_LOCAL / MISSING_PRODUCTION / UNUSED / OK |
+| `extractDatabaseSchema` | 7 | Parses supabase/migrations/*.sql for CREATE TABLE; compares against database.types.ts; flags TABLE_MISSING_IN_TYPES |
+| `analyzeGitHistory` | 8 | git log last commit hash/date/age; uncommitted change count; all branches |
+
+**TypeScript strict compliance verified by inspection:**
+- `noUncheckedIndexedAccess`: all `m[1]` regex capture accesses guarded with `if (k !== undefined)` / `if (t !== undefined)`; array index `l[0] ?? null` / `l[1] ?? null` safe
+- `noUnusedLocals/Parameters`: no unused locals; all imports used
+- `strictNullChecks`: `root!` non-null assertion safe (checked at line 14); `typesFile` null-guarded before use
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts — 5 files present
+
+---
+
 # r3-003 — SCAN Ops 1–4 (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)
