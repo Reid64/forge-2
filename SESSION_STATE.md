@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-003 — queries.ts complete (15 query functions)
+## Current Session: r1-004 — fingerprint.ts complete (error fingerprinting algorithm)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-23
 
@@ -8,15 +8,15 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-003 |
-| Prompts Executed | 3 (r1-001, r1-002, r1-003) |
-| Prompts Passed | 3 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-004 |
+| Prompts Executed | 4 (r1-001, r1-002, r1-003, r1-004) |
+| Prompts Passed | 4 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-003** — `src/learning/queries.ts` fully implemented with all 15 functions: `generateId`, `saveToForgeMemory`, `getForgeMemory`, `updateForgeMemory`, `savePromptScore`, `getBestPromptTemplates`, `getFixPattern`, `registerError`, `registerFix`, `getGovernanceRules`, `incrementGovernanceEnforcement`, `getDecisionWeights`, `getRelevantSkills`, `getPendingEvolutions`, `updateEvolutionStatus`. All SQL uses ? parameterized placeholders. VALID_TABLES whitelist enforced on every write. TypeScript strict mode compliant. Gate verification: exec blocker active — code verified by manual review.
+**r1-004** — `src/learning/fingerprint.ts` fully implemented. `generalizeFilePath`: normalizes backslashes, wildcards entity-specific directory segments while preserving FRAMEWORK_DIRS, `[dynamic]` route segments, short dirs, and the filename. `generalizeErrorMessage`: wildcards quoted strings (single/double/backtick), non-structural PascalCase identifiers, and relative file paths; collapses consecutive `*`. `getErrorFingerprint`: SHA-256 of `errorCode|generalizedPath|generalizedMessage|sortedTechStack`, returns first 32 hex chars. Determinism guaranteed by all-lowercase errorCode + sorted techStack. Gate verification: exec blocker active — code verified by manual review against spec.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
@@ -28,7 +28,7 @@
 3. `pnpm lint` → expect clean
 4. `npm test` → expect learning-database, learning-fingerprint, learning-queries, learning-sync to pass
 
-**Then continue queue: next prompt r1-004**
+**Then continue queue: next prompt r1-005 (loops.ts)**
 
 ---
 

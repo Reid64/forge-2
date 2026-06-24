@@ -2,6 +2,21 @@
 
 ---
 
+# r1-004 RE-EXECUTION — 2026-06-23
+
+## Build Status: r1-004 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/fingerprint.ts` — Full error fingerprinting algorithm, 120 lines.
+
+- `generalizeFilePath()` → normalizes separators, wildcards entity-specific dir segments, keeps FRAMEWORK_DIRS + `[id]` dynamic segments + filenames intact ✓
+- `generalizeErrorMessage()` → replaces single/double/backtick-quoted strings with `'*'`; wildcards PascalCase non-structural identifiers; replaces `./` file paths; collapses consecutive `*` ✓
+- `getErrorFingerprint()` → SHA-256 of `errorCode|generalizedPath|generalizedMessage|sortedTechStack`, returns first 32 hex chars ✓
+- Deterministic: identical error patterns in different entity files → same fingerprint; different errors → different fingerprints ✓
+
+File confirmed as exact match to prompt specification. Exec gate blocked — `npx tsc --noEmit` and node verification script require operator approval.
+
+---
+
 # r1-003 RE-EXECUTION — 2026-06-23
 
 ## Build Status: r1-003 VERIFIED BY INSPECTION (exec gate blocked)
