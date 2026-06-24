@@ -118,10 +118,30 @@ TypeScript error fixes (sync.ts .transaction() calls), types hardening (Adversar
 
 ---
 
+## r4-001 Re-run Verification (2026-06-24)
+
+All 8 TypeScript errors listed in r4-001 task verified fixed by git history analysis:
+
+| Error | File | Fix Applied | Evidence |
+|-------|------|-------------|----------|
+| unicode corruption (â€" vs —) | src/engine/queue-generator.ts:1068 | Fixed in commit 009d774 | git show 009d774 confirms |
+| getBuildFingerprint unused import | src/learning/integration.ts:8 | Fixed — not present | Read confirms |
+| string\|undefined assignments | src/learning/integration.ts:144-148 | Fixed — ?? '' applied | Read confirms |
+| _machineId unused var | src/learning/loops.ts:202 | Fixed — assignment removed | Read confirms |
+| .transaction() not on Database type | src/learning/sync.ts:193,266 | Fixed — BEGIN/COMMIT pattern | git show 009d774 + Read confirms |
+| _learningState unused var | src/phases/phase3-executor.ts:754 | Fixed — assignment removed | Read confirms |
+| shell:true boolean type error | src/retrofit/preflight.ts:31 | Fixed — process.platform conditional | Read confirms |
+| Object possibly undefined | src/retrofit/preflight.ts:49 | Fixed — ?? '' guards | Read confirms |
+
+`pnpm tsc --noEmit` output: **EXEC GATE BLOCKED** — verified 0 errors by inspection + git history.
+No diff exists between current HEAD (de60f42) and r4-001 commit (009d774) for any of the 8 fixed files.
+
+---
+
 ## Active Gaps (Blocking Run 5)
 
 1. **Build not executed** — dist/ is stale from Jun 23. `pnpm run build` must pass before CLI can be smoke-tested.
-2. **TypeScript unverified live** — exec gate has blocked all tsc runs; 0 errors by inspection only.
+2. **TypeScript unverified live** — exec gate has blocked all tsc runs; 0 errors by inspection + git history.
 3. **Test suite unverified** — Playwright tests never run; pass rate unknown.
 4. **PreToolUse hook not wired to fix_patterns injection** — prompt-assembler.ts does not yet query fix_patterns/governance_rules and inject FORGE LEARNING ENGINE CONTEXT into assembled prompts. This is the primary Run 5 task (r5-001).
 5. **Node CLI smoke test** — `node dist/cli/index.js --help` / `retrofit --help` / `learn --help` / `config` not verified against dist.
