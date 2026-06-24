@@ -2,9 +2,25 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-004 complete
-**Total Prompts Executed:** 29 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004)
+**Current Run:** Run 3 — r3-006 complete
+**Total Prompts Executed:** 30 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## r3-006 — SCAN ORCHESTRATOR VERIFICATION (2026-06-24)
+
+### Status: COMPLETE (file already present from Section 1 — verified by inspection)
+
+**Task:** Create `src/retrofit/scan.ts` (SCAN orchestrator) and add `runScan` / `ScanOptions` exports to `src/retrofit/index.ts`.
+
+**Finding:** Both files already exist with correct content:
+- `src/retrofit/scan.ts` — 65 lines; `ScanOptions` interface, `EMPTY_REPORT` factory, `runScan` async function wiring all 14 scan ops in order, writing `.forge/scan_report.json`. `resume` parameter is correctly prefixed `_resume` to satisfy ESLint unused-vars rule.
+- `src/retrofit/index.ts` — lines 7-8 already export `runScan` and `ScanOptions` from `./scan.js`.
+
+**No code changes required.** Content confirmed by direct file read.
+
+**Exec gate:** `pnpm tsc --noEmit` blocked (intermittent per recorded history). Zero errors expected per prior clean state.
 
 ---
 
