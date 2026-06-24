@@ -1,23 +1,23 @@
-/**
- * FORGE 2.0 — Phase 2: Governance Generator.
+﻿/**
+ * FORGE 2.0 â€” Phase 2: Governance Generator.
  *
  * Phase 2 (queue.yaml s4-p01) is the LAST design phase. It takes the APPROVED
  * {@link ArchitectureDesign} produced by Phase 1B (and approved at Gate 2) and renders
  * the complete GOVERNANCE PACKAGE the rest of FORGE executes against. It then HALTS for
- * Gate 3 human approval (BEHAVIORAL_CONTRACTS Contract 2 — no bypass).
+ * Gate 3 human approval (BEHAVIORAL_CONTRACTS Contract 2 â€” no bypass).
  *
  * EIGHT documents are produced, each from its template under `templates/governance/`:
- *   1. BLUEPRINT.md            — system overview + tech stack + project structure
- *   2. SCHEMA_REGISTRY.md      — every table, column, constraint, index, RLS policy, seed
- *   3. AGENTS.md               — every agent definition (trigger, I/O contract, prompt, budget)
- *   4. BEHAVIORAL_CONTRACTS.md — API + Auth + interaction-summary contracts
- *   5. INTERACTION_MAPS.md     — per-feature, per-element interaction specs (Contract 18)
- *   6. TESTING.md              — the test plan + generated Playwright scaffolds + Six Laws plan
- *   7. STATE_OF_THE_BUILD.md   — Phase 0-2 status, design summary, governance package, audit
- *   8. SESSION_STATE.md        — the live-session tracker, initialized empty
+ *   1. BLUEPRINT.md            â€” system overview + tech stack + project structure
+ *   2. SCHEMA_REGISTRY.md      â€” every table, column, constraint, index, RLS policy, seed
+ *   3. AGENTS.md               â€” every agent definition (trigger, I/O contract, prompt, budget)
+ *   4. BEHAVIORAL_CONTRACTS.md â€” API + Auth + interaction-summary contracts
+ *   5. INTERACTION_MAPS.md     â€” per-feature, per-element interaction specs (Contract 18)
+ *   6. TESTING.md              â€” the test plan + generated Playwright scaffolds + Six Laws plan
+ *   7. STATE_OF_THE_BUILD.md   â€” Phase 0-2 status, design summary, governance package, audit
+ *   8. SESSION_STATE.md        â€” the live-session tracker, initialized empty
  *
  * DETERMINISTIC: unlike Phases 1A/1B, this phase makes NO model calls. It is a pure,
- * repeatable transformation from the structured design into Markdown — the same design
+ * repeatable transformation from the structured design into Markdown â€” the same design
  * always yields the same governance package (modulo timestamps and the live audit).
  *
  * TEMPLATES: each document is rendered by substituting `{{PLACEHOLDER}}` markers in the
@@ -27,18 +27,18 @@
  *
  * AUDIT (BLUEPRINT Canonical Rule 9): STATE_OF_THE_BUILD.md and SESSION_STATE.md are
  * populated from an ACTUAL codebase audit of the target project ({@link readCodebase}),
- * not assumptions — so the state documents reflect the real file tree, schema, and routes
+ * not assumptions â€” so the state documents reflect the real file tree, schema, and routes
  * present after the package is written.
  *
  * NON-FATAL house style (matching the sibling phase orchestrators): every Build Memory
- * write is guarded (Contract 4 — degrade to stateless) and every file read/write is
+ * write is guarded (Contract 4 â€” degrade to stateless) and every file read/write is
  * wrapped so a failure is collected as a warning rather than thrown. Build Memory version
- * recording (Contract 6 — every template version-controlled with a content hash) is
+ * recording (Contract 6 â€” every template version-controlled with a content hash) is
  * best-effort. `runPhase2Governance` never rejects.
  *
  * BOUNDARY: documents are written ONLY to the TARGET project's governance directory
  * (`<projectPath>/governance` by default). This phase never touches FORGE's own
- * governance files (Iron Law 1) — `projectPath` is always the build target, never FORGE.
+ * governance files (Iron Law 1) â€” `projectPath` is always the build target, never FORGE.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -98,9 +98,9 @@ export interface GovernanceDocResult {
   missingPlaceholders: string[];
 }
 
-/** Gate 3 marker — Phase 2 always halts here for human approval (Contract 2). */
+/** Gate 3 marker â€” Phase 2 always halts here for human approval (Contract 2). */
 export interface Gate3Status {
-  name: 'Gate 3 — Governance Approval';
+  name: 'Gate 3 â€” Governance Approval';
   /** Always `awaiting_human_approval`: there is no bypass (Contract 2). */
   status: 'awaiting_human_approval';
   detail: string;
@@ -125,9 +125,9 @@ export interface GovernancePackage {
   };
   /** True when a ConstraintManifest (partial build) shaped the design. */
   constrained: boolean;
-  /** Non-fatal observations (template unreadable, write failure, memory unreachable, …). */
+  /** Non-fatal observations (template unreadable, write failure, memory unreachable, â€¦). */
   warnings: string[];
-  /** Gate 3 — the build halts here until a human approves the governance package. */
+  /** Gate 3 â€” the build halts here until a human approves the governance package. */
   gate: Gate3Status;
   generatedAt: string;
 }
@@ -197,14 +197,14 @@ function defaultTemplatesDir(): string {
 /** Escape a value for use inside a Markdown table cell (pipes + newlines). */
 function cell(value: string): string {
   const s = value.trim();
-  if (s === '') return '—';
+  if (s === '') return 'â€”';
   return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 /** Wrap text in an inline code span, or em-dash for empty. */
 function code(value: string): string {
   const s = value.trim();
-  return s === '' ? '—' : `\`${s}\``;
+  return s === '' ? 'â€”' : `\`${s}\``;
 }
 
 /** Render a bullet list, or a single "_(none)_" line when empty. */
@@ -215,7 +215,7 @@ function bullets(items: readonly string[]): string {
 
 /** Join a string array as an inline, comma-separated list (em-dash when empty). */
 function inlineList(items: readonly string[]): string {
-  return items.length === 0 ? '—' : items.join(', ');
+  return items.length === 0 ? 'â€”' : items.join(', ');
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ function applyTemplate(
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — BLUEPRINT.md
+// Section renderers â€” BLUEPRINT.md
 // ---------------------------------------------------------------------------
 
 function renderSystemOverview(design: ArchitectureDesign): string {
@@ -252,7 +252,7 @@ function renderSystemOverview(design: ArchitectureDesign): string {
       `${d.frontend.pages.length} page(s)${d.agents.agents.length > 0 ? `, and ${d.agents.agents.length} autonomous agent(s)` : ''}.`,
   ];
   if (roles.length > 0) parts.push(`Access is governed by ${roles.length} role(s): ${roles.join(', ')}.`);
-  if (d.auth.multiTenancy.trim() !== '') parts.push(`Multi-tenancy: ${d.auth.multiTenancy.trim()}`);
+  if ((d.auth.multiTenancy ?? "").trim() !== '') parts.push(`Multi-tenancy: ${(d.auth.multiTenancy ?? "").trim()}`);
   return parts.join(' ');
 }
 
@@ -273,14 +273,14 @@ function renderTechStack(fingerprint: StackFingerprint | undefined): string {
     }
     return lines.join('\n');
   }
-  // FORGE default stack (TECH STACK — LOCKED, per CLAUDE.md).
+  // FORGE default stack (TECH STACK â€” LOCKED, per CLAUDE.md).
   return [
     '- **Framework:** Next.js 14 (App Router), TypeScript strict mode',
     '- **Database:** Supabase (PostgreSQL + Auth + RLS + Realtime)',
     '- **Hosting:** Vercel',
     '- **Package Manager:** pnpm',
     '- **Testing:** Playwright',
-    '- **Version Control:** Git → GitHub',
+    '- **Version Control:** Git â†’ GitHub',
   ].join('\n');
 }
 
@@ -306,53 +306,53 @@ function renderProjectStructure(design: ArchitectureDesign): string {
   const d = design;
   const lines: string[] = [`${d.projectName}/`];
 
-  // app/ — pages + api routes.
-  lines.push('├── app/');
-  lines.push('│   ├── layout.tsx');
-  lines.push('│   ├── page.tsx');
+  // app/ â€” pages + api routes.
+  lines.push('â”œâ”€â”€ app/');
+  lines.push('â”‚   â”œâ”€â”€ layout.tsx');
+  lines.push('â”‚   â”œâ”€â”€ page.tsx');
   for (const p of d.frontend.pages) {
     if (p.path.trim() === '' || p.path === '/') continue;
     const seg = p.path.replace(/^\/+/, '');
-    lines.push(`│   ├── ${seg}/page.tsx`);
+    lines.push(`â”‚   â”œâ”€â”€ ${seg}/page.tsx`);
   }
   const apiRoutes = d.api.routes.filter((r) => r.path.trim() !== '');
   if (apiRoutes.length > 0) {
-    lines.push('│   └── api/');
+    lines.push('â”‚   â””â”€â”€ api/');
     for (const r of apiRoutes) {
       const seg = r.path.replace(/^\/+/, '').replace(/^api\//, '');
-      lines.push(`│       └── ${seg}/route.ts`);
+      lines.push(`â”‚       â””â”€â”€ ${seg}/route.ts`);
     }
   }
 
   // components/
-  lines.push('├── components/');
+  lines.push('â”œâ”€â”€ components/');
   for (const c of d.frontend.components) {
-    if (c.name.trim() !== '') lines.push(`│   ├── ${c.name}.tsx`);
+    if (c.name.trim() !== '') lines.push(`â”‚   â”œâ”€â”€ ${c.name}.tsx`);
   }
 
   // lib/ (Supabase client convention).
-  lines.push('├── lib/');
-  lines.push('│   └── supabase/');
-  lines.push('│       ├── client.ts');
-  lines.push('│       └── server.ts');
+  lines.push('â”œâ”€â”€ lib/');
+  lines.push('â”‚   â””â”€â”€ supabase/');
+  lines.push('â”‚       â”œâ”€â”€ client.ts');
+  lines.push('â”‚       â””â”€â”€ server.ts');
 
   // supabase/migrations/
-  lines.push('├── supabase/');
-  lines.push('│   └── migrations/');
+  lines.push('â”œâ”€â”€ supabase/');
+  lines.push('â”‚   â””â”€â”€ migrations/');
   for (const m of d.database.migrations) {
-    if (m.filename.trim() !== '') lines.push(`│       ├── ${m.filename}`);
+    if (m.filename.trim() !== '') lines.push(`â”‚       â”œâ”€â”€ ${m.filename}`);
   }
 
   // tests/
-  lines.push('├── tests/');
+  lines.push('â”œâ”€â”€ tests/');
   for (const s of d.testing.playwrightSpecs) {
-    if (s.file.trim() !== '') lines.push(`│   ├── ${s.file}`);
+    if (s.file.trim() !== '') lines.push(`â”‚   â”œâ”€â”€ ${s.file}`);
   }
 
   // root files.
-  lines.push('├── middleware.ts');
-  lines.push('├── package.json');
-  lines.push('└── tsconfig.json');
+  lines.push('â”œâ”€â”€ middleware.ts');
+  lines.push('â”œâ”€â”€ package.json');
+  lines.push('â””â”€â”€ tsconfig.json');
 
   return '```\n' + lines.join('\n') + '\n```';
 }
@@ -379,9 +379,9 @@ function renderEnvironmentVariables(design: ArchitectureDesign): string {
 
 const BLUEPRINT_CANONICAL_RULES = [
   '1. Every multi-tenant table carries a company/tenant scope column with RLS enabled (Six Laws Law 1).',
-  '2. API routes derive `company_id` from the session — NEVER from the request body (Six Laws Law 2).',
-  '3. On ANY role-fetch failure, middleware redirects to `/login` ONLY — never a default/wrong-role page (Iron Law 4).',
-  '4. No mocks or placeholder data in production code — all data comes from real tables (Iron Law 8).',
+  '2. API routes derive `company_id` from the session â€” NEVER from the request body (Six Laws Law 2).',
+  '3. On ANY role-fetch failure, middleware redirects to `/login` ONLY â€” never a default/wrong-role page (Iron Law 4).',
+  '4. No mocks or placeholder data in production code â€” all data comes from real tables (Iron Law 8).',
   '5. Dashboard HTML is served via no-cache API routes, never directly from `public/` (Iron Law 5).',
   '6. `pnpm tsc --noEmit` must return zero errors before any commit (Iron Law 6).',
   '7. Governance documents are read-only during Phase 3 execution (Contract 3).',
@@ -399,13 +399,13 @@ function renderBlueprint(design: ArchitectureDesign, fingerprint: StackFingerpri
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — SCHEMA_REGISTRY.md
+// Section renderers â€” SCHEMA_REGISTRY.md
 // ---------------------------------------------------------------------------
 
 function renderTable(table: ArchTable): string {
   const lines: string[] = [];
   const schema = table.schema || 'public';
-  lines.push(`### Table: \`${table.name || '(unnamed)'}\`${table.immutable ? ' _(immutable — pre-existing)_' : ''}`);
+  lines.push(`### Table: \`${table.name || '(unnamed)'}\`${table.immutable ? ' _(immutable â€” pre-existing)_' : ''}`);
   if (table.purpose.trim() !== '') lines.push(table.purpose.trim());
   lines.push('');
   lines.push('| Column | Type | Nullable | Default | Constraints |');
@@ -416,18 +416,18 @@ function renderTable(table: ArchTable): string {
     for (const c of table.columns) {
       lines.push(
         `| ${cell(c.name)} | ${cell(c.type)} | ${c.nullable ? 'yes' : 'no'} | ` +
-          `${c.default === null ? '—' : cell(c.default)} | ${cell(inlineList(c.constraints))} |`
+          `${c.default === null ? 'â€”' : cell(c.default)} | ${cell(inlineList(c.constraints))} |`
       );
     }
   }
   lines.push('');
   lines.push(`- **Schema:** \`${schema}\``);
-  lines.push(`- **Primary key:** ${table.primaryKey.length === 0 ? '—' : table.primaryKey.map(code).join(', ')}`);
+  lines.push(`- **Primary key:** ${table.primaryKey.length === 0 ? 'â€”' : table.primaryKey.map(code).join(', ')}`);
   if (table.foreignKeys.length > 0) {
     lines.push('- **Foreign keys:**');
     for (const fk of table.foreignKeys) {
       lines.push(
-        `  - (${fk.columns.join(', ')}) → \`${fk.referencesTable}\`(${fk.referencesColumns.join(', ')})` +
+        `  - (${fk.columns.join(', ')}) â†’ \`${fk.referencesTable}\`(${fk.referencesColumns.join(', ')})` +
           `${fk.onDelete ? ` ON DELETE ${fk.onDelete}` : ''}`
       );
     }
@@ -459,7 +459,7 @@ function renderSchemaRegistry(db: DatabaseArchitecture): Record<string, string> 
           ...db.indexes.map(
             (i) =>
               `| ${cell(i.name)} | ${cell(i.table)} | ${cell(inlineList(i.columns))} | ${i.unique ? 'yes' : 'no'} | ` +
-              `${i.method === null ? '—' : cell(i.method)} | ${i.where === null ? '—' : cell(i.where)} |`
+              `${i.method === null ? 'â€”' : cell(i.method)} | ${i.where === null ? 'â€”' : cell(i.where)} |`
           ),
         ].join('\n');
 
@@ -472,19 +472,19 @@ function renderSchemaRegistry(db: DatabaseArchitecture): Record<string, string> 
           ...db.rlsPolicies.map(
             (p) =>
               `| ${cell(p.name)} | ${cell(p.table)} | ${cell(p.command)} | ${cell(inlineList(p.roles))} | ` +
-              `${p.using === null ? '—' : cell(p.using)} | ${p.check === null ? '—' : cell(p.check)} |`
+              `${p.using === null ? 'â€”' : cell(p.using)} | ${p.check === null ? 'â€”' : cell(p.check)} |`
           ),
         ].join('\n');
 
   const seeds =
     db.seeds.length === 0
       ? '_(no seed data designed)_'
-      : bullets(db.seeds.map((s) => `\`${s.table}\` — ${s.description}${s.rowCount === null ? '' : ` (~${s.rowCount} rows)`}`));
+      : bullets(db.seeds.map((s) => `\`${s.table}\` â€” ${s.description}${s.rowCount === null ? '' : ` (~${s.rowCount} rows)`}`));
 
   const migrations =
     db.migrations.length === 0
       ? '_(no migrations planned)_'
-      : bullets(db.migrations.map((m) => `\`${m.filename}\` — ${m.description}`));
+      : bullets(db.migrations.map((m) => `\`${m.filename}\` â€” ${m.description}`));
 
   return {
     DATABASE_OVERVIEW: overview,
@@ -497,7 +497,7 @@ function renderSchemaRegistry(db: DatabaseArchitecture): Record<string, string> 
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — AGENTS.md
+// Section renderers â€” AGENTS.md
 // ---------------------------------------------------------------------------
 
 function renderAgents(agents: AgentArchitecture): Record<string, string> {
@@ -513,11 +513,11 @@ function renderAgents(agents: AgentArchitecture): Record<string, string> {
   const sections = agents.agents.map((a) => {
     const lines = [
       `### Agent: ${a.name || '(unnamed)'}`,
-      `- **Purpose:** ${a.purpose || '—'}`,
-      `- **Trigger:** ${a.trigger || '—'}`,
-      `- **Input contract:** ${a.inputContract || '—'}`,
-      `- **Output contract:** ${a.outputContract || '—'}`,
-      `- **Model:** \`${a.model || '—'}\``,
+      `- **Purpose:** ${a.purpose || 'â€”'}`,
+      `- **Trigger:** ${a.trigger || 'â€”'}`,
+      `- **Input contract:** ${a.inputContract || 'â€”'}`,
+      `- **Output contract:** ${a.outputContract || 'â€”'}`,
+      `- **Model:** \`${a.model || 'â€”'}\``,
       `- **Token budget:** ${a.tokenBudget === null ? 'unbounded/unspecified' : String(a.tokenBudget)}`,
       '',
       '**System prompt:**',
@@ -532,23 +532,23 @@ function renderAgents(agents: AgentArchitecture): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — BEHAVIORAL_CONTRACTS.md
+// Section renderers â€” BEHAVIORAL_CONTRACTS.md
 // ---------------------------------------------------------------------------
 
 function renderApiRoute(route: ApiRoute): string {
   const lines = [
-    `### \`${route.method} ${route.path}\`${route.immutable ? ' _(immutable — pre-existing)_' : ''}`,
-    `- **Purpose:** ${route.purpose || '—'}`,
+    `### \`${route.method} ${route.path}\`${route.immutable ? ' _(immutable â€” pre-existing)_' : ''}`,
+    `- **Purpose:** ${route.purpose || 'â€”'}`,
     `- **Auth required:** ${route.authRequired ? 'yes' : 'no'}`,
     `- **Roles:** ${inlineList(route.roles)}`,
-    `- **Request:** ${route.requestSchema || '—'}`,
-    `- **Response:** ${route.responseSchema || '—'}`,
+    `- **Request:** ${route.requestSchema || 'â€”'}`,
+    `- **Response:** ${route.responseSchema || 'â€”'}`,
     `- **Reads tables:** ${inlineList(route.dbReads.map((t) => `\`${t}\``))}`,
     `- **Writes tables:** ${inlineList(route.dbWrites.map((t) => `\`${t}\``))}`,
   ];
   if (route.errors.length > 0) {
     lines.push('- **Errors:**');
-    for (const e of route.errors) lines.push(`  - \`${e.status}\` ${e.code} — ${e.description}`);
+    for (const e of route.errors) lines.push(`  - \`${e.status}\` ${e.code} â€” ${e.description}`);
   }
   return lines.join('\n');
 }
@@ -574,7 +574,7 @@ function renderAuthContracts(auth: AuthArchitecture): string {
   if (auth.roles.length === 0) lines.push('_(no roles defined)_');
   else {
     for (const r of auth.roles) {
-      lines.push(`- **${r.name}** — ${r.description || '—'}`);
+      lines.push(`- **${r.name}** â€” ${r.description || 'â€”'}`);
       if (r.permissions.length > 0) lines.push(`  - Permissions: ${inlineList(r.permissions)}`);
     }
   }
@@ -593,7 +593,7 @@ function renderAuthContracts(auth: AuthArchitecture): string {
   lines.push('#### Middleware');
   lines.push(
     auth.middleware.trim() === ''
-      ? 'On ANY role-fetch failure, redirect to `/login` ONLY — never render a default/wrong-role page (Iron Law 4).'
+      ? 'On ANY role-fetch failure, redirect to `/login` ONLY â€” never render a default/wrong-role page (Iron Law 4).'
       : auth.middleware.trim()
   );
   lines.push('');
@@ -607,7 +607,7 @@ function renderAuthContracts(auth: AuthArchitecture): string {
 }
 
 function renderInteractionSummary(maps: InteractionMap[]): string {
-  if (maps.length === 0) return '_(no interaction maps — see INTERACTION_MAPS.md)_';
+  if (maps.length === 0) return '_(no interaction maps â€” see INTERACTION_MAPS.md)_';
   const byFeature = new Map<string, number>();
   for (const m of maps) {
     const f = m.feature.trim() || '(unspecified)';
@@ -617,16 +617,16 @@ function renderInteractionSummary(maps: InteractionMap[]): string {
   return [
     `${maps.length} interaction map(s) across ${rows.length} feature(s). Full specs are in INTERACTION_MAPS.md.`,
     '',
-    ...rows.map(([feature, count]) => `- **${feature}** — ${count} interactive element(s)`),
+    ...rows.map(([feature, count]) => `- **${feature}** â€” ${count} interactive element(s)`),
   ].join('\n');
 }
 
 const STANDARD_FORGE_CONTRACTS = [
   '**Company scoping:** every API route derives `company_id` from the authenticated session, never from the request body (Six Laws Law 2).',
   '**Role-fetch fallback:** any role-fetch failure redirects to `/login` only (Iron Law 4).',
-  '**No mocks:** production code reads only real tables — no mock or placeholder data (Iron Law 8).',
+  '**No mocks:** production code reads only real tables â€” no mock or placeholder data (Iron Law 8).',
   '**No-cache dashboards:** dashboard HTML is served via no-cache API routes, never from `public/` (Iron Law 5).',
-  '**Quality gates:** `tsc --noEmit` → build → lint → test must pass before any commit (Iron Laws 6-7).',
+  '**Quality gates:** `tsc --noEmit` â†’ build â†’ lint â†’ test must pass before any commit (Iron Laws 6-7).',
   '**Six Laws:** a feature is complete only when Schema, API, UI, Data, Wiring, and Verification all pass.',
 ];
 
@@ -640,27 +640,27 @@ function renderBehavioralContracts(design: ArchitectureDesign): Record<string, s
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — INTERACTION_MAPS.md
+// Section renderers â€” INTERACTION_MAPS.md
 // ---------------------------------------------------------------------------
 
 function renderInteractionMap(map: InteractionMap, index: number): string {
   return [
     `### ${index}. ${map.element || '(element)'}`,
-    `- **User action:** ${map.userAction || '—'}`,
-    `- **Frontend reaction:** ${map.frontendReaction || '—'}`,
+    `- **User action:** ${map.userAction || 'â€”'}`,
+    `- **Frontend reaction:** ${map.frontendReaction || 'â€”'}`,
     `- **API call:** ${code(map.apiCall)}`,
-    `- **Backend processing:** ${map.backendProcessing || '—'}`,
+    `- **Backend processing:** ${map.backendProcessing || 'â€”'}`,
     `- **Database write:** ${code(map.dbWrite)}`,
     `- **Side effects:** ${inlineList(map.sideEffects)}`,
-    `- **Success response:** ${map.successResponse || '—'}`,
-    `- **Error response:** ${map.errorResponse || '—'}`,
+    `- **Success response:** ${map.successResponse || 'â€”'}`,
+    `- **Error response:** ${map.errorResponse || 'â€”'}`,
     `- **Tracking event:** ${code(map.trackingEvent)}`,
   ].join('\n');
 }
 
 function renderInteractionMaps(maps: InteractionMap[]): Record<string, string> {
   if (maps.length === 0) {
-    return { INTERACTION_MAPS: '_(no interaction maps were produced — Contract 18 expects one per interactive element)_' };
+    return { INTERACTION_MAPS: '_(no interaction maps were produced â€” Contract 18 expects one per interactive element)_' };
   }
 
   // Group by feature, preserving first-seen order.
@@ -681,7 +681,7 @@ function renderInteractionMaps(maps: InteractionMap[]): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — TESTING.md
+// Section renderers â€” TESTING.md
 // ---------------------------------------------------------------------------
 
 /** Generate a runnable Playwright test scaffold for one spec. */
@@ -720,7 +720,7 @@ function renderTesting(testing: TestingStrategy): Record<string, string> {
             return [
               `### ${s.name || '(unnamed spec)'}`,
               `- **File:** \`${file}\``,
-              `- **Scenario:** ${s.scenario || '—'}`,
+              `- **Scenario:** ${s.scenario || 'â€”'}`,
               '',
               '```ts',
               `// ${file}`,
@@ -755,7 +755,7 @@ function renderTesting(testing: TestingStrategy): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers — STATE_OF_THE_BUILD.md & SESSION_STATE.md (post-audit)
+// Section renderers â€” STATE_OF_THE_BUILD.md & SESSION_STATE.md (post-audit)
 // ---------------------------------------------------------------------------
 
 function renderPhaseStatus(design: ArchitectureDesign, overrides: Phase2Options['phaseStatus']): string {
@@ -789,7 +789,7 @@ function renderDesignSummary(design: ArchitectureDesign): string {
     `- **Roles:** ${d.auth.roles.length}`,
     `- **Agents:** ${d.agents.agents.length}`,
     `- **Cross-validation issues:** ${d.crossValidation.length} (${critical} critical)`,
-    `- **Design used fallback artifacts:** ${d.usedFallback ? `yes — ${d.fallbackArtifacts.join(', ')}` : 'no'}`,
+    `- **Design used fallback artifacts:** ${d.usedFallback ? `yes â€” ${d.fallbackArtifacts.join(', ')}` : 'no'}`,
   ];
   return lines.join('\n');
 }
@@ -797,7 +797,7 @@ function renderDesignSummary(design: ArchitectureDesign): string {
 function renderGovernancePackageSection(results: readonly GovernanceDocResult[]): string {
   const rows = results.map(
     (r) =>
-      `| ${r.name} | ${r.path === null ? '_(not written)_' : '✓'} | \`${r.contentHash.slice(0, 12)}\` | ${r.bytes} |`
+      `| ${r.name} | ${r.path === null ? '_(not written)_' : 'âœ“'} | \`${r.contentHash.slice(0, 12)}\` | ${r.bytes} |`
   );
   return [
     '| Document | Written | Content hash (sha256, first 12) | Bytes |',
@@ -825,7 +825,7 @@ function renderCodebaseAudit(snapshot: CodebaseSnapshot): string {
 // Hashing & writing
 // ---------------------------------------------------------------------------
 
-/** SHA-256 hex digest of a string (Contract 6 — content hashing for governance versions). */
+/** SHA-256 hex digest of a string (Contract 6 â€” content hashing for governance versions). */
 function sha256(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
@@ -841,7 +841,7 @@ function sha256(content: string): string {
  */
 const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
   'BLUEPRINT.md': [
-    '# {{PROJECT_NAME}} — BLUEPRINT',
+    '# {{PROJECT_NAME}} â€” BLUEPRINT',
     '',
     '> Generated by FORGE 2.0 Phase 2 (Governance Generator) on {{GENERATED_AT}}.',
     '',
@@ -870,7 +870,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'SCHEMA_REGISTRY.md': [
-    '# {{PROJECT_NAME}} — SCHEMA REGISTRY',
+    '# {{PROJECT_NAME}} â€” SCHEMA REGISTRY',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}.',
     '',
@@ -894,7 +894,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'AGENTS.md': [
-    '# {{PROJECT_NAME}} — AGENTS',
+    '# {{PROJECT_NAME}} â€” AGENTS',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}.',
     '',
@@ -906,7 +906,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'BEHAVIORAL_CONTRACTS.md': [
-    '# {{PROJECT_NAME}} — BEHAVIORAL CONTRACTS',
+    '# {{PROJECT_NAME}} â€” BEHAVIORAL CONTRACTS',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}.',
     '',
@@ -924,7 +924,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'INTERACTION_MAPS.md': [
-    '# {{PROJECT_NAME}} — INTERACTION MAPS',
+    '# {{PROJECT_NAME}} â€” INTERACTION MAPS',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}.',
     '',
@@ -932,7 +932,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'TESTING.md': [
-    '# {{PROJECT_NAME}} — TESTING',
+    '# {{PROJECT_NAME}} â€” TESTING',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}.',
     '',
@@ -950,7 +950,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'STATE_OF_THE_BUILD.md': [
-    '# {{PROJECT_NAME}} — STATE OF THE BUILD',
+    '# {{PROJECT_NAME}} â€” STATE OF THE BUILD',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}. Updated from a live codebase audit.',
     '',
@@ -971,7 +971,7 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '',
   ].join('\n'),
   'SESSION_STATE.md': [
-    '# {{PROJECT_NAME}} — SESSION STATE',
+    '# {{PROJECT_NAME}} â€” SESSION STATE',
     '',
     '> Generated by FORGE 2.0 Phase 2 on {{GENERATED_AT}}. Initialized empty.',
     '',
@@ -1025,7 +1025,7 @@ async function loadTemplate(
  * into the complete governance package and writing it to the target project's governance
  * directory. Then HALTS for Gate 3 (Contract 2).
  *
- * Always resolves (never rejects). Each document is rendered from its template (disk →
+ * Always resolves (never rejects). Each document is rendered from its template (disk â†’
  * embedded fallback), hashed, written (guarded), and recorded in Build Memory (guarded,
  * Contract 6). The two state documents are populated from a LIVE codebase audit run after
  * the design documents are written (Canonical Rule 9).
@@ -1046,7 +1046,7 @@ export async function runPhase2Governance(
   const buildMode = design.constrained ? 'partial build (extending an existing codebase)' : 'greenfield';
   const warnings: string[] = [...design.warnings];
 
-  log(`rendering governance package for "${projectName}" → ${governanceDir}`);
+  log(`rendering governance package for "${projectName}" â†’ ${governanceDir}`);
 
   // Shared placeholders present in every document.
   const common: Record<string, string> = {
@@ -1086,7 +1086,7 @@ export async function runPhase2Governance(
     results.push(result);
   }
 
-  // 3. Live codebase audit (Canonical Rule 9) — runs AFTER the design docs are on disk.
+  // 3. Live codebase audit (Canonical Rule 9) â€” runs AFTER the design docs are on disk.
   log('running live codebase audit for the state documents');
   const snapshot = await readCodebase(projectPath);
 
@@ -1103,11 +1103,11 @@ export async function runPhase2Governance(
   };
   designVars['SESSION_STATE.md'] = {
     ...common,
-    CURRENT_PHASE: 'Phase 2 complete — awaiting Gate 3 approval',
+    CURRENT_PHASE: 'Phase 2 complete â€” awaiting Gate 3 approval',
     CURRENT_PROMPT: 'none (Phase 3 has not started)',
     COMPLETED_PROMPTS: '0',
     FAILED_PROMPTS: '0',
-    ACTIVE_BUILD: 'none — no build is executing yet',
+    ACTIVE_BUILD: 'none â€” no build is executing yet',
     SESSION_NOTES: 'Initialized empty by Phase 2 (Governance Generator). Phase 3 updates this after every prompt.',
   };
 
@@ -1130,7 +1130,7 @@ export async function runPhase2Governance(
     }
     const recorded = results.filter((r) => r.versionRecorded).length;
     if (recorded < results.length) {
-      warnings.push(`Build Memory recorded ${recorded}/${results.length} governance versions (stateless degrade — Contract 4).`);
+      warnings.push(`Build Memory recorded ${recorded}/${results.length} governance versions (stateless degrade â€” Contract 4).`);
     }
     log(`Build Memory: recorded ${recorded}/${results.length} governance version(s)`);
   }
@@ -1162,7 +1162,7 @@ export async function runPhase2Governance(
     constrained: design.constrained,
     warnings,
     gate: {
-      name: 'Gate 3 — Governance Approval',
+      name: 'Gate 3 â€” Governance Approval',
       status: 'awaiting_human_approval',
       detail:
         'Phase 2 complete. The build HALTS here until a human approves the governance package ' +
@@ -1174,7 +1174,7 @@ export async function runPhase2Governance(
   const written = documents.filter((d) => d.path !== null).length;
   const missing = documents.reduce((n, d) => n + d.missingPlaceholders.length, 0);
   log(
-    `Phase 2 complete — ${written}/${documents.length} document(s) written to ${governanceDir}` +
+    `Phase 2 complete â€” ${written}/${documents.length} document(s) written to ${governanceDir}` +
       `${missing > 0 ? `; ${missing} unfilled placeholder(s)` : ''}. HALT for Gate 3 (human governance approval required).`
   );
 
@@ -1240,3 +1240,4 @@ async function renderAndWrite(
 }
 
 export default runPhase2Governance;
+
