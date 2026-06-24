@@ -1265,6 +1265,29 @@ async function main(): Promise<void> {
       });
     });
 
+  program
+    .command('sentinel')
+    .description('Run FORGE Sentinel quality pipeline against a project')
+    .argument('<project-path>', 'Absolute path to the project')
+    .option('--ring <ring>', 'Ring to run: 1 (every-prompt), 2 (every-10th), 3 (end-of-run), all', 'all')
+    .option('--prompt-number <n>', 'Current prompt number (for ring trigger logic)', '1')
+    .option('--final', 'Mark this as the final prompt of the run (triggers Ring 3)', false)
+    .action(async (projectPath: string, opts: Record<string, unknown>) => {
+      const { runSentinelRing } = await import('../phases/phase4-sentinel.js');
+      const ring = String(opts['ring'] ?? 'all');
+      const promptNumber = parseInt(String(opts['promptNumber'] ?? '1'), 10);
+      const isFinal = Boolean(opts['final']);
+      const rings = ring === 'all' ? [1, 2, 3] : [parseInt(ring, 10)];
+      for (const r of rings) {
+        if (r === 2 && promptNumber % 10 !== 0 && !isFinal) { console.log(`Ring 2 skipped (prompt ${promptNumber} is not a multiple of 10)`); continue; }
+        if (r === 3 && !isFinal) { console.log('Ring 3 skipped (not final prompt — use --final to force)'); continue; }
+        console.log(`\nRunning Sentinel Ring ${r}...`);
+        const result = await runSentinelRing(r, projectPath, promptNumber);
+        console.log(result.passed ? `Ring ${r}: PASSED` : `Ring ${r}: FAILED`);
+        if (!result.passed) process.exit(1);
+      }
+    });
+
   registerLearningCommands(program);
 
   await program.parseAsync(process.argv);

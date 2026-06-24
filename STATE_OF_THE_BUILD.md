@@ -2,6 +2,38 @@
 
 ---
 
+# r3-013 — SENTINEL STANDALONE CLI COMMAND (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Add standalone `sentinel` CLI command to `src/cli/index.ts` and add `runSentinelRing` export to `src/phases/phase4-sentinel.ts`.
+
+**Audit findings (pre-change):**
+- No `sentinel` command existed in `src/cli/index.ts`.
+- `src/phases/phase4-sentinel.ts` had no `runSentinelRing` export — only `runSentinel` (main) and `export default runSentinel`.
+
+**Changes made:**
+
+1. **`src/phases/phase4-sentinel.ts`** — added `runSentinelRing(ring, projectPath, promptNumber)`:
+   - Builds a `SentinelOptions` object with `stopOnFirstFailure: false`
+   - Ring 1: options passed as-is (mandatory checks run unconditionally)
+   - Ring 2: sets `ring2: { promptNumber, isFinalPrompt: true }`
+   - Ring 3: sets `ring3: { forceRun: true, isFinalPrompt: true }`
+   - Returns `{ passed: boolean; results: unknown[] }` (checks array cast to `unknown[]`)
+
+2. **`src/cli/index.ts`** — added `sentinel` command after `retrofit`:
+   - Argument: `<project-path>`
+   - `--ring <ring>`: `1 | 2 | 3 | all` (default `all`)
+   - `--prompt-number <n>`: current prompt number (default `1`)
+   - `--final`: forces Ring 3 to fire
+   - Ring 2 skipped unless `promptNumber % 10 === 0` or `--final`
+   - Ring 3 skipped unless `--final`
+   - On any ring failure: `process.exit(1)`
+
+**Gates:** tsc/build unverifiable (exec gate blocked). Zero TypeScript errors expected by inspection — no new types introduced, all options match existing `SentinelOptions` shape.
+
+---
+
 # r3-012 — SENTINEL RING 3 HARDENING (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-012 — SENTINEL RING 3 HARDENING (2026-06-24)
+## Current Session: r3-013 — SENTINEL STANDALONE CLI COMMAND (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,13 +8,13 @@
 |-------|-------|
 | Run Number | Run 3 (in progress) |
 | Phase | SENTINEL HARDENING |
-| Current Prompt | r3-012 (Sentinel Ring 3) |
-| Prompts Executed | 24 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-012) |
-| Prompts Passed | 24 (exec gate UNVERIFIED) |
+| Current Prompt | r3-013 (Sentinel standalone CLI) |
+| Prompts Executed | 25 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013) |
+| Prompts Passed | 25 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-012 (SENTINEL RING 3 HARDENING)** — Audited `src/phases/phase4-sentinel.ts`; Ring 3 was entirely absent. Implemented full Ring 3 (final-prompt / explicit --ring 3 gate): added `spawn` + `ChildProcess` imports; added `trivy | gitleaks | lighthouse` to `SentinelCheckName`; added `ring3?` option to `SentinelOptions`; added `shouldFireRing3(isFinalPrompt, forceRun)` export. Ring 3a Trivy: `trivy fs --severity CRITICAL,HIGH --format json --quiet .`, skips if not in PATH, threshold=0 CRITICAL+HIGH CVEs. Ring 3b Gitleaks: `gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0`, reads report file (absent=0 findings), skips if not in PATH, threshold=0. Ring 3c Lighthouse: spawns `pnpm dev --port 3099`, polls until ready (30s), runs `lighthouse http://localhost:3099 --chrome-flags="--headless --no-sandbox" --output=json --output-path=.forge/lighthouse.json`, kills dev server, parses categories, threshold=90+ for performance/accessibility/best-practices/SEO, skips if lighthouse not installed. All tools null-safe and gracefully degrading. Exec gate blocked; zero TS errors expected by inspection.
+**r3-013 (SENTINEL STANDALONE CLI COMMAND)** — Audited `src/cli/index.ts`: no `sentinel` command existed. Audited `src/phases/phase4-sentinel.ts`: no `runSentinelRing` export. Added `runSentinelRing(ring, projectPath, promptNumber): Promise<{ passed: boolean; results: unknown[] }>` to phase4-sentinel.ts (wires ring 1/2/3 into `runSentinel` with appropriate options). Added `sentinel <project-path>` command to CLI after `retrofit` with `--ring`, `--prompt-number`, `--final` options; ring 2 skipped unless prompt% 10===0 or --final; ring 3 skipped unless --final; process.exit(1) on any failure. Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
@@ -23,6 +23,7 @@
 Operator can verify with:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
+3. `node dist/cli/index.js sentinel --help` → shows sentinel command with --ring, --prompt-number, --final options
 
 ---
 

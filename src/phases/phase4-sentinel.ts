@@ -3607,4 +3607,32 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// ---------------------------------------------------------------------------
+// Standalone CLI entry point — `forge sentinel <path> --ring N`
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a specific Sentinel ring (1, 2, or 3) as a standalone operation.
+ * Ring 1 = mandatory checks (tsc, eslint, build, file-integrity, schema-drift, deps).
+ * Ring 2 = every-10th-prompt checks (Vitest, Semgrep, knip) — fires unconditionally here.
+ * Ring 3 = end-of-run checks (Trivy, Gitleaks, Lighthouse) — fires unconditionally here.
+ * Returns the aggregate pass/fail and the per-check results.
+ */
+export async function runSentinelRing(
+  ring: number,
+  projectPath: string,
+  promptNumber: number
+): Promise<{ passed: boolean; results: unknown[] }> {
+  const options: SentinelOptions = { projectPath, stopOnFirstFailure: false };
+
+  if (ring === 2) {
+    options.ring2 = { promptNumber, isFinalPrompt: true };
+  } else if (ring === 3) {
+    options.ring3 = { forceRun: true, isFinalPrompt: true };
+  }
+
+  const result = await runSentinel(options);
+  return { passed: result.passed, results: result.checks };
+}
+
 export default runSentinel;
