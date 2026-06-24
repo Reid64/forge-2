@@ -5,7 +5,7 @@ import { initializeForgeMemory, getMachineId } from './database.js';
 import { saveToForgeMemory } from './queries.js';
 import { scorePromptExecution, captureError, checkAutoElevation, updateDecisionWeights, loadCrossProjectKnowledge, analyzeForEvolutions, presentEvolutions } from './loops.js';
 import { syncForgeMemory, loadSyncConfig } from './sync.js';
-import { testCrashRecovery, setForgeLock, removeForgeLock, resumeForgeSession, exportSessionState, exportSessionHandoff, getBuildFingerprint } from './session.js';
+import { testCrashRecovery, setForgeLock, removeForgeLock, resumeForgeSession, exportSessionState, exportSessionHandoff } from './session.js';
 import type { GovernanceRule, SkillEntry, FixPattern } from './types.js';
 
 /**
@@ -143,9 +143,9 @@ export function onPromptComplete(result: {
         if (tsMatch) {
           const [, filePath, , , errorCode, errorMessage] = tsMatch;
           const captured = captureError({
-            errorCode,
-            filePath,
-            errorMessage,
+            errorCode: errorCode ?? '',
+            filePath: filePath ?? '',
+            errorMessage: errorMessage ?? '',
             errorCategory: 'COMPILE',
             techStack: result.techStackTags,
           }, dbPath);

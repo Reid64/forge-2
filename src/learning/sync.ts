@@ -190,17 +190,21 @@ function syncPull(
           `INSERT OR IGNORE INTO ${table} (${colNames.join(', ')}) VALUES (${placeholders})`
         );
 
-        const insertMany = localDb.transaction((records: any[]) => {
-          let inserted = 0;
-          for (const row of records) {
-            const values = colNames.map(col => row[col] ?? null);
-            const result = insertStmt.run(...values);
-            if (result.changes > 0) inserted++;
+        let inserted = 0;
+        localDb.prepare('BEGIN').run();
+        try {
+          for (const row of rows) {
+            try {
+              const values = colNames.map(col => row[col] ?? null);
+              const r = insertStmt.run(...values);
+              if (r.changes > 0) inserted++;
+            } catch { /* skip conflicting record */ }
           }
-          return inserted;
-        });
-
-        const inserted = insertMany(rows);
+          localDb.prepare('COMMIT').run();
+        } catch (txErr) {
+          localDb.prepare('ROLLBACK').run();
+          throw txErr;
+        }
         if (inserted > 0) {
           totalSynced += inserted;
           syncedTables.push(table);
@@ -263,17 +267,21 @@ function syncPush(
           `INSERT OR IGNORE INTO ${table} (${colNames.join(', ')}) VALUES (${placeholders})`
         );
 
-        const insertMany = masterDb.transaction((records: any[]) => {
-          let inserted = 0;
-          for (const row of records) {
-            const values = colNames.map(col => row[col] ?? null);
-            const result = insertStmt.run(...values);
-            if (result.changes > 0) inserted++;
+        let inserted = 0;
+        masterDb.prepare('BEGIN').run();
+        try {
+          for (const row of rows) {
+            try {
+              const values = colNames.map(col => row[col] ?? null);
+              const r = insertStmt.run(...values);
+              if (r.changes > 0) inserted++;
+            } catch { /* skip conflicting record */ }
           }
-          return inserted;
-        });
-
-        const inserted = insertMany(rows);
+          masterDb.prepare('COMMIT').run();
+        } catch (txErr) {
+          masterDb.prepare('ROLLBACK').run();
+          throw txErr;
+        }
         if (inserted > 0) {
           totalSynced += inserted;
           syncedTables.push(table);

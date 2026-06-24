@@ -751,7 +751,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
 
   // Learning engine — non-critical, failures are caught internally
-  const _learningState = await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
+  await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
 
   // 3. Walk the prompts in dependency order.
   const ctx: LoopContext = {

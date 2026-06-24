@@ -28,7 +28,7 @@ export async function runPreFlightChecks(
     results.push({ check: 'Git repository', status: 'PASS', message: '.git found' });
   } else {
     try {
-      execSync('git init && git add -A && git commit -m "FORGE RETROFIT: initial snapshot" --allow-empty', { cwd: projectPath, stdio: 'pipe', shell: true });
+      execSync('git init && git add -A && git commit -m "FORGE RETROFIT: initial snapshot" --allow-empty', { cwd: projectPath, stdio: 'pipe', shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/sh' });
       results.push({ check: 'Git repository', status: 'PASS', message: 'Initialized', autoFixed: true });
     } catch {
       results.push({ check: 'Git repository', status: 'FAIL', message: 'Git init failed' });
@@ -46,7 +46,7 @@ export async function runPreFlightChecks(
 
   const envPath = join(projectPath, '.env.local');
   if (existsSync(envPath)) {
-    for (const line of readFileSync(envPath, 'utf8').split('\n')) { const m = line.match(/^([^#=\s][^=]*)=(.*)/); if (m) envVars[m[1].trim()] = m[2].trim(); }
+    for (const line of readFileSync(envPath, 'utf8').split('\n')) { const m = line.match(/^([^#=\s][^=]*)=(.*)/); if (m) envVars[(m[1] ?? '').trim()] = (m[2] ?? '').trim(); }
     results.push({ check: 'Environment file', status: 'PASS', message: `${Object.keys(envVars).length} vars` });
   } else { results.push({ check: 'Environment file', status: 'WARN', message: '.env.local not found' }); }
 

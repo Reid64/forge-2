@@ -199,7 +199,7 @@ export function analyzeForEvolutions(buildId: string, dbPath?: string): PendingE
   const proposals: PendingEvolution[] = [];
   try {
     const db = getConnection(dbPath);
-    const _machineId = getMachineId(dbPath);
+    getMachineId(dbPath);
 
     // Analysis A: Templates with low pass rate over 3+ samples
     const weakTemplates = db.prepare(`

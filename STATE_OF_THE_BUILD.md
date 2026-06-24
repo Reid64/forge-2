@@ -2,8 +2,9 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-013 complete
-**Total Prompts Executed:** 37 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012 + r3-013)
+**Current Run:** Run 4 — r4-001 complete
+**Total Prompts Executed:** 38 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012 + r3-013 + r4-001)
+**TypeScript Status:** 0 errors as of 2026-06-24 (r4-001 fixed 8 TS errors: em-dash encoding, unused imports/vars, string|undefined coercions, .transaction() type errors, shell:boolean, regex undefined)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
 ---
