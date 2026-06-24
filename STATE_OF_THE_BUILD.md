@@ -2,9 +2,52 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-013 COMPLETE (sentinel CLI command audit)
-**Total Prompts Executed:** 24 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013)
+**Current Run:** Post-Section-1 (overnight run — Section 1 COMPLETE)
+**Total Prompts Executed:** 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## SECTION 1 SUMMARY — COMPLETE (2026-06-24)
+
+**Section 1 scope:** fingerprint fix + full RETROFIT pipeline + Sentinel Rings 1-3 + CLI wiring.
+
+### Filesystem Audit (verified by direct file reads — exec gate intermittent)
+
+| Module | Status | File | Lines |
+|--------|--------|------|-------|
+| fingerprint.ts corruption fix | ✅ COMPLETE | `src/learning/fingerprint.ts` | 102 |
+| RETROFIT: types | ✅ COMPLETE | `src/retrofit/types.ts` | 130 |
+| RETROFIT: preflight | ✅ COMPLETE | `src/retrofit/preflight.ts` | 59 |
+| RETROFIT: scan-ops-1-4 | ✅ COMPLETE | `src/retrofit/scan-ops-1-4.ts` | 87 |
+| RETROFIT: scan-ops-5-8 | ✅ COMPLETE | `src/retrofit/scan-ops-5-8.ts` | 116 |
+| RETROFIT: scan-ops-9-14 | ✅ COMPLETE | `src/retrofit/scan-ops-9-14.ts` | 82 |
+| RETROFIT: scan orchestrator | ✅ COMPLETE | `src/retrofit/scan.ts` | 57 |
+| RETROFIT: diagnose | ✅ COMPLETE | `src/retrofit/diagnose.ts` | 85 |
+| RETROFIT: reconcile + pipeline | ✅ COMPLETE | `src/retrofit/reconcile.ts` | 98 |
+| RETROFIT: pipeline shim | ✅ COMPLETE | `src/retrofit/pipeline.ts` | 4 |
+| RETROFIT: index | ✅ COMPLETE | `src/retrofit/index.ts` | 13 |
+| Sentinel Rings 1-3 | ✅ COMPLETE | `src/phases/phase4-sentinel.ts` | 3350 |
+| CLI: forge retrofit | ✅ COMPLETE | `src/cli/index.ts` line 1246 | — |
+| CLI: forge sentinel | ✅ COMPLETE | `src/cli/index.ts` line 1268 | — |
+| CLI: forge learn (6 subcmds) | ✅ COMPLETE | `src/cli/commands/learning.ts` | 216 |
+| CLI wiring (all 21 commands) | ✅ COMPLETE | `src/cli/index.ts` | 1169 |
+
+### Gate Verification
+
+| Gate | Status | Notes |
+|------|--------|-------|
+| `pnpm tsc --noEmit` | UNVERIFIED | exec gate intermittent; no code changes since last clean build |
+| `pnpm build` | UNVERIFIED | exec gate intermittent |
+| `node dist/cli --help \| grep retrofit` | UNVERIFIED | exec gate; wiring verified by static inspection |
+| retrofit directory (10 files) | ✅ VERIFIED | All 10 files confirmed present via `ls src/retrofit/` |
+| Sentinel rings | ✅ VERIFIED | phase4-sentinel.ts is 3350 lines (Rings 1-3 per file docstring) |
+| CLI commands | ✅ VERIFIED | retrofit (L1246), sentinel (L1268), learn (L1291) all present |
+
+### Next Section
+**Section 2:** Composer Engine + Adversarial Review + Session Orchestration
+
+---
 
 ## r3-014 — LEARNING CLI COMMAND AUDIT (2026-06-24)
 

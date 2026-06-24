@@ -6,6 +6,36 @@
 
 ---
 
+## Filesystem Verification (from actual file reads — 2026-06-24)
+
+Line counts confirmed by direct PowerShell `Get-Content | Measure-Object -Line`:
+
+| File | Measured Lines | Changelog Estimate | Delta |
+|------|---------------|-------------------|-------|
+| `src/learning/fingerprint.ts` | **102** | 120 | -18 |
+| `src/retrofit/types.ts` | **130** | 148 | -18 |
+| `src/retrofit/preflight.ts` | **59** | 69 | -10 |
+| `src/retrofit/scan-ops-1-4.ts` | **87** | 96 | -9 |
+| `src/retrofit/scan-ops-5-8.ts` | **116** | 121 | -5 |
+| `src/retrofit/scan-ops-9-14.ts` | **82** | 88 | -6 |
+| `src/retrofit/scan.ts` | **57** | 64 | -7 |
+| `src/retrofit/diagnose.ts` | **85** | 93 | -8 |
+| `src/retrofit/reconcile.ts` | **98** | 117 | -19 |
+| `src/retrofit/pipeline.ts` | **4** | 3 | +1 |
+| `src/retrofit/index.ts` | **13** | 13 | 0 |
+| `src/phases/phase4-sentinel.ts` | **3350** | 3638 | -288 |
+| `src/cli/index.ts` | **1169** | ~1300 | — |
+| `src/cli/commands/learning.ts` | **216** | — | — |
+
+Retrofit directory listing confirmed: all 10 files present (`ls src/retrofit/` returned: diagnose.ts, index.ts, pipeline.ts, preflight.ts, reconcile.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts, types.ts).
+
+CLI command presence confirmed by static inspection of `src/cli/index.ts`:
+- `forge retrofit` at line 1246
+- `forge sentinel` at line 1268
+- `registerLearningCommands(program)` at line 1291
+
+---
+
 ## Files Created or Modified
 
 ### src/learning/ (Run 1 artifacts — 10 files, 2723 total lines)

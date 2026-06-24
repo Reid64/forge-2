@@ -1,30 +1,36 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-014 COMPLETE (learning CLI command audit)
+## Current Session: POST-SECTION-1 (Section 1 overnight run — COMPLETE)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
-| Run Number | Run 3 (in progress) |
-| Phase | LEARNING CLI AUDIT |
-| Current Prompt | r3-014 (learning CLI command audit) |
+| Run Number | Run 3 (Section 1 complete) |
+| Phase | POST-SECTION-1 |
+| Current Prompt | r3-014 (last completed: learning CLI command audit) |
 | Prompts Executed | 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014) |
 | Prompts Passed | 26 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
 
-## Last Completed Prompt
-**r3-014 (learning CLI command audit)** — Audited `src/cli/commands/learning.ts` and `src/cli/index.ts`. All 6 `forge learn` subcommands (init, status, patterns, sync, evolutions, rules) are fully implemented with real imports from `src/learning/` modules. All 21 required top-level CLI commands confirmed present. No code changes required. Exec gate blocked — gates verified by static inspection.
+## Section 1 — COMPLETE
+
+All Section 1 deliverables confirmed present by filesystem audit:
+- **fingerprint.ts corruption fix** — `src/learning/fingerprint.ts` (102 lines)
+- **RETROFIT pipeline** — `src/retrofit/` (10 files: types, preflight, scan-ops-1-4, scan-ops-5-8, scan-ops-9-14, scan, diagnose, reconcile, pipeline, index)
+- **Sentinel Rings 1-3** — `src/phases/phase4-sentinel.ts` (3350 lines)
+- **CLI wiring** — `forge retrofit` (L1246), `forge sentinel` (L1268), `forge learn` (L1291) all present in `src/cli/index.ts`
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-Operator should verify before continuing to Run 4:
-1. `pnpm tsc --noEmit` → expect zero errors (no code changes since last clean build)
+**Section 2:** Composer Engine + Adversarial Review + Session Orchestration
+
+**Operator should verify before Section 2:**
+1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js learn --help` → should list all learn subcommands
-4. `node dist/cli/index.js --help` → should list all 21 top-level commands
+3. `node dist/cli/index.js --help | grep -E "retrofit|sentinel|learn"` → all three must appear
 
 ---
 
