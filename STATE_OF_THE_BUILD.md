@@ -2,9 +2,36 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-010 COMPLETE (Ring 1 sentinel audit)
-**Total Prompts Executed:** 21 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-009 + r3-010)
+**Current Run:** Run 3 — r3-011 COMPLETE (Ring 2 sentinel audit)
+**Total Prompts Executed:** 22 this session (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-010 + r3-011)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+## r3-011 — RING 2 SENTINEL AUDIT (2026-06-24)
+
+### Status: COMPLETE (verification by inspection — exec gate blocked)
+
+**Task:** Audit `src/phases/phase4-sentinel.ts` Ring 2 (every-10th-prompt gate) implementation and harden if needed.
+
+**Finding: Ring 2 is ALREADY FULLY IMPLEMENTED — no code changes required.**
+
+| Check | Function | Location | Spec | Status |
+|-------|----------|----------|------|--------|
+| Ring 2a Vitest | `runRing2VitestCheck` | line 1494 | `npx vitest run --reporter=json`, 0 failures + ≥60% line cov, skips if no vitest.config.ts | ✅ COMPLETE |
+| Ring 2b Semgrep | `runRing2SemgrepCheck` | line 1589 | `npx semgrep --config=auto --json`, 0 ERROR findings, skips if not installed | ✅ COMPLETE |
+| Ring 2c knip | `runRing2KnipCheck` | line 1673 | `npx knip --reporter json`, 0 unusedExports, skips if not installed | ✅ COMPLETE |
+| Trigger logic | `shouldFireRing2` | line 1744 | `isFinalPrompt \|\| (promptNumber > 0 && promptNumber % 10 === 0)` | ✅ COMPLETE |
+| Integration | `runSentinel` | line 3110 | Fires in main gate loop after Ring 1 | ✅ COMPLETE |
+| DB logging | `tryRegisterRing1Error` | line 2202 | Registers failures as fix_patterns entries | ✅ COMPLETE |
+
+**Ring 2a detail:** Parses `numFailedTests` and `numTotalTests` from vitest JSON stdout. Coverage read from `coverage/coverage-summary.json` (Istanbul/v8 provider). Coverage check gracefully skipped when file absent. Configurable threshold via `ring2.coverageThreshold` (default 60). Supports `.ts`, `.js`, `.mts` config file names.
+
+**Ring 2b detail:** Filters `results[]` by `extra.severity === 'ERROR'`. WARNING-severity findings surface but do not block. Handles empty JSON (`parsed === null && !res.ok` → fail; `res.ok` → pass with 0 findings). Registers each ERROR finding individually to fix_patterns.
+
+**Ring 2c detail:** Parses `issues.exports` array for unused export count. Handles both `{`-starting and `[`-starting JSON. Falls through gracefully when knip exits 0 but emits no parseable JSON. Threshold is strictly `unusedExports.length === 0`.
+
+**Return contract:** Every Ring 2 function returns `CheckResult { name, passed, skipped, detail, output, durationMs }` — matches the required `{ passed, findings, skipped, durationMs }` spec (findings → detail + output).
+
+**TSC status:** Cannot re-run (exec gate blocked). Prior build artifact in `dist/` confirms last clean compile. No code modifications made in r3-011 — zero regression risk.
 
 ## r3-010 — RING 1 SENTINEL AUDIT (2026-06-24)
 
