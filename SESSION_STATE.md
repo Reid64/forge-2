@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-004** — adversarial-review.ts written to src/analysis/ (127 lines, 8 exports, 6 phase prompts: ARCHITECT_PRD, ARCHITECT_GOVERNANCE, COMPOSE_QUEUE, EXECUTE_PROMPT, DIAGNOSE_HEALTH, DEPLOY_CANARY). runAdversarialReview, shouldRunAdversarialReview, persistAdversaryFindings all exported.
+**r4-005** — loops.ts verified: updateDecisionWeights (line 120) and analyzeForEvolutions (line 198) confirmed full SQLite implementations (not stubs). No changes to loops.ts required — both functions already present with complete logic. Governance files updated.
 
 ---
 
@@ -77,7 +77,7 @@
 | src/learning/types.ts | Added AdversaryFindingRecord, BuildFingerprintRecord |
 | src/learning/session-lifecycle.ts | Created (212 lines) |
 | src/learning/handoff-generator.ts | Created (155 lines) |
-| src/learning/loops.ts | Verified updateDecisionWeights + analyzeForEvolutions |
+| src/learning/loops.ts | r4-005: Verified updateDecisionWeights (line 120) + analyzeForEvolutions (line 198) — full implementations confirmed, no changes needed |
 | src/analysis/adversarial-review.ts | Created (127 lines) |
 | src/cli/commands/learning.ts | Verified 6 subcommands complete |
 | src/cli/index.ts | Wired retrofit command with spinner/error pattern |
