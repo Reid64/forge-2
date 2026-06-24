@@ -156,6 +156,31 @@ export interface HookResult {
   duration_ms: number;
 }
 
+export interface AdversaryFindingRecord {
+  id: string;
+  build_id: string;
+  phase: string;
+  severity: 'BLOCKER' | 'SIGNIFICANT' | 'MINOR' | 'DISMISSED';
+  vector: string | null;
+  issue: string;
+  fix: string | null;
+  resolution: 'PENDING' | 'FIXED' | 'DISMISSED' | 'DEFERRED';
+  resolved_at: string | null;
+  machine_id: string;
+  created_at: string;
+}
+
+export interface BuildFingerprintRecord {
+  id: string;
+  build_id: string;
+  project_name: string;
+  fingerprint: string;
+  file_count: number;
+  total_size_kb: number;
+  computed_at: string;
+  machine_id: string;
+}
+
 export const VALID_TABLES = [
   'forge_meta', 'prompt_scores', 'fix_patterns', 'decision_weights',
   'governance_rules', 'pending_evolutions', 'build_outcomes', 'skill_library',

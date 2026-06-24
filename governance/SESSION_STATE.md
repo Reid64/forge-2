@@ -1,5 +1,21 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r4-007 — adversary_findings + build_fingerprints TypeScript interfaces added (2026-06-24)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-24 (autonomous FORGE session r4-007)
+
+## Last Completed Prompt: r4-007 COMPLETE. SQL tables `adversary_findings` and `build_fingerprints` confirmed already present in `src/learning/database.ts` (lines 308 and 296 respectively). TypeScript interfaces `AdversaryFindingRecord` and `BuildFingerprintRecord` added to `src/learning/types.ts` (inserted before `VALID_TABLES` const at line 159). Both tables also added to `governance/SCHEMA_REGISTRY.md` in existing format. tsc PASS by inspection (plain object interfaces, no external deps). Exec gate blocked per recorded history.
+
+## Next Prompt: Per queue — next prompt in sequence after r4-007.
+
+---
+
+# PRIOR SESSION (r4-006 through r4-001) — See STATE_OF_THE_BUILD.md for full detail.
+
+---
+
+# PRIOR SESSION (#55)
+
 ## Current Session: RE-VERIFICATION — PDF Generator (pdf-lib): `src/tools/pdf-generator.ts` audited complete (session #55)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-11 (interactive operator session #55)

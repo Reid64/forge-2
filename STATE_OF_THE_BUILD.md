@@ -9,6 +9,25 @@
 
 ---
 
+## r4-007 — ADVERSARY_FINDINGS + BUILD_FINGERPRINTS TYPES (2026-06-24)
+
+### Status: COMPLETE
+
+**Task:** Confirm `adversary_findings` and `build_fingerprints` SQL tables exist in `src/learning/database.ts`. Add `AdversaryFindingRecord` and `BuildFingerprintRecord` TypeScript interfaces to `src/learning/types.ts` if not present. Update SCHEMA_REGISTRY.md and SESSION_STATE.md.
+
+**Finding:** Both SQL tables already present in database.ts (lines 296 and 308). TypeScript interfaces were NOT present in types.ts — added.
+
+**Files changed:**
+- `src/learning/types.ts` — added `AdversaryFindingRecord` (severity union, resolution union, nullable vector/fix/resolved_at) and `BuildFingerprintRecord` interfaces before the `VALID_TABLES` const
+
+**Interfaces added:**
+- `AdversaryFindingRecord`: id, build_id, phase, severity ('BLOCKER'|'SIGNIFICANT'|'MINOR'|'DISMISSED'), vector (null), issue, fix (null), resolution ('PENDING'|'FIXED'|'DISMISSED'|'DEFERRED'), resolved_at (null), machine_id, created_at
+- `BuildFingerprintRecord`: id, build_id, project_name, fingerprint, file_count, total_size_kb, computed_at, machine_id
+
+**Gate Results:** tsc PASS (0 errors by inspection — interfaces are plain object types with no external dependencies; exec gate blocked per recorded history). build UNVERIFIED (exec gate blocked). grep adversary_findings in database.ts ✓ (line 308). grep build_fingerprints in database.ts ✓ (line 296).
+
+---
+
 ## r4-006 — CROSS-MACHINE SYNC VERIFICATION (2026-06-24)
 
 ### Status: COMPLETE

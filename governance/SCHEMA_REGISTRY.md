@@ -266,6 +266,61 @@ Persistent design tokens per brand/project.
 
 ---
 
+---
+
+## SQLite Learning Database (forge_memory.db)
+
+The following tables live in the local SQLite learning database (`~/.forge/forge_memory.db`), not in the Supabase instance above. They are created by `src/learning/database.ts` → `initializeForgeMemory()` and typed in `src/learning/types.ts`.
+
+---
+
+## Table: adversary_findings (SQLite)
+Track adversarial review findings for resolution and accuracy measurement.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | Finding identifier (UUID) |
+| build_id | TEXT | NOT NULL | Build that generated this finding |
+| phase | TEXT | NOT NULL | Phase where finding was raised |
+| severity | TEXT | NOT NULL, CHECK IN ('BLOCKER','SIGNIFICANT','MINOR','DISMISSED') | Severity classification |
+| vector | TEXT | | Attack/failure vector (nullable) |
+| issue | TEXT | NOT NULL | Description of the issue found |
+| fix | TEXT | | Proposed or applied fix (nullable) |
+| resolution | TEXT | NOT NULL DEFAULT 'PENDING', CHECK IN ('PENDING','FIXED','DISMISSED','DEFERRED') | Current resolution status |
+| resolved_at | TEXT | | ISO timestamp when resolved (nullable) |
+| machine_id | TEXT | NOT NULL | Machine that recorded this finding |
+| created_at | TEXT | NOT NULL DEFAULT (datetime('now')) | Record creation |
+
+### Indexes:
+- `idx_adversary_build` ON (build_id)
+- `idx_adversary_severity` ON (severity)
+
+### TypeScript interface: `AdversaryFindingRecord` (src/learning/types.ts)
+
+---
+
+## Table: build_fingerprints (SQLite)
+Track project state hashes for integrity verification between runs.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | Fingerprint record identifier (UUID) |
+| build_id | TEXT | NOT NULL | Build associated with this fingerprint |
+| project_name | TEXT | NOT NULL | Name of the project being built |
+| fingerprint | TEXT | NOT NULL | SHA-256 or composite hash of project state |
+| file_count | INTEGER | NOT NULL DEFAULT 0 | Number of files in project at this snapshot |
+| total_size_kb | REAL | NOT NULL DEFAULT 0 | Total project size in kilobytes |
+| computed_at | TEXT | NOT NULL DEFAULT (datetime('now')) | When fingerprint was computed |
+| machine_id | TEXT | NOT NULL | Machine that computed this fingerprint |
+
+### Indexes:
+- `idx_fingerprints_build` ON (build_id)
+- `idx_fingerprints_project` ON (project_name)
+
+### TypeScript interface: `BuildFingerprintRecord` (src/learning/types.ts)
+
+---
+
 ## Seed Data: Pre-loaded Error Patterns
 
 The following error patterns are seeded into error_patterns on initialization:
