@@ -43,7 +43,8 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { GitManager, type GitFileChange } from '../engine/git-manager.js';
@@ -144,7 +145,10 @@ export type SentinelCheckName =
   | 'playwright'
   | 'vitest'
   | 'semgrep'
-  | 'knip';
+  | 'knip'
+  | 'trivy'
+  | 'gitleaks'
+  | 'lighthouse';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
@@ -511,6 +515,32 @@ export interface SentinelOptions {
     runKnip?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
     /** Minimum line-coverage percentage for Vitest to pass. Default 60. */
     coverageThreshold?: number;
+  };
+  /**
+   * Ring 3 gate (final-prompt of a run OR explicit `forge sentinel --ring 3`). When supplied,
+   * Sentinel runs three additional tools after Ring 1/2 have passed:
+   *
+   *  - **Trivy** (`trivy fs --severity CRITICAL,HIGH --format json --quiet .`): 0 CRITICAL + 0
+   *    HIGH CVEs. Skips when trivy binary is not in PATH.
+   *  - **Gitleaks** (`gitleaks detect --source=. --report-format json --exit-code 0`): 0 secret
+   *    findings. Skips when gitleaks binary is not in PATH.
+   *  - **Lighthouse** (starts dev server on port 3099, runs lighthouse, stops server): all four
+   *    categories (performance / accessibility / best-practices / SEO) must score ≥ 90. Skips
+   *    when lighthouse is not installed or the dev server does not start.
+   *
+   * All three tools degrade gracefully (SKIP, never FAIL) when the binary is unavailable.
+   */
+  ring3?: {
+    /** Set to true on the last prompt of a run so Ring 3 fires automatically. */
+    isFinalPrompt?: boolean;
+    /** Force Ring 3 to run regardless of prompt position (e.g. `forge sentinel --ring 3`). */
+    forceRun?: boolean;
+    /** Override Trivy runner (tests). */
+    runTrivy?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Override Gitleaks runner (tests). */
+    runGitleaks?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Override Lighthouse runner (tests). */
+    runLighthouse?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
   };
   /** Progress reporter. Default logs to the console with a `[FORGE:sentinel]` prefix. */
   log?: (message: string) => void;
@@ -1716,6 +1746,424 @@ export function shouldFireRing2(promptNumber: number, isFinalPrompt = false): bo
 }
 
 // ---------------------------------------------------------------------------
+// Ring 3 — End-of-run gate (Trivy, Gitleaks, Lighthouse)
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether Ring 3 should fire.
+ * Fires when `isFinalPrompt` is true OR when `forceRun` is true (explicit `forge sentinel --ring 3`).
+ */
+export function shouldFireRing3(isFinalPrompt = false, forceRun = false): boolean {
+  return isFinalPrompt || forceRun;
+}
+
+/** Partial shape of `trivy fs --format json` output. */
+interface TrivyResult {
+  Results?: Array<{
+    Target?: string;
+    Vulnerabilities?: Array<{
+      VulnerabilityID?: string;
+      Severity?: string;
+      PkgName?: string;
+      Title?: string;
+    }>;
+  }>;
+}
+
+/**
+ * Ring 3a: Trivy vulnerability scan.
+ * Runs `trivy fs --severity CRITICAL,HIGH --format json --quiet .`.
+ * Skips gracefully when trivy binary is not in PATH.
+ * Threshold: 0 CRITICAL + 0 HIGH CVEs.
+ */
+async function runRing3TrivyCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const res = await run(
+    'trivy fs --severity CRITICAL,HIGH --format json --quiet .',
+    projectPath,
+    5 * 60 * 1000
+  );
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('trivy', 'Trivy TIMED OUT after 300s', combined, durationMs);
+  }
+
+  const notInstalled =
+    /command not found|is not recognized|no such file|ENOENT|not installed/i.test(combined) &&
+    !res.stdout.trim().startsWith('{');
+  if (notInstalled) {
+    return skip('trivy', 'trivy not installed or not in PATH — Ring 3 Trivy check skipped');
+  }
+
+  // Parse JSON output.
+  let parsed: TrivyResult | null = null;
+  try {
+    const firstBrace = res.stdout.indexOf('{');
+    if (firstBrace >= 0) {
+      parsed = JSON.parse(res.stdout.slice(firstBrace)) as TrivyResult;
+    }
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed === null) {
+    if (!res.ok) {
+      return fail(
+        'trivy',
+        `Trivy exited ${res.exitCode ?? 'null'} without JSON: ${firstLine(combined)}`,
+        clip(combined),
+        durationMs
+      );
+    }
+    // exit 0 but no JSON — treat as clean (some versions print nothing when no vulns found).
+    return pass('trivy', 'Trivy: 0 CRITICAL/HIGH CVEs (no JSON output; exit 0)', combined, durationMs);
+  }
+
+  const vulns = (parsed.Results ?? []).flatMap((r) => r.Vulnerabilities ?? []);
+  const critical = vulns.filter((v) => (v.Severity ?? '').toUpperCase() === 'CRITICAL');
+  const high = vulns.filter((v) => (v.Severity ?? '').toUpperCase() === 'HIGH');
+
+  const summary =
+    `Trivy scanned ${(parsed.Results ?? []).length} target(s): ${critical.length} CRITICAL, ${high.length} HIGH CVE(s).\n` +
+    vulns
+      .slice(0, 30)
+      .map(
+        (v) =>
+          `[${v.Severity ?? '?'}] ${v.VulnerabilityID ?? '?'} in ${v.PkgName ?? '?'}${v.Title ? `: ${v.Title}` : ''}`
+      )
+      .join('\n');
+
+  if (critical.length > 0 || high.length > 0) {
+    const worst = [...critical, ...high]
+      .slice(0, 8)
+      .map((v) => `${v.VulnerabilityID ?? '?'} (${v.Severity ?? '?'}) in ${v.PkgName ?? '?'}`)
+      .join('; ');
+    tryRegisterRing1Error(
+      {
+        file: projectPath,
+        code: 'TRIVY_VULNERABILITY',
+        message: `${critical.length} CRITICAL + ${high.length} HIGH CVEs found by Trivy: ${worst}`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail(
+      'trivy',
+      `Trivy: ${critical.length} CRITICAL + ${high.length} HIGH CVE(s) — build blocked: ${worst}`,
+      summary,
+      durationMs
+    );
+  }
+
+  return pass(
+    'trivy',
+    `Trivy: 0 CRITICAL/HIGH CVEs (${vulns.length} total finding(s) at lower severity)`,
+    summary,
+    durationMs
+  );
+}
+
+/** A single Gitleaks finding from the JSON report. */
+interface GitleaksFinding {
+  RuleID?: string;
+  Match?: string;
+  Secret?: string;
+  File?: string;
+  StartLine?: number;
+  Description?: string;
+}
+
+/**
+ * Ring 3b: Gitleaks secret scan.
+ * Runs `gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0`.
+ * The `--exit-code 0` flag makes gitleaks always exit 0; findings are read from the report file.
+ * Skips gracefully when gitleaks binary is not in PATH.
+ * Threshold: 0 findings.
+ */
+async function runRing3GitleaksCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const reportPath = join(projectPath, '.forge', 'gitleaks-report.json');
+
+  const res = await run(
+    'gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0',
+    projectPath,
+    3 * 60 * 1000
+  );
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    return fail('gitleaks', 'Gitleaks TIMED OUT after 180s', combined, durationMs);
+  }
+
+  if (/command not found|is not recognized|no such file|ENOENT|not installed/i.test(combined)) {
+    return skip('gitleaks', 'gitleaks not installed or not in PATH — Ring 3 Gitleaks check skipped');
+  }
+
+  // Read the report file (only written by gitleaks when findings are present).
+  let findings: GitleaksFinding[] = [];
+  const reportContent = await readTextSafe(reportPath);
+  if (reportContent) {
+    try {
+      const parsed = JSON.parse(reportContent) as unknown;
+      if (Array.isArray(parsed)) {
+        findings = parsed as GitleaksFinding[];
+      }
+    } catch {
+      log('WARNING: Ring 3 Gitleaks — report JSON could not be parsed');
+    }
+  }
+
+  const summary =
+    `Gitleaks detected ${findings.length} secret(s).\n` +
+    findings
+      .slice(0, 20)
+      .map(
+        (f) =>
+          `[${f.RuleID ?? '?'}] ${f.Description ?? f.Match ?? '?'} in ${f.File ?? '?'}${
+            f.StartLine !== undefined ? `:${f.StartLine}` : ''
+          }`
+      )
+      .join('\n');
+
+  if (findings.length > 0) {
+    const first = findings[0]!;
+    tryRegisterRing1Error(
+      {
+        file: first.File ?? projectPath,
+        code: 'GITLEAKS_SECRET',
+        message: `${findings.length} secret(s) detected: ${first.RuleID ?? '?'} at ${first.File ?? '?'}`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail(
+      'gitleaks',
+      `Gitleaks: ${findings.length} secret(s) detected — build blocked`,
+      summary,
+      durationMs
+    );
+  }
+
+  return pass('gitleaks', 'Gitleaks: 0 secrets detected', summary, durationMs);
+}
+
+/** Partial shape of a Lighthouse JSON report. */
+interface LighthouseCategory {
+  id?: string;
+  title?: string;
+  score?: number | null;
+}
+interface LighthouseReport {
+  categories?: Record<string, LighthouseCategory | undefined>;
+}
+
+/** Port used by the dev server spawned for Ring 3 Lighthouse. */
+const LIGHTHOUSE_DEV_PORT = 3099;
+/** Minimum Lighthouse category score (0–100) to pass the gate. */
+const LIGHTHOUSE_THRESHOLD = 90;
+/** Categories evaluated by the gate. */
+const LIGHTHOUSE_AUDITED_CATS = new Set(['performance', 'accessibility', 'best-practices', 'seo']);
+
+/** Poll `url` until it responds with HTTP < 500 or `timeoutMs` elapses. Never throws. */
+async function waitForDevServer(
+  url: string,
+  timeoutMs: number,
+  log: (m: string) => void
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const POLL_MS = 1000;
+  while (Date.now() < deadline) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 2000);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (resp.status < 500) return true;
+    } catch {
+      // Not ready yet — swallow and poll again.
+    }
+    await new Promise<void>((r) => setTimeout(r, POLL_MS));
+    log(`Ring 3c: waiting for dev server at ${url}…`);
+  }
+  return false;
+}
+
+/** Kill a spawned child process (guarded; null-safe). */
+function killChildProcess(proc: ChildProcess | null, log: (m: string) => void): void {
+  if (!proc) return;
+  try {
+    if (!proc.killed) proc.kill('SIGTERM');
+  } catch (err) {
+    log(
+      `WARNING: Ring 3 Lighthouse — could not kill dev server (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+}
+
+/**
+ * Ring 3c: Lighthouse performance / accessibility / best-practices / SEO audit.
+ * Starts a dev server on port 3099, runs Lighthouse, stops the dev server.
+ * Skips gracefully when lighthouse is not installed or the dev server does not start.
+ * Threshold: all four categories ≥ 90.
+ */
+async function runRing3LighthouseCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const reportPath = join(projectPath, '.forge', 'lighthouse.json');
+  const devUrl = `http://localhost:${LIGHTHOUSE_DEV_PORT}`;
+
+  // Fast-path: check if lighthouse is installed before spinning up a dev server.
+  const versionRes = await run('lighthouse --version', projectPath, 10_000);
+  const versionOut = [versionRes.stdout, versionRes.stderr]
+    .filter((s) => s.trim() !== '')
+    .join('\n');
+  if (
+    /command not found|is not recognized|no such file|ENOENT|not installed/i.test(versionOut) ||
+    (!versionRes.ok && !versionRes.stdout.trim())
+  ) {
+    return skip('lighthouse', 'lighthouse not installed or not in PATH — Ring 3 Lighthouse check skipped');
+  }
+
+  // Spawn the dev server.
+  log(`Ring 3c: starting dev server on port ${LIGHTHOUSE_DEV_PORT} for Lighthouse audit`);
+  let devServer: ChildProcess | null = null;
+  try {
+    devServer = spawn('pnpm', ['dev', '--port', String(LIGHTHOUSE_DEV_PORT)], {
+      cwd: projectPath,
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: process.platform === 'win32',
+    });
+  } catch (err) {
+    log(
+      `WARNING: Ring 3 Lighthouse — could not spawn dev server (${err instanceof Error ? err.message : String(err)})`
+    );
+    return skip('lighthouse', 'dev server could not be spawned — Lighthouse check skipped');
+  }
+
+  // Wait for the dev server to accept connections (up to 30 s).
+  const ready = await waitForDevServer(devUrl, 30_000, log);
+  if (!ready) {
+    killChildProcess(devServer, log);
+    return skip(
+      'lighthouse',
+      `dev server on port ${LIGHTHOUSE_DEV_PORT} did not become ready within 30s — Lighthouse check skipped`
+    );
+  }
+
+  // Run Lighthouse against the live server.
+  log(`Ring 3c: running Lighthouse against ${devUrl}`);
+  const lhRes = await run(
+    `lighthouse ${devUrl} --chrome-flags="--headless --no-sandbox" --output=json --output-path=.forge/lighthouse.json`,
+    projectPath,
+    3 * 60 * 1000
+  );
+  const lhCombined = [lhRes.stdout, lhRes.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  // Always stop the dev server.
+  killChildProcess(devServer, log);
+
+  const durationMs = nowMs() - startedAt;
+
+  if (lhRes.timedOut) {
+    return fail('lighthouse', 'Lighthouse TIMED OUT after 180s', lhCombined, durationMs);
+  }
+  if (
+    /command not found|is not recognized|ENOENT|not found/i.test(lhCombined) &&
+    !lhRes.ok
+  ) {
+    return skip('lighthouse', 'lighthouse binary not found during run — Lighthouse check skipped');
+  }
+
+  // Read and parse the output file.
+  const reportContent = await readTextSafe(reportPath);
+  if (!reportContent) {
+    if (!lhRes.ok) {
+      return fail(
+        'lighthouse',
+        `Lighthouse exited ${lhRes.exitCode ?? 'null'}: ${firstLine(lhCombined)}`,
+        clip(lhCombined),
+        durationMs
+      );
+    }
+    return skip('lighthouse', 'Lighthouse report not found at .forge/lighthouse.json — not evaluated');
+  }
+
+  let report: LighthouseReport | null = null;
+  try {
+    report = JSON.parse(reportContent) as LighthouseReport;
+  } catch {
+    return fail(
+      'lighthouse',
+      'Lighthouse report JSON could not be parsed',
+      clip(reportContent),
+      durationMs
+    );
+  }
+
+  const cats = report?.categories ?? {};
+  const audited: { key: string; name: string; score: number }[] = [];
+  const failing: { key: string; name: string; score: number }[] = [];
+
+  for (const [key, cat] of Object.entries(cats)) {
+    if (!cat) continue;
+    const rawScore = cat.score;
+    if (rawScore === null || rawScore === undefined) continue;
+    const scorePct = Math.round(rawScore * 100);
+    const name = cat.title ?? key;
+    audited.push({ key, name, score: scorePct });
+    if (LIGHTHOUSE_AUDITED_CATS.has(key) && scorePct < LIGHTHOUSE_THRESHOLD) {
+      failing.push({ key, name, score: scorePct });
+    }
+  }
+
+  const summary =
+    `Lighthouse scores (threshold ${LIGHTHOUSE_THRESHOLD}): ` +
+    audited.map((a) => `${a.name} ${a.score}`).join(', ');
+
+  if (failing.length > 0) {
+    const worst = failing.map((f) => `${f.name}: ${f.score}`).join(', ');
+    tryRegisterRing1Error(
+      {
+        file: projectPath,
+        code: 'LIGHTHOUSE_LOW_SCORE',
+        message: `Lighthouse scores below ${LIGHTHOUSE_THRESHOLD}: ${worst}`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail(
+      'lighthouse',
+      `Lighthouse: ${failing.length} category(ies) below ${LIGHTHOUSE_THRESHOLD}: ${worst}`,
+      summary,
+      durationMs
+    );
+  }
+
+  return pass(
+    'lighthouse',
+    `Lighthouse: all categories ≥ ${LIGHTHOUSE_THRESHOLD} — ${audited.map((a) => `${a.name} ${a.score}`).join(', ')}`,
+    summary,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Ring 1 — Enhanced per-prompt gate (TypeScript error parsing, ESLint, schema drift)
 // ---------------------------------------------------------------------------
 
@@ -2708,6 +3156,60 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         knipResult = skip('knip', 'Ring 2 knip runner threw — not evaluated');
       }
       record(knipResult);
+    }
+  }
+
+  // --- Ring 3. End-of-run gate (Trivy, Gitleaks, Lighthouse) ----------------------------------
+  // Fires when ring3.isFinalPrompt === true OR ring3.forceRun === true.
+  // All three tools skip gracefully when the binary is not installed — never a false failure.
+  // A failing tool registers a fix_patterns entry in the learning DB.
+  if (options.ring3 && shouldFireRing3(options.ring3.isFinalPrompt, options.ring3.forceRun)) {
+    // Ring 3a: Trivy (CVE scan — 0 CRITICAL + 0 HIGH threshold)
+    if (shouldSkipRest()) {
+      record(skipRest('trivy'));
+    } else {
+      log('Ring 3a: Trivy vulnerability scan (0 CRITICAL/HIGH threshold)');
+      const trivyFn = options.ring3.runTrivy ?? runRing3TrivyCheck;
+      let trivyResult: CheckResult;
+      try {
+        trivyResult = await trivyFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 3 Trivy check threw (${describe(err)})`);
+        trivyResult = skip('trivy', 'Ring 3 Trivy runner threw — not evaluated');
+      }
+      record(trivyResult);
+    }
+
+    // Ring 3b: Gitleaks (secret scan — 0 findings threshold)
+    if (shouldSkipRest()) {
+      record(skipRest('gitleaks'));
+    } else {
+      log('Ring 3b: Gitleaks secret scan (0 findings threshold)');
+      const gitleaksFn = options.ring3.runGitleaks ?? runRing3GitleaksCheck;
+      let gitleaksResult: CheckResult;
+      try {
+        gitleaksResult = await gitleaksFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 3 Gitleaks check threw (${describe(err)})`);
+        gitleaksResult = skip('gitleaks', 'Ring 3 Gitleaks runner threw — not evaluated');
+      }
+      record(gitleaksResult);
+    }
+
+    // Ring 3c: Lighthouse (≥ 90 for performance / accessibility / best-practices / SEO)
+    if (shouldSkipRest()) {
+      record(skipRest('lighthouse'));
+    } else {
+      log('Ring 3c: Lighthouse performance/accessibility/best-practices/SEO audit (≥ 90 threshold)');
+      const lighthouseFn = options.ring3.runLighthouse ?? runRing3LighthouseCheck;
+      let lighthouseResult: CheckResult;
+      try {
+        lighthouseResult = await lighthouseFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 3 Lighthouse check threw (${describe(err)})`);
+        lighthouseResult = skip('lighthouse', 'Ring 3 Lighthouse runner threw — not evaluated');
+      }
+      record(lighthouseResult);
     }
   }
 

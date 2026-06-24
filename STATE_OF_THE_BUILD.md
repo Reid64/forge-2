@@ -2,6 +2,85 @@
 
 ---
 
+# r3-012 — SENTINEL RING 3 HARDENING (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Audit and fully implement Ring 3 (end-of-run gate) in `src/phases/phase4-sentinel.ts`.
+
+**Audit findings (pre-change):**
+- Ring 3 was entirely absent — no `trivy`, `gitleaks`, or `lighthouse` check names existed in the union type, no `ring3` option in `SentinelOptions`, no implementation functions, no wiring in `runSentinel`.
+
+**Changes made to `src/phases/phase4-sentinel.ts`:**
+
+1. **Imports** — added `spawn` to the existing `node:child_process` import; added `import type { ChildProcess }` for the dev-server process handle.
+
+2. **`SentinelCheckName` union** — added `| 'trivy' | 'gitleaks' | 'lighthouse'`.
+
+3. **`SentinelOptions.ring3`** (new optional property):
+   - `isFinalPrompt?: boolean` — fires Ring 3 when the final prompt of a run completes
+   - `forceRun?: boolean` — fires Ring 3 when explicitly invoked via `forge sentinel --ring 3`
+   - `runTrivy?`, `runGitleaks?`, `runLighthouse?` — injectable runners for tests
+
+4. **`shouldFireRing3(isFinalPrompt, forceRun)` (exported)** — mirrors `shouldFireRing2`; returns true when either flag is set.
+
+5. **`TrivyResult` interface** — partial shape of `trivy fs --format json` output (`Results[].Vulnerabilities`).
+
+6. **`runRing3TrivyCheck(projectPath, run, log)`** — Ring 3a:
+   - Runs `trivy fs --severity CRITICAL,HIGH --format json --quiet .` (5-minute timeout)
+   - Skips when `command not found / ENOENT / not installed` in output and stdout does not start with `{`
+   - Parses `Results[].Vulnerabilities`, counts CRITICAL and HIGH
+   - Threshold: 0 CRITICAL + 0 HIGH CVEs; non-blocking at medium/low
+   - Registers failures to learning DB via `tryRegisterRing1Error`
+
+7. **`GitleaksFinding` interface** — `RuleID`, `Match`, `Secret`, `File`, `StartLine`, `Description`.
+
+8. **`runRing3GitleaksCheck(projectPath, run, log)`** — Ring 3b:
+   - Runs `gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0` (3-minute timeout)
+   - `--exit-code 0` ensures gitleaks always exits 0; findings are read from the JSON report file
+   - Skips when `command not found / ENOENT / not installed` in stderr
+   - Reads `.forge/gitleaks-report.json`; absence of file = no findings (gitleaks only writes it when secrets are found)
+   - Threshold: 0 findings; registers first finding to learning DB
+
+9. **`LighthouseCategory` / `LighthouseReport` interfaces** — typed wrappers for Lighthouse JSON output.
+
+10. **`waitForDevServer(url, timeoutMs, log)`** — polls url with a 2s AbortController timeout per attempt, POLL_MS=1000ms, up to `timeoutMs`.
+
+11. **`killChildProcess(proc: ChildProcess | null, log)`** — null-safe SIGTERM wrapper.
+
+12. **`runRing3LighthouseCheck(projectPath, run, log)`** — Ring 3c:
+    - Fast-path: checks `lighthouse --version`; skips if not installed
+    - Spawns `pnpm dev --port 3099` (Windows shell mode enabled on win32)
+    - Polls `http://localhost:3099` for up to 30s; skips if server not ready
+    - Runs `lighthouse http://localhost:3099 --chrome-flags="--headless --no-sandbox" --output=json --output-path=.forge/lighthouse.json` (3-minute timeout)
+    - Always kills dev server (even on failure paths)
+    - Reads and parses `.forge/lighthouse.json`
+    - Evaluates `performance`, `accessibility`, `best-practices`, `seo` categories
+    - Threshold: all four ≥ 90; fails with per-category scores in detail
+    - Registers failures to learning DB
+
+13. **Ring 3 wiring in `runSentinel()`** — added after Ring 2 block, before final result assembly:
+    - Guards with `options.ring3 && shouldFireRing3(options.ring3.isFinalPrompt, options.ring3.forceRun)`
+    - Runs Ring 3a (Trivy) → 3b (Gitleaks) → 3c (Lighthouse) in order
+    - Each tool respects `shouldSkipRest()` (stopOnFirstFailure)
+    - All runners guarded with try/catch → skip on throw
+
+**TypeScript strict-mode compliance (by inspection):**
+- `spawn` / `ChildProcess` properly imported from `node:child_process`
+- `killChildProcess` takes `ChildProcess | null` — null-safe
+- `LighthouseReport.categories` typed as `Record<string, LighthouseCategory | undefined>` — undefined entries handled by `if (!cat) continue`
+- `AbortController` used with explicit `clearTimeout` to avoid resource leaks
+- All optional chaining used on parsed JSON results
+- No `console.log` statements; no unused variables
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+| `pnpm build` | UNVERIFIED (exec gated) |
+
+---
+
 # r3-011 — SENTINEL RING 2 HARDENING (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

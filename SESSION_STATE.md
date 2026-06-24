@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-011 — SENTINEL RING 2 HARDENING (2026-06-24)
+## Current Session: r3-012 — SENTINEL RING 3 HARDENING (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,13 +8,13 @@
 |-------|-------|
 | Run Number | Run 3 (in progress) |
 | Phase | SENTINEL HARDENING |
-| Current Prompt | r3-011 (Sentinel Ring 2) |
-| Prompts Executed | 23 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-011) |
-| Prompts Passed | 23 (exec gate UNVERIFIED) |
+| Current Prompt | r3-012 (Sentinel Ring 3) |
+| Prompts Executed | 24 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-012) |
+| Prompts Passed | 24 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-011 (SENTINEL RING 2 HARDENING)** — Audited `src/phases/phase4-sentinel.ts`; Ring 2 was entirely absent. Implemented full Ring 2 (every-10th-prompt + final-prompt gate): Ring 2a Vitest (`npx vitest run --reporter=json`, skips if no vitest.config.ts, threshold=0 failures AND coverage≥60% read from `coverage/coverage-summary.json`); Ring 2b Semgrep (`npx semgrep --config=auto --json`, skips if not installed, threshold=0 ERROR findings); Ring 2c knip (`npx knip --reporter json`, skips if not installed, threshold=0 unused exports). All three tools register failures to the learning DB. Trigger: `promptNumber % 10 === 0` OR `isFinalPrompt === true`. Exported `shouldFireRing2()` helper. Added `'vitest' | 'semgrep' | 'knip'` to `SentinelCheckName`; added `ring2?` option to `SentinelOptions`; added `import { existsSync } from 'node:fs'`. Exec gate blocked; zero TS errors expected by inspection.
+**r3-012 (SENTINEL RING 3 HARDENING)** — Audited `src/phases/phase4-sentinel.ts`; Ring 3 was entirely absent. Implemented full Ring 3 (final-prompt / explicit --ring 3 gate): added `spawn` + `ChildProcess` imports; added `trivy | gitleaks | lighthouse` to `SentinelCheckName`; added `ring3?` option to `SentinelOptions`; added `shouldFireRing3(isFinalPrompt, forceRun)` export. Ring 3a Trivy: `trivy fs --severity CRITICAL,HIGH --format json --quiet .`, skips if not in PATH, threshold=0 CRITICAL+HIGH CVEs. Ring 3b Gitleaks: `gitleaks detect --source=. --report-format json --report-path .forge/gitleaks-report.json --exit-code 0`, reads report file (absent=0 findings), skips if not in PATH, threshold=0. Ring 3c Lighthouse: spawns `pnpm dev --port 3099`, polls until ready (30s), runs `lighthouse http://localhost:3099 --chrome-flags="--headless --no-sandbox" --output=json --output-path=.forge/lighthouse.json`, kills dev server, parses categories, threshold=90+ for performance/accessibility/best-practices/SEO, skips if lighthouse not installed. All tools null-safe and gracefully degrading. Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
