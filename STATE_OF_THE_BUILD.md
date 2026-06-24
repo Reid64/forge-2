@@ -65,14 +65,14 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 
 ---
 
-## Run 6 — IN PROGRESS (1/3)
+## Run 6 — IN PROGRESS (2/3)
 
 Queue file: `forge2-run6-20260624.yaml` (written to project root 2026-06-24)
 
 | Prompt | Name | Status | Notes |
 |--------|------|--------|-------|
 | r6-001 | Inject handlePreToolUse into assemblePrompt | PASSED | `src/engine/prompt-assembler.ts` — added import + try/catch call to `handlePreToolUse`; prepends fix_patterns + governance_rules context block before assembled prompt sections; non-fatal (DB absent → skip). tsc/build/lint/test UNVERIFIED (exec gate blocked). |
-| r6-002 | Implement PRD 4-pass refinement hardening in phase1a-prd.ts | QUEUED | |
+| r6-002 | Wire handlePostToolUse in phase3-executor.ts | PASSED | `src/phases/phase3-executor.ts` — verified `handlePostToolUse` call exists at lines 856-873 (added in r5 series); improved `tokensConsumed` from hardcoded `0` to `outcome.tokensEstimated` so the learning engine receives actual token data; call is already wrapped in try/catch (learning failures never crash the build). tsc/build UNVERIFIED (exec gate blocked). |
 | r6-003 | Harden phase1b-architect.ts governance suite generation | QUEUED | |
 
 ---
@@ -84,11 +84,11 @@ Queue file: `forge2-run6-20260624.yaml` (written to project root 2026-06-24)
 - **Run 3:** COMPLETE ✓
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
-- **Run 6:** 1/3 IN PROGRESS
-- **Overall:** ~63/~65 queued prompts complete (~97%)
+- **Run 6:** 2/3 IN PROGRESS
+- **Overall:** ~64/~65 queued prompts complete (~98%)
 
 ---
 
 ## Next Action
 
-Continue Run 6: execute r6-002 (phase1a-prd.ts PRD 4-pass refinement hardening).
+Continue Run 6: execute r6-003 (harden phase1b-architect.ts governance suite generation).

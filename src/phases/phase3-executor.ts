@@ -863,7 +863,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         techStackTags: ['typescript', 'nextjs'],
         firstPassSuccess: outcome.disposition === 'completed',
         retryCount: outcome.recovery?.attempted ? 1 : 0,
-        tokensConsumed: 0,
+        tokensConsumed: outcome.tokensEstimated,
         gatPassRate: outcome.disposition === 'completed' ? 1 : 0,
         errorOutput: outcome.sentinel?.diagnosticReport ?? '',
         filesModified: [],

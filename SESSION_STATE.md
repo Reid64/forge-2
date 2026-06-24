@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 6 (in progress) |
 | Phase | EXECUTE |
-| Current Prompt | r6-001 (PASSED) |
-| Prompts Executed (Run 6) | 1 |
-| Prompts Passed (Run 6) | 1 |
+| Current Prompt | r6-002 (PASSED) |
+| Prompts Executed (Run 6) | 2 |
+| Prompts Passed (Run 6) | 2 |
 | Prompts Failed (Run 6) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,9 +22,9 @@
 
 ## Last Completed Prompt
 
-r6-001 — Inject `handlePreToolUse` into `assemblePrompt` in `src/engine/prompt-assembler.ts` (PASSED)
+r6-002 — Wire `handlePostToolUse` in `src/phases/phase3-executor.ts` (PASSED)
 
-**What was built:** Before assembling the final prompt string, `assemblePrompt` now calls `handlePreToolUse(entry.prompt_type, techStackTags, 0)` from `src/learning/hooks-enhanced.ts`. The returned `contextInjection` (active governance rules + known fix patterns from forge_memory.db) is prepended to every assembled prompt. The call is wrapped in try/catch — if forge_memory.db is absent or any query fails, injection is silently skipped and the prompt assembles normally. Tech stack tags are derived from `input.stackFingerprint` fields (framework, language, database, deployment, packageManager).
+**What was built:** Verified `handlePostToolUse` (from `src/learning/hooks-enhanced.ts`) is called in the main execution loop immediately after each `executePrompt` returns (lines 856-873). The call was already present from the r5 series. Improvement applied this run: `tokensConsumed` changed from hardcoded `0` to `outcome.tokensEstimated`, so the learning engine now receives the actual per-prompt token estimate. All parameters passed: `buildId` (buildRunId ?? ''), `promptId` (entry.id), `taskType` (entry.prompt_type), `techStackTags` (['typescript','nextjs']), `firstPassSuccess` (outcome.disposition === 'completed'), `retryCount` (outcome.recovery?.attempted ? 1 : 0), `tokensConsumed` (outcome.tokensEstimated), `gatPassRate` (0 or 1), `errorOutput` (sentinel diagnosticReport), `filesModified` ([]), `projectName`. Wrapped in try/catch — learning failures never crash the build.
 
 ---
 
@@ -36,7 +36,7 @@ r6-001 — Inject `handlePreToolUse` into `assemblePrompt` in `src/engine/prompt
 
 ## Next Action
 
-Execute r6-002: Implement PRD 4-pass refinement hardening in `phase1a-prd.ts`.
+Execute r6-003: Harden `phase1b-architect.ts` governance suite generation.
 
 ---
 
@@ -52,14 +52,13 @@ Execute r6-002: Implement PRD 4-pass refinement hardening in `phase1a-prd.ts`.
 | dist/cli/index.js | PRESENT |
 | .forge/hooks.json | PRESENT |
 | forge_config.json | PRESENT |
-| TypeScript | 0 errors by inspection (r6-001 change type-safe by inspection) |
+| TypeScript | 0 errors by inspection (r6-002 change: `outcome.tokensEstimated` is `number`, matches `tokensConsumed: number` param — type-safe) |
 
 ---
 
-## Files Modified This Session (Run 6 — r6-001)
+## Files Modified This Session (Run 6 — r6-001 through r6-002)
 
 - `src/engine/prompt-assembler.ts` (modified — added `handlePreToolUse` import + call in `assemblePrompt`)
-- `state/current-prompt.json` (updated)
-- `state/gate-results.json` (updated)
+- `src/phases/phase3-executor.ts` (modified — fixed `tokensConsumed: 0` → `outcome.tokensEstimated` in `handlePostToolUse` call)
 - `STATE_OF_THE_BUILD.md` (updated)
 - `SESSION_STATE.md` (this file)
