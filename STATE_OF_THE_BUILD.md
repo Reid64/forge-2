@@ -2,8 +2,9 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Post-Run 4 (r4-013 snapshot complete; awaiting Run 5 execution)
-**Total Prompts Executed:** 48+ (r1-001…r4-012 + r4-013 snapshot)
+**Current Run:** Post-Run 4 (r4-012 complete; awaiting Run 5 execution)
+**Total Prompts Executed:** 49+ (r1-001…r4-012 + r4-013 snapshot)
+**README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r4-012; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 

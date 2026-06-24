@@ -1,226 +1,243 @@
 # FORGE 2.0 — Factory for Orchestrated Replicable Governed Execution
 
-> **v2.0.0** · TypeScript · Node >=20 · SQLite learning engine · Claude Sonnet 4.6
-
-FORGE 2.0 is a self-learning autonomous software factory CLI. It takes a raw product idea or an
-existing codebase and drives it through a governed, quality-gated build pipeline — with zero
-human intervention during execution.
+> Version 2.0.0 · TypeScript/Node.js · `bin: forge`
 
 ---
 
 ## What Is FORGE 2.0?
 
-FORGE 2.0 orchestrates the full lifecycle of a software build:
+FORGE 2.0 is a **self-learning autonomous software factory CLI** (from `package.json` description
+field). It builds production-grade applications from governance documents and prompt queues with zero
+human intervention during execution. The pipeline runs idea → PRD → architecture → code generation →
+Sentinel quality gates → recursive learning, recording every error and fix pattern in a local SQLite
+knowledge base so future builds improve automatically.
 
-- **Phase 0 — Toolchain Scout:** Scans the target environment; detects framework, database, and
-  package manager; installs missing tools; writes a locked `TOOLCHAIN.md` manifest.
-- **Phase 1A — PRD Generator:** Converts a raw product idea into a structured Product Requirements
-  Document.
-- **Phase 1B — Architecture Engine:** Derives tables, routes, components, auth flows, and agents
-  from the PRD.
-- **Phase 2 — Governance Generator + Queue:** Writes governance docs and a dependency-ordered
-  `queue.yaml` of atomic build prompts.
-- **Phase 3 — Build Executor:** Executes prompts against the Claude API sequentially, with
-  git snapshots before every prompt.
-- **Phase 4 — Sentinel:** Runs after every Phase 3 prompt; mandatory checks are `typescript`,
-  `eslint`, `build`, `file_integrity`, `schema_drift`, `dependencies`.
-- **Phase 5 — Recursive Learner:** Indexes prompt scores, fix patterns, and governance rules into
-  the local SQLite learning database after every build.
-- **RETROFIT:** Scans, diagnoses, reconciles, and re-queues any existing codebase — the core
-  recovery mode for abandoned or broken projects.
+Key properties derived from `forge_config.json` and `src/cli/index.ts`:
+
+- Model: `claude-sonnet-4-6` · max retries per prompt: `3` · max prompts per run: `45`
+- Autonomous Recovery Mode available on every build (Contract 14)
+- Build Memory backed by Supabase (stateless-mode fallback when unreachable)
+- Learning database at `~/.forge/forge_memory.db` (SQLite, cross-machine sync supported)
 
 ---
 
 ## Quick Start
 
-Build from source first:
+Install dependencies and compile (from `package.json` scripts):
 
 ```bash
 pnpm install
-pnpm build            # tsc → dist/
+pnpm run build          # tsc → dist/
 ```
 
-Run the CLI:
+Run any command:
 
 ```bash
-# via npm script (from package.json)
-pnpm forge -- build ./my-project --idea "a multi-tenant SaaS for X"
+node dist/cli/index.js <command> [options]
+# or via the package.json alias:
+pnpm forge <command> [options]
+```
 
-# or directly after build
-node dist/cli/index.js build ./my-project --idea "a multi-tenant SaaS for X"
+Run the test suite:
+
+```bash
+pnpm test               # learning-database, learning-fingerprint, learning-queries, learning-sync
+pnpm run test:memory    # memory integration tests
+```
+
+Type-check without emitting:
+
+```bash
+pnpm run typecheck      # tsc --noEmit
 ```
 
 ---
 
 ## CLI Commands
 
-All commands print the FORGE banner and config warnings before executing.
+Sourced from `src/cli/index.ts` (commander wiring, lines 1103–1302).
 
-| Command | Description |
-|---------|-------------|
-| `forge build <path>` | Full autonomous build pipeline: Phase 0 → 1 → 2 → 3 → 4 → 5 |
-| `forge scout <path>` | Phase 0 only — scan + lock the environment |
-| `forge design <path>` | Phase 0 + 1 only — PRD + Architecture; stops at Gate 2 |
-| `forge resume <build-id>` | Resume a halted build from its last checkpoint |
-| `forge replay <build-id> --from <n>` | Re-execute a build from prompt index `n` (F12) |
-| `forge status [build-id]` | Build status from Build Memory (defaults to most recent) |
-| `forge history` | List past builds; filter with `--project <name>` |
-| `forge patterns` | Known error patterns and their auto-resolve success rates |
-| `forge agents` | Self-created agents and their status |
-| `forge resurrect <path>` | Autopsy a failed project and rebuild from the report (skips Phase 1A/1B) |
-| `forge estimate <path>` | Cost/time estimate without building (F17) |
-| `forge repair <path>` | Diagnose → cluster → queue → execute → verify TypeScript errors |
-| `forge retrofit <path>` | SCAN → DIAGNOSE → RECONCILE → QUEUE an existing codebase |
-| `forge sentinel <path>` | Run the Sentinel quality pipeline manually |
-| `forge schedule list` | Scheduler dashboard: all tasks with next/last run + result |
-| `forge schedule add <name>` | Register a recurring cron task in Build Memory |
-| `forge schedule remove <name>` | Remove a scheduled task |
-| `forge schedule trigger <name>` | Run a scheduled task once now |
-| `forge learn init` | Initialize the learning database at `~/.forge/forge_memory.db` |
-| `forge learn status` | Learning DB stats: prompts scored, fix patterns, active rules |
-| `forge config` | Show the resolved FORGE configuration (secret-safe) |
+| Command | Arguments | Description |
+|---|---|---|
+| `build` | `<path>` | Full autonomous build pipeline: Phase 0 → 1 → 2 → 3 → 4 → 5 |
+| `scout` | `<path>` | Phase 0 only — Toolchain Scout: scan + lock the environment |
+| `design` | `<path>` | Phase 0 + 1 only — PRD + Architecture. Stops at the Gate 2 review. |
+| `resume` | `<build-id>` | Resume a halted build from its last checkpoint |
+| `replay` | `<build-id>` | Replay a build from a checkpoint (F12) |
+| `status` | `[build-id]` | Show build status from Build Memory (defaults to most recent build) |
+| `history` | — | List past builds (optionally filter with `--project <name>`) |
+| `patterns` | — | Show known error patterns and success rates |
+| `agents` | — | List self-created agents and their status |
+| `resurrect` | `<path>` | Autopsy a failed project and rebuild it straight from the report (skips Phase 1A/1B) |
+| `estimate` | `<path>` | Cost/time estimate without building (F17) |
+| `repair` | `<path>` | Repair a broken TypeScript repo: diagnose → cluster → queue → execute → verify |
+| `sentinel` | `<project-path>` | Run FORGE Sentinel quality pipeline against a project |
+| `retrofit` | `<project-path>` | Scan, diagnose, reconcile governance, and generate a continuation queue |
+| `learn` | `<subcommand>` | Manage the FORGE learning engine (SQLite knowledge base) |
+| `schedule` | `<subcommand>` | Manage cron-scheduled recurring tasks (list / add / remove / trigger) |
+| `config` | — | Show the resolved FORGE configuration (secret-safe) |
 
-### `forge build` flags
+### `build` flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--idea <text>` | — | Raw product idea — generates the PRD |
-| `--prd <path>` | — | Use an existing PRD file instead |
-| `--autonomous-recovery` | false | Enable Autonomous Recovery Mode (Contract 14) |
-| `--dry-run` | false | Simulate the build — plan + cost only, no execution |
-| `--skip-design` | false | Skip Phase 1A+1B and use existing governance docs |
+```
+--idea <text>           Raw product idea (generates the PRD)
+--prd <path>            Use an existing PRD file instead of generating one
+--autonomous-recovery   Enable Autonomous Recovery Mode (Contract 14)
+--dry-run               Simulate the build: plan + cost, no execution
+--skip-design           Skip Phase 1A+1B and use existing governance docs
+```
 
 ---
 
 ## RETROFIT
 
-`forge retrofit <project-path>` runs the four-phase recovery pipeline against an existing codebase:
+Sourced from `src/cli/index.ts` retrofit command wiring and `src/retrofit/` directory listing.
 
-**SCAN (14 operations):** directory tree, dependency graph, broken imports, dead files, route
-inventory, env-var audit, database schema extraction, git history analysis, package audit,
-governance inventory, TypeScript compilation check, existing test execution, dynamic route
-testing (GET-only), Vercel deployment analysis.
+RETROFIT scans an existing codebase, diagnoses structural issues, reconciles governance docs, and
+generates a FORGE-compatible continuation queue so an abandoned build can resume autonomously.
 
-**DIAGNOSE (3 reports):** Architecture Health Report (with adversarial Claude review),
-Governance Reconciliation Report, Enterprise Patterns Gap Report.
+```bash
+node dist/cli/index.js retrofit <project-path> [options]
+```
 
-**RECONCILE:** Presents BUILD / DEFER / ABANDON decisions; persists every choice to SQLite.
+### RETROFIT Options
 
-**QUEUE:** Emits a tier-ordered `queue.yaml` compatible with `forge build`.
+```
+--scope <scope>         Analysis scope: A (codebase only), B (+ database), C (+ Vercel)  [default: C]
+--skip-dynamic          Skip dynamic route testing
+--resume                Resume from a prior SCAN checkpoint
+--non-interactive       Auto-approve all RECONCILE decisions
+--queue-output <path>   Override the QUEUE output directory
+--api-key <key>         Anthropic API key for adversarial review
+```
 
-### Retrofit source files (`src/retrofit/`)
+### RETROFIT Source Files (`src/retrofit/`)
 
 | File | Purpose |
-|------|---------|
-| `preflight.ts` | 8 pre-flight environment checks |
-| `scan-ops-1-4.ts` | Directory tree, dependency graph, broken imports, dead files |
-| `scan-ops-5-8.ts` | Route inventory, env audit, schema extraction, git history |
-| `scan-ops-9-14.ts` | Package audit, governance inventory, TSC check, tests, dynamic routes, Vercel |
-| `scan.ts` | Orchestrates all 14 scan ops; writes `.forge/scan_report.json` |
-| `diagnose.ts` | Produces all 3 diagnostic reports |
-| `reconcile.ts` | Interactive RECONCILE engine + `generateRetrofitQueue` |
-| `pipeline.ts` | End-to-end SCAN → DIAGNOSE → RECONCILE → QUEUE orchestrator |
-| `types.ts` | `ScanReport` and all sub-types |
-| `index.ts` | Public exports + `RETROFIT_VERSION = '2.0.0'` |
+|---|---|
+| `preflight.ts` | 8 pre-flight environment checks before any SCAN |
+| `types.ts` | All ScanReport, DiagnoseReport, ReconcileDecision type definitions |
+| `scan-ops-1-4.ts` | SCAN ops 1–4: directory tree, dependency graph, broken imports, dead files |
+| `scan-ops-5-8.ts` | SCAN ops 5–8: route inventory, env audit, schema extraction, git history |
+| `scan-ops-9-14.ts` | SCAN ops 9–14: package audit, governance inventory, tsc check, tests, dynamic routes, Vercel |
+| `scan.ts` | SCAN orchestrator: wires all 14 ops, writes `.forge/scan_report.json` |
+| `diagnose.ts` | DIAGNOSE: Architecture Health Report + Claude API adversarial review |
+| `reconcile.ts` | RECONCILE: hybrid interactive model, SQLite decision persistence |
+| `pipeline.ts` | Top-level SCAN → DIAGNOSE → RECONCILE → QUEUE pipeline |
+| `index.ts` | `runRetrofitPipeline()` — entry point called by the CLI |
 
-### Retrofit options
+### RETROFIT Pipeline Stages
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--scope <A\|B\|C>` | `C` | A = codebase only, B = + database, C = + Vercel |
-| `--skip-dynamic` | false | Skip dynamic route testing |
-| `--resume` | false | Resume from a prior SCAN checkpoint |
-| `--non-interactive` | false | Auto-approve all RECONCILE decisions |
-| `--queue-output <path>` | — | Override the QUEUE output directory |
-| `--api-key <key>` | — | Anthropic API key for adversarial review |
+```
+SCAN (14 ops)  →  DIAGNOSE  →  RECONCILE  →  QUEUE
+```
+
+1. **SCAN** — reads the project without modifying any file. Runs 14 analysis operations covering code
+   structure, dependencies, schemas, environment variables, git history, test coverage, and Vercel
+   deployment state.
+2. **DIAGNOSE** — produces three reports: Architecture Health, Governance Reconciliation, and
+   Enterprise Patterns Gap. Adversarial Claude review runs on every Architecture Health Report.
+3. **RECONCILE** — presents BUILD / DEFER / ABANDON choices for every unbuilt item. Persists all
+   decisions to the learning database before applying any change.
+4. **QUEUE** — emits a tier-ordered YAML prompt queue compatible with `forge build --skip-design`.
 
 ---
 
 ## Architecture
 
-The build pipeline is split into discrete phase modules under `src/phases/`:
+Phase modules sourced from `src/phases/` directory listing.
 
-| File | Phase |
-|------|-------|
-| `phase0-scout.ts` | Toolchain Scout — environment pre-flight + TOOLCHAIN.md |
-| `phase1a-prd.ts` | PRD Generator — idea → structured PRD |
-| `phase1b-architect.ts` | Architecture Engine — PRD → tables, routes, components |
-| `phase1c-ingest.ts` | Ingest — existing project context injection |
-| `phase2-governance.ts` | Governance Generator — writes governance docs |
-| `phase3-executor.ts` | Build Executor — executes queue.yaml prompt-by-prompt |
-| `phase4-sentinel.ts` | Sentinel — post-prompt health gate |
-| `phase5-learner.ts` | Recursive Learner — indexes outcomes into SQLite |
+| File | Phase | Description |
+|---|---|---|
+| `phase0-scout.ts` | Phase 0 | Toolchain Scout — environment gate, stack fingerprint, TOOLCHAIN.md |
+| `phase1a-prd.ts` | Phase 1A | PRD Generator — feature/table/agent scope from raw idea |
+| `phase1b-architect.ts` | Phase 1B | Architecture Engine — database schema, API routes, frontend pages |
+| `phase1c-ingest.ts` | Phase 1C | Governance ingestion — existing docs absorbed into the design context |
+| `phase2-governance.ts` | Phase 2 | Governance Generator — writes BLUEPRINT, SCHEMA, queue.yaml |
+| `phase3-executor.ts` | Phase 3 | Build Executor — runs prompts against Claude, triggers Phase 4 per-prompt |
+| `phase4-sentinel.ts` | Phase 4 | Sentinel — 25-check quality gate; Autonomous Recovery on eligible failures |
+| `phase5-learner.ts` | Phase 5 | Recursive Learner — scores prompts, updates fix patterns, proposes evolutions |
 
-Additional engine modules under `src/engine/`:
-
-- `claude-runner.ts` — Claude API client (injectable for tests)
-- `git-manager.ts` — Git snapshot, checkpoint tags, diff extraction
-- `queue-generator.ts` — Topological sort + YAML emission
-- `prompt-assembler.ts` — Injects governance context into prompts
-- `governance-gate.ts` — Six-Laws verifier
-- `failure-predictor.ts` — Predicts which prompts will need retries
-- `hook-manager.ts` — Lifecycle hook execution (PreToolUse / PostToolUse)
-- `model-router.ts` / `provider-router.ts` — Multi-model routing
+Full pipeline: `Phase 0 → 1A → 1B → 2 → [3 + 4 per-prompt] → 5`
 
 ---
 
 ## Learning Engine
 
-The learning engine (`src/learning/`) stores prompt outcomes, error fingerprints, fix patterns,
-and governance rules in a local SQLite database at `~/.forge/forge_memory.db`.
+Source files sourced from `src/learning/` directory listing.
 
 | File | Purpose |
-|------|---------|
-| `database.ts` | Schema init (14 tables), connection management, machine identity |
-| `queries.ts` | Read/write query functions for all 14 tables |
-| `loops.ts` | 5 learning loops (prompt scoring, fix indexing, decision weighting, …) |
-| `hooks-enhanced.ts` | 24 default lifecycle hooks; hook execution engine |
-| `sync.ts` | Cross-machine sync (append-only pull/push to a master copy) |
-| `session.ts` | Session serialization, fingerprinting, crash recovery, handoff docs |
-| `session-lifecycle.ts` | SessionStart / SessionEnd orchestration |
-| `handoff-generator.ts` | Generates `SESSION_HANDOFF.md` at run end |
-| `integration.ts` | Wires the learning engine into the Phase 3 executor |
-| `fingerprint.ts` | Error fingerprinting — normalizes messages for dedup |
-| `precompact.ts` | PreCompact hook — saves state before Claude context compaction |
+|---|---|
+| `types.ts` | All Learning Engine type definitions, `VALID_TABLES` constant |
+| `database.ts` | SQLite init, 14 tables, connection management, machine identity |
+| `queries.ts` | 15 read/write query functions (governance rules, fix patterns, prompt scores) |
+| `loops.ts` | 5 learning loops (prompt scoring, fix indexing, decision weighting, instinct extraction, self-evolution) |
+| `hooks-enhanced.ts` | 24 default hooks, execution engine, hook priority ordering |
+| `fingerprint.ts` | Error fingerprinting — produces stable hashes across different files |
+| `precompact.ts` | PreCompact hook — saves critical context to SQLite before context compaction |
+| `session.ts` | Session orchestration — state serialization, fingerprinting, resumption |
+| `session-lifecycle.ts` | SessionStart / SessionEnd lifecycle coordination |
+| `handoff-generator.ts` | Generates SESSION_HANDOFF.md between runs |
+| `sync.ts` | Cross-machine sync — pull/push between local DB and master copy |
+| `integration.ts` | Executor wiring — integrates the learning engine into the build pipeline |
 
-Initialize with:
+### `forge learn` Subcommands
 
-```bash
-forge learn init
-forge learn status
-```
+Sourced from `src/cli/commands/learning.ts`:
+
+| Subcommand | Description |
+|---|---|
+| `learn init` | Initialize the learning database at `~/.forge/forge_memory.db` |
+| `learn status` | Show DB stats: prompts scored, fix patterns, governance rules active, per-table row counts |
+| `learn patterns` | List top fix patterns sorted by success rate (with `--limit <n>` option) |
+| `learn sync` | Cross-machine sync (bidirectional by default; `--pull` / `--push` to select direction) |
 
 ---
 
 ## Sentinel Quality Pipeline
 
-Phase 4 Sentinel (`src/phases/phase4-sentinel.ts`) runs after every Phase 3 prompt.
-The mandatory Contract-13 checks always run in this order:
+Check names sourced from `SentinelCheckName` type in `src/phases/phase4-sentinel.ts` (lines 126–151).
 
-1. `typescript` — `pnpm tsc --noEmit` (zero errors required)
-2. `eslint` — ESLint with `next/core-web-vitals` config
-3. `build` — `pnpm run build` (warnings OK; errors FAIL)
-4. `file_integrity` — Immutable governance docs must not change; no unexpected deletions
-5. `schema_drift` — Schema vs SCHEMA_REGISTRY.md (only when schema prompts have run)
-6. `dependencies` — New packages not in TOOLCHAIN.md baseline FAIL
+Sentinel runs after **every** Phase 3 prompt. The first five checks are the mandatory Contract-13
+suite executed in order; remaining checks are conditional or opt-in.
 
-Additional opt-in checks (triggered by configuration or file type):
+| Check | Ring | When |
+|---|---|---|
+| `typescript` | Ring 1 | Every prompt — `pnpm tsc --noEmit`, zero errors required |
+| `eslint` | Ring 1 | Every prompt — lint gate |
+| `build` | Ring 1 | Every prompt — `pnpm run build`, warnings ok, errors fail |
+| `file_integrity` | Ring 1 | Every prompt — immutable governance docs unchanged, no unexpected deletions |
+| `schema_drift` | Ring 1 | Every prompt (when schema prompts ran) — additions ok, modifications/deletions fail |
+| `dependencies` | Ring 1 | Every prompt — no new dep outside the locked TOOLCHAIN.md manifest |
+| `migration_safety` | Ring 1 | When migration files changed |
+| `security_scan` | Ring 2 | Every 10th prompt |
+| `dead_code` | Ring 2 | Every 10th prompt |
+| `six_laws` | Ring 2 | Every 10th prompt |
+| `agent_shield` | Ring 2 | Every 10th prompt |
+| `live_schema_drift` | Ring 2 | Every 10th prompt |
+| `architecture` | Ring 2 | Every 10th prompt |
+| `consensus_validation` | Ring 2 | Every 10th prompt |
+| `playwright` | Ring 3 | End of run |
+| `vitest` | Ring 3 | End of run |
+| `semgrep` | Ring 3 | End of run |
+| `knip` | Ring 3 | End of run |
+| `trivy` | Ring 3 | End of run |
+| `gitleaks` | Ring 3 | End of run |
+| `lighthouse` | Ring 3 | End of run |
+| `visual_regression` | Opt-in | When UI files changed and configured |
+| `live_preview` | Opt-in | When UI files changed and configured |
+| `accessibility` | Opt-in | When UI files changed and configured |
+| `seo` | Opt-in | When UI files changed and configured |
 
-`security_scan`, `visual_regression`, `live_preview`, `accessibility`, `seo`,
-`architecture`, `consensus_validation`, `agent_shield`, `live_schema_drift`, `dead_code`,
-`six_laws`, `playwright`, `vitest`, `semgrep`, `knip`, `trivy`, `gitleaks`, `lighthouse`
-
-Ring trigger schedule (from `forge_config.json`):
-
-- **Ring 1** — `typescript`, `eslint`, `build`, `file_integrity` — every prompt
-- **Ring 2** — extended checks — every 10th prompt
-- **Ring 3** — full suite including security + accessibility — end of run
+Autonomous Recovery (Contract 14): on a Sentinel failure, if `autonomousRecoveryMode` is enabled and
+the error matches a `fix_patterns` row with `success_rate > 0.90`, FORGE auto-applies the fix and
+re-runs the prompt (max 2 attempts per prompt before escalating to a human).
 
 ---
 
 ## Configuration
 
-`forge_config.json` at the project root (actual content):
+From `forge_config.json` at the project root:
 
 ```json
 {
@@ -261,11 +278,14 @@ Ring trigger schedule (from `forge_config.json`):
 }
 ```
 
-Environment variables (set in `.env`):
+Environment variables (read at startup by `src/cli/config.ts`):
 
-- `FORGE_SUPABASE_URL` + `FORGE_SUPABASE_SERVICE_KEY` — enable Build Memory (Supabase)
-- `ANTHROPIC_API_KEY` — required for all build / design / retrofit / sentinel commands
-- `FORGE_MACHINE_ID` — per-machine identity for multi-machine coordination
+```
+FORGE_SUPABASE_URL          Enable Build Memory (history, patterns, agents)
+FORGE_SUPABASE_SERVICE_KEY  Required alongside FORGE_SUPABASE_URL
+ANTHROPIC_API_KEY           Required for all build/design/retrofit commands
+FORGE_MACHINE_ID            Optional machine identity override (defaults to generated ID)
+```
 
 ---
 
@@ -273,15 +293,14 @@ Environment variables (set in `.env`):
 
 Scripts from `package.json`:
 
-| Script | Command |
-|--------|---------|
-| `pnpm build` | `tsc` — compile TypeScript to `dist/` |
-| `pnpm typecheck` | `tsc --noEmit` — type-check only |
-| `pnpm forge` | `node dist/cli/index.js` — run the built CLI |
-| `pnpm test` | Run learning engine unit tests via Node test runner |
-| `pnpm test:memory` | Run Build Memory integration tests |
+```bash
+pnpm run build          # tsc — compile src/ → dist/
+pnpm run typecheck      # tsc --noEmit — type-check without emitting
+pnpm forge <cmd>        # node dist/cli/index.js <cmd>
+pnpm test               # node tests: learning-database, fingerprint, queries, sync
+pnpm run test:memory    # node tests: memory integration
+```
 
-Key runtime dependencies: `commander`, `chalk`, `ora`, `better-sqlite3`, `js-yaml`, `zod`,
-`playwright`, `pino`, `crawlee`, `@supabase/supabase-js`.
+Runtime requirement (from `package.json` `engines` field): **Node.js >= 20**.
 
-Current build progress: [`STATE_OF_THE_BUILD.md`](./STATE_OF_THE_BUILD.md).
+Package manager: **pnpm** (never npm or yarn).

@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-011** — `src/cli/config.ts` verified COMPLETE by full file inspection. All four required exports confirmed present and matching spec exactly: `ForgeConfig` interface, `DEFAULT_FORGE_CONFIG`, `mergeWithDefaults`, `saveConfig`. `forge_config.json` confirmed EXISTS at project root. No code changes required. Exec gate blocked live `pnpm tsc --noEmit`; 0 errors by inspection. Governance updated: STATE_OF_THE_BUILD.md + SESSION_STATE.md.
+**r4-012** — `README.md` COMPLETE. 306-line README written from actual source reads: `package.json`, `forge_config.json`, `src/cli/index.ts` (commander wiring lines 1103–1302), `src/phases/phase4-sentinel.ts` (SentinelCheckName type lines 126–151), `src/cli/commands/learning.ts`, plus directory listings for `src/phases/`, `src/learning/`, `src/retrofit/`. Verification: 306 lines ≥ 80 ✓, "retrofit" appears 5 times ≥ 3 ✓. Exec gate blocked live CLI help commands; all content sourced from file reads only. Zero fabrication.
 
 ---
 
@@ -81,7 +81,7 @@
 | src/cli/index.ts | Wired retrofit command with spinner/error pattern |
 | src/cli/config.ts | Added ForgeConfig, DEFAULT_FORGE_CONFIG, mergeWithDefaults, saveConfig |
 | forge_config.json | Created at project root |
-| README.md | Full replacement (287 lines) |
+| README.md | Full replacement (306 lines) — r4-012 |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 
 ---
