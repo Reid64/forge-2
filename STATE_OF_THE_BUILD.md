@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-001 COMPLETE
-**Total Prompts Executed:** 51+ (r1-001…r4-013 complete; r5-001 complete)
+**Current Run:** Run 5 — r5-002 COMPLETE
+**Total Prompts Executed:** 52+ (r1-001…r4-013 complete; r5-001, r5-002 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -245,6 +245,10 @@ Queue file: `C:\Users\manag\Documents\FORGE\projects\forge-2\forge2-run5-2026062
 
 Database schema audit + types.ts hardening. Verified `database.ts` already contained all 14 tables including `hook_execution_log` (lines 270–284) and `compact_snapshots` (lines 286–294) — no changes to database.ts needed. Added three missing TypeScript interfaces to `src/learning/types.ts`: `HookExecutionLog`, `CompactSnapshot`, `DecisionWeight`. TSC: exec gate blocked; 0 errors by inspection.
 
+### r5-002 — COMPLETE (2026-06-24)
+
+Created `.forge/hooks.json` with the complete 24-hook default configuration. `.forge/` directory already existed. File written to `C:\Users\manag\Documents\forge-2\.forge\hooks.json`. Verified: `Test-Path` returns True; `Measure-Object` count = 24. Hooks cover all lifecycle events: SessionStart (3), PreToolUse (3), PostToolUse (5), PreCompact (1), PreCommit (2), PreDeploy (2), SessionEnd (6), plus adversary-review, six-laws-check hooks. TSC: exec gate blocked; 0 errors by inspection (no TypeScript files modified).
+
 ---
 
 ## Completion Tracking
@@ -253,5 +257,5 @@ Database schema audit + types.ts hardening. Verified `database.ts` already conta
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 1/? prompts complete (r5-001 PASSED)
+- **Run 5:** IN PROGRESS — 2/? prompts complete (r5-001, r5-002 PASSED)
 - **Overall:** ~96% of planned scope complete

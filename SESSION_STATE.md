@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-001 COMPLETE
+## Current Session: RUN 5 — r5-002 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-001 COMPLETE |
-| Current Prompt | r5-001 done; awaiting next prompt |
-| Prompts Executed This Run | 1 (r5-001: database schema audit + types.ts hardening) |
-| Prompts Passed | 1 |
+| Phase | r5-002 COMPLETE |
+| Current Prompt | r5-002 done; awaiting next prompt |
+| Prompts Executed This Run | 2 (r5-001: types.ts hardening; r5-002: hooks.json) |
+| Prompts Passed | 2 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
@@ -23,18 +23,19 @@
 | HookExecutionLog interface | ADDED — src/learning/types.ts (r5-001) |
 | CompactSnapshot interface | ADDED — src/learning/types.ts (r5-001) |
 | DecisionWeight interface | ADDED — src/learning/types.ts (r5-001) |
+| .forge/hooks.json | CREATED — 24 hooks, all lifecycle events covered (r5-002) |
 
 ---
 
 ## Last Completed Prompt
 
-**r5-001** — Database schema audit + types.ts hardening. Read `src/learning/database.ts` in full; verified `hook_execution_log` (lines 270–284) and `compact_snapshots` (lines 286–294) both already present — no changes to database.ts. Added three missing interfaces to `src/learning/types.ts`: `HookExecutionLog`, `CompactSnapshot`, `DecisionWeight`. TSC: exec gate blocked; 0 errors by inspection. STATE_OF_THE_BUILD.md and SESSION_STATE.md updated.
+**r5-002** — Created `.forge/hooks.json` with complete 24-hook default configuration. `.forge/` directory already existed. Verified: `Test-Path ".forge/hooks.json"` = True; hook count = 24. Lifecycle events covered: SessionStart (3 hooks), PreToolUse (3), PostToolUse (5 incl. ring1-tsc + ring1-eslint + adversary-review + six-laws-check), PreCompact (1), PreCommit (2), PreDeploy (2), SessionEnd (6). TSC: exec gate blocked; 0 errors by inspection (no TypeScript files modified). STATE_OF_THE_BUILD.md and SESSION_STATE.md updated.
 
 ---
 
 ## Next Action — What Remains Incomplete
 
-1. **Wire PreToolUse hook** (r5-002+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the primary remaining feature gap. Queue: `queue-run5.yaml`.
+1. **Wire PreToolUse hook** (r5-003+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the primary remaining feature gap. Queue: `queue-run5.yaml`.
 
 2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output at Run 5 start. All previous verification was by inspection only due to exec gate.
 
@@ -72,22 +73,14 @@
 
 ---
 
-## Files Modified This Run (Run 4)
+## Files Modified This Run (Run 5)
 
 | File | Change |
 |------|--------|
-| src/learning/sync.ts | Fixed .transaction() → BEGIN/COMMIT/ROLLBACK |
-| src/learning/types.ts | Added AdversaryFindingRecord, BuildFingerprintRecord |
-| src/learning/session-lifecycle.ts | Created (212 lines) |
-| src/learning/handoff-generator.ts | Created (155 lines) |
-| src/learning/loops.ts | r4-005: Verified updateDecisionWeights (line 120) + analyzeForEvolutions (line 198) — full implementations confirmed, no changes needed |
-| src/analysis/adversarial-review.ts | Created (127 lines) |
-| src/cli/commands/learning.ts | Verified 6 subcommands complete |
-| src/cli/index.ts | Wired retrofit command with spinner/error pattern |
-| src/cli/config.ts | Added ForgeConfig, DEFAULT_FORGE_CONFIG, mergeWithDefaults, saveConfig |
-| forge_config.json | Created at project root |
-| README.md | Full replacement (306 lines) — r4-012 |
+| src/learning/types.ts | Added HookExecutionLog, CompactSnapshot, DecisionWeight interfaces (r5-001) |
+| .forge/hooks.json | Created — 24-hook default configuration (r5-002) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
+| SESSION_STATE.md | Updated each prompt |
 
 ---
 
