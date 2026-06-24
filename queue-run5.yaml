@@ -1,0 +1,47 @@
+project: forge-2
+governance:
+  - BLUEPRINT.md
+  - STATE_OF_THE_BUILD.md
+  - SESSION_STATE.md
+  - SCHEMA_REGISTRY.md
+  - BEHAVIORAL_CONTRACTS.md
+  - AGENTS.md
+settings:
+  build_model: claude-sonnet-4-6
+  max_retries: 3
+prompts:
+  - id: r5-001
+    name: "Wire PreToolUse hook to inject fix patterns into prompt assembly"
+    prompt: |
+      You are operating autonomously on FORGE 2.0 at C:\Users\manag\Documents\forge-2.
+      Read all context cold from the filesystem. Write all files directly to correct paths.
+      Do NOT install npm packages. Do NOT produce stubs.
+
+      TASK: Read src/learning/hooks-enhanced.ts and src/engine/prompt-assembler.ts in full.
+      Wire the PreToolUse hook so it queries fix_patterns and governance_rules from forge_memory.db
+      and injects them into the assembled prompt before Claude Code sees it.
+
+      The injection must happen in assemblePrompt() in prompt-assembler.ts.
+      Before returning the assembled prompt string, add:
+
+      1. Query active governance rules matching the task type:
+         SELECT rule_text FROM governance_rules WHERE active = 1 AND (scope = 'GLOBAL' OR task_type = ?) ORDER BY enforcement_count DESC LIMIT 10
+
+      2. Query fix patterns with success_rate > 0.7 and occurrence_count >= 2:
+         SELECT fix_description, fix_diff FROM fix_patterns WHERE success_rate > 0.7 AND occurrence_count >= 2 ORDER BY (success_rate * occurrence_count) DESC LIMIT 5
+
+      3. Prepend to the assembled prompt:
+         === FORGE LEARNING ENGINE CONTEXT ===
+         Active governance rules: [list each rule_text]
+         Known fix patterns for this task type: [list each fix_description]
+         === END LEARNING CONTEXT ===
+
+      All DB reads are non-fatal -- if DB unavailable, skip injection and continue.
+
+      INCREMENTAL TEST:
+      pnpm tsc --noEmit -- 0 errors.
+      pnpm build -- succeeds.
+
+      GOVERNANCE:
+      Update STATE_OF_THE_BUILD.md: PreToolUse hook wired into prompt assembly.
+      Update SESSION_STATE.md: r5-001 complete.
