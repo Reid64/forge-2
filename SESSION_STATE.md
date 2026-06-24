@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-004 COMPLETE
+## Current Session: RUN 5 — r5-005 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-004 COMPLETE |
-| Current Prompt | r5-004 done; awaiting next prompt |
-| Prompts Executed This Run | 4 (r5-001: types.ts hardening; r5-002: hooks.json; r5-003: handlePreToolUse; r5-004: handlePostToolUse) |
-| Prompts Passed | 4 |
+| Phase | r5-005 COMPLETE |
+| Current Prompt | r5-005 done; awaiting next prompt |
+| Prompts Executed This Run | 5 (r5-001…r5-005) |
+| Prompts Passed | 5 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
@@ -26,18 +26,19 @@
 | .forge/hooks.json | CREATED — 24 hooks, all lifecycle events covered (r5-002) |
 | handlePreToolUse | ADDED — src/learning/hooks-enhanced.ts; exported from integration.ts (r5-003) |
 | handlePostToolUse | ADDED — src/learning/hooks-enhanced.ts; exported from integration.ts (r5-004) |
+| handlePreCompact | REPLACED — precompact.ts full rewrite; 4 exports; integration.ts re-exports added (r5-005) |
 
 ---
 
 ## Last Completed Prompt
 
-**r5-004** — Added `handlePostToolUse` to `src/learning/hooks-enhanced.ts`. Function writes prompt score to `prompt_scores` (templateHash = SHA-256 of `taskType:promptId`), upserts TypeScript error fingerprints into `fix_patterns` (parsed from tsc output via regex matchAll), logs modified files to `hook_execution_log`. All writes are non-fatal (outer try/catch). Dropped unused `computeFingerprint` dynamic import to satisfy `noUnusedLocals: true`. Re-exported from `integration.ts` alongside `handlePreToolUse`. TSC: exec gate blocked; 0 errors by inspection.
+**r5-005** — `src/learning/precompact.ts` replaced in full. Old API (`invokePreCompactSave`, `restoreCompactedContext`, `shouldPreCompact`) removed — grep confirmed zero external callers. New API: `PreCompactState` interface, `handlePreCompact` (async, writes to `compact_snapshots` via `getConnection`, uses `existsSync` guard, returns `{saved,snapshotId}`), `loadLatestCompactSnapshot` (async, reads latest row by `build_id`), `buildPreCompactContextBlock` (sync, formats restored-context block). `integration.ts` updated to re-export all 3 functions + `PreCompactState` type from `./precompact.js`. 4 exports verified (≥4 required). TSC: exec gate blocked; 0 errors by inspection.
 
 ---
 
 ## Next Action — What Remains Incomplete
 
-1. **Wire handlePreToolUse into prompt assembler** (r5-005+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` still does not call `handlePreToolUse` and inject the returned `contextInjection` into assembled prompts. Both hook functions are now implemented and exported; the assembler needs to consume them.
+1. **Wire handlePreToolUse into prompt assembler** (r5-006+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` still does not call `handlePreToolUse` and inject the returned `contextInjection` into assembled prompts. Both hook functions are now implemented and exported; the assembler needs to consume them.
 
 2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output at Run 5 start. All previous verification was by inspection only due to exec gate.
 
@@ -82,7 +83,8 @@
 | src/learning/types.ts | Added HookExecutionLog, CompactSnapshot, DecisionWeight interfaces (r5-001) |
 | .forge/hooks.json | Created — 24-hook default configuration (r5-002) |
 | src/learning/hooks-enhanced.ts | Added handlePreToolUse function + 3 imports (r5-003); handlePostToolUse function (r5-004) |
-| src/learning/integration.ts | Added handlePreToolUse re-export (r5-003); handlePostToolUse re-export (r5-004) |
+| src/learning/integration.ts | Added handlePreToolUse re-export (r5-003); handlePostToolUse re-export (r5-004); handlePreCompact/loadLatestCompactSnapshot/buildPreCompactContextBlock/PreCompactState re-exports (r5-005) |
+| src/learning/precompact.ts | Full replacement — new API: PreCompactState interface + handlePreCompact + loadLatestCompactSnapshot + buildPreCompactContextBlock (r5-005) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
 

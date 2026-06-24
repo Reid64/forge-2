@@ -1,124 +1,112 @@
-// FORGE 2.0 Learning Engine — PreCompact Context Preservation
-import { execSync } from 'node:child_process';
+// FORGE 2.0 - PreCompact Hook: Context State Preservation
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { getConnection } from './database.js';
-import { saveToForgeMemory } from './queries.js';
 
-export function shouldPreCompact(promptIndex: number, totalPrompts: number): boolean {
-  if (totalPrompts > 0 && promptIndex / totalPrompts >= 0.8) return true;
-  if (promptIndex > 30 && promptIndex % 10 === 0) return true;
-  return false;
-}
-
-interface PreCompactContext {
+export interface PreCompactState {
   buildId: string;
   promptIndex: number;
   phase: string;
-  projectPath: string;
-  techStackTags: string[];
-  acceptanceCriteria: string;
-  queueStatus: { total: number; completed: number; pending: number };
+  activeErrors: string[];
+  activeGovernanceRules: string[];
+  queueStatus: { total: number; completed: number; remaining: number };
+  pendingGitChanges: string[];
+  currentAcceptanceCriteria: string[];
+  activeBlockers: string[];
 }
 
-interface ActiveError {
-  id: string;
-  error_message: string;
-  error_category: string;
-  occurrence_count: number;
-}
+export async function handlePreCompact(
+  state: PreCompactState,
+  dbPath?: string
+): Promise<{ saved: boolean; snapshotId: string | null }> {
+  const resolvedPath = dbPath ?? join(homedir(), '.forge', 'forge_memory.db');
 
-interface ActiveRule {
-  id: string;
-  rule_short_name: string;
-  rule_text: string;
-}
-
-interface SnapshotState extends PreCompactContext {
-  activeErrors: ActiveError[];
-  governanceRules: ActiveRule[];
-  gitStatus: string;
-}
-
-export function invokePreCompactSave(context: PreCompactContext, dbPath?: string): string {
-  const db = getConnection(dbPath);
-
-  const activeErrors = db
-    .prepare(
-      `SELECT id, error_message, error_category, occurrence_count
-       FROM fix_patterns
-       WHERE occurrence_count > 0 AND fix_diff IS NULL
-       ORDER BY occurrence_count DESC LIMIT 20`,
-    )
-    .all() as ActiveError[];
-
-  const governanceRules = db
-    .prepare(
-      `SELECT id, rule_short_name, rule_text
-       FROM governance_rules
-       WHERE active = 1 LIMIT 30`,
-    )
-    .all() as ActiveRule[];
-
-  let gitStatus = '';
-  try {
-    gitStatus = execSync('git status --porcelain', {
-      cwd: context.projectPath,
-      encoding: 'utf8',
-    }).trim();
-  } catch {
-    gitStatus = '(git status unavailable)';
+  if (!existsSync(resolvedPath)) {
+    return { saved: false, snapshotId: null };
   }
 
-  const state: SnapshotState = { ...context, activeErrors, governanceRules, gitStatus };
+  try {
+    const db = getConnection(resolvedPath);
+    const snapshotId = randomUUID();
 
-  return saveToForgeMemory(
-    'compact_snapshots',
-    {
-      build_id: context.buildId,
-      prompt_index: context.promptIndex,
-      state_json: JSON.stringify(state),
-    },
-    dbPath,
-  );
+    db.prepare(`
+      INSERT INTO compact_snapshots (id, build_id, prompt_index, state_json, machine_id, created_at)
+      VALUES (?, ?, ?, ?, 'unknown', datetime('now'))
+    `).run(
+      snapshotId,
+      state.buildId,
+      state.promptIndex,
+      JSON.stringify(state)
+    );
+
+    console.log(`[PRECOMPACT] Context snapshot saved: prompt ${state.promptIndex}, ${state.activeErrors.length} active errors, ${state.activeGovernanceRules.length} rules`);
+    return { saved: true, snapshotId };
+  } catch (e: unknown) {
+    console.warn(`[PRECOMPACT] Failed to save snapshot: ${String(e)}`);
+    return { saved: false, snapshotId: null };
+  }
 }
 
-export function restoreCompactedContext(buildId: string, dbPath?: string): string | null {
-  const db = getConnection(dbPath);
+export async function loadLatestCompactSnapshot(
+  buildId: string,
+  dbPath?: string
+): Promise<PreCompactState | null> {
+  const resolvedPath = dbPath ?? join(homedir(), '.forge', 'forge_memory.db');
+  if (!existsSync(resolvedPath)) return null;
 
-  const row = db
-    .prepare(
-      `SELECT state_json FROM compact_snapshots
-       WHERE build_id = ? ORDER BY prompt_index DESC LIMIT 1`,
-    )
-    .get(buildId) as { state_json: string } | undefined;
-
-  if (!row) return null;
-
-  let state: SnapshotState;
   try {
-    state = JSON.parse(row.state_json) as SnapshotState;
+    const db = getConnection(resolvedPath);
+    const row = db.prepare(`
+      SELECT state_json FROM compact_snapshots
+      WHERE build_id = ?
+      ORDER BY prompt_index DESC LIMIT 1
+    `).get(buildId) as { state_json: string } | undefined;
+
+    if (!row) return null;
+    return JSON.parse(row.state_json) as PreCompactState;
   } catch {
     return null;
   }
+}
 
-  const errorCount = state.activeErrors.length;
-  const errorDetails = state.activeErrors
-    .map((e) => `  [${e.error_category}] ${e.error_message} (x${e.occurrence_count})`)
-    .join('\n');
-
-  const ruleCount = state.governanceRules.length;
-  const ruleSummaries = state.governanceRules
-    .map((r) => `  - ${r.rule_short_name}: ${r.rule_text.substring(0, 80)}`)
-    .join('\n');
-
-  return [
-    '=== FORGE CONTEXT RECOVERY ===',
+export function buildPreCompactContextBlock(state: PreCompactState): string {
+  const lines: string[] = [
+    '=== FORGE CONTEXT RESTORED FROM COMPACTION ===',
+    `Build: ${state.buildId}`,
+    `Prompt: ${state.promptIndex}`,
     `Phase: ${state.phase}`,
-    `Prompt: ${state.promptIndex}/${state.queueStatus.total}`,
-    `Active errors: ${errorCount}`,
-    errorDetails,
-    `Governance rules: ${ruleCount}`,
-    ruleSummaries,
-    `Acceptance criteria: ${state.acceptanceCriteria}`,
-    '=== END RECOVERY ===',
-  ].join('\n');
+    '',
+  ];
+
+  if (state.activeErrors.length > 0) {
+    lines.push('ACTIVE UNRESOLVED ERRORS:');
+    for (const e of state.activeErrors) lines.push(`  - ${e}`);
+    lines.push('');
+  }
+
+  if (state.activeGovernanceRules.length > 0) {
+    lines.push('ACTIVE GOVERNANCE RULES:');
+    for (const r of state.activeGovernanceRules) lines.push(`  - ${r}`);
+    lines.push('');
+  }
+
+  if (state.currentAcceptanceCriteria.length > 0) {
+    lines.push('CURRENT ACCEPTANCE CRITERIA:');
+    for (const c of state.currentAcceptanceCriteria) lines.push(`  - ${c}`);
+    lines.push('');
+  }
+
+  if (state.activeBlockers.length > 0) {
+    lines.push('ACTIVE BLOCKERS:');
+    for (const b of state.activeBlockers) lines.push(`  - ${b}`);
+    lines.push('');
+  }
+
+  lines.push(`Queue: ${state.queueStatus.completed}/${state.queueStatus.total} complete, ${state.queueStatus.remaining} remaining`);
+  lines.push('=== END RESTORED CONTEXT ===');
+  lines.push('');
+
+  return lines.join('\n');
 }

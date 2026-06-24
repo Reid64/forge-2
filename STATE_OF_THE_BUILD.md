@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-004 COMPLETE
-**Total Prompts Executed:** 54+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004 complete)
+**Current Run:** Run 5 — r5-005 COMPLETE
+**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -119,7 +119,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | session.ts | 10,118 bytes | Session orchestration |
 | integration.ts | 9,118 bytes | Executor wiring; re-exports handlePreToolUse + handlePostToolUse |
 | fingerprint.ts | 4,230 bytes | Error fingerprinting |
-| precompact.ts | 3,363 bytes | PreCompact handler |
+| precompact.ts | ~3,600 bytes | PreCompact handler — handlePreCompact, loadLatestCompactSnapshot, buildPreCompactContextBlock (r5-005) |
 | session-lifecycle.ts | 8,299 bytes | Session lifecycle (212 lines) |
 | handoff-generator.ts | 5,032 bytes | Handoff document generator (155 lines) |
 
@@ -135,6 +135,11 @@ RETROFIT pipeline: 10 files in src/retrofit/
 
 ### Run 3 — COMPLETE (r3-001 … r3-015 + hotfixes)
 Adversarial review, session lifecycle, handoff generator, loops enhancement, sync hardening
+
+### Run 5 — IN PROGRESS (r5-001 … r5-005, 5/? prompts PASSED)
+Types hardening (r5-001), hooks.json creation (r5-002), handlePreToolUse (r5-003), handlePostToolUse (r5-004), precompact.ts full replacement with handlePreCompact/loadLatestCompactSnapshot/buildPreCompactContextBlock + PreCompactState interface; integration.ts re-exports added (r5-005). TSC: 0 errors by inspection (exec gate blocked live run).
+
+**r5-005:** `src/learning/precompact.ts` replaced in full. Old API (`invokePreCompactSave`, `restoreCompactedContext`, `shouldPreCompact`) removed — grep confirmed no external callers. New API: `PreCompactState` interface, `handlePreCompact` (async, writes to compact_snapshots via getConnection, returns `{saved,snapshotId}`), `loadLatestCompactSnapshot` (async, reads latest snapshot by build_id), `buildPreCompactContextBlock` (sync, formats context block string). All use `existsSync` guard on db path. 4 exports confirmed (≥4 required). `integration.ts` lines 238–241 now re-export all 3 functions + type from `./precompact.js`. TSC: exec gate blocked; 0 errors by inspection (no external callers of old API; new API follows same `getConnection` import pattern as prior implementation).
 
 ### Run 4 — COMPLETE (r4-001 … r4-013, 13/13 prompts PASSED)
 TypeScript error fixes (sync.ts .transaction() calls), types hardening (AdversaryFindingRecord, BuildFingerprintRecord), sync verification, adversarial review module (r4-004: 127 lines), session lifecycle (212 lines), handoff generator (155 lines), learning loops (updateDecisionWeights + analyzeForEvolutions), learning CLI (6 subcommands), CLI retrofit command (6 options), forge_config.json, README.md (306 lines), full verification pass and queue-run5.yaml handoff (r4-013)

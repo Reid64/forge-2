@@ -235,6 +235,8 @@ export async function onRunEnd(
   }
 }
 
+export { handlePreCompact, loadLatestCompactSnapshot, buildPreCompactContextBlock } from './precompact.js';
+export type { PreCompactState } from './precompact.js';
 export { handlePreToolUse, handlePostToolUse } from './hooks-enhanced.js';
 export { detectStaleLock, checkCrashRecovery } from './session-lifecycle.js';
 export { setForgeLock as setForgeLockV2, removeForgeLock as removeForgeLockV2 } from './session-lifecycle.js';
