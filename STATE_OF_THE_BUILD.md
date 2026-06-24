@@ -1,6 +1,6 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (re-audit after r6-001 snapshot restore)
+**Last Updated:** 2026-06-24 (r6-004 audit — precompact.ts verification complete)
 **Build Status:** IN_PROGRESS
 **Current Run:** RUN-6 (r6-001…r6-004 complete)
 **Total Prompts Executed:** 58+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-004 complete)
@@ -25,7 +25,7 @@
 | Session Lifecycle (`src/learning/session-lifecycle.ts`) | COMPLETE | File exists — 8260 bytes |
 | Handoff Generator (`src/learning/handoff-generator.ts`) | COMPLETE | File exists — 5032 bytes |
 | Session Hooks (`src/learning/session-hooks.ts`) | COMPLETE | File exists — 5881 bytes |
-| PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE | File exists — ~4700 bytes; enriched: queries fix_patterns + governance_rules from DB on save |
+| PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE | 149 lines; `handlePreCompact` queries fix_patterns + governance_rules from DB; `loadLatestCompactSnapshot` + `buildPreCompactContextBlock` fully implemented; all three re-exported from integration.ts:238 |
 | Hook Configuration (`.forge/hooks.json`) | COMPLETE | File exists; schema_version 1.0, project_name forge-2 |
 | Learning Loops (`src/learning/loops.ts`) | COMPLETE | File exists — 12900 bytes |
 | Cross-Machine Sync (`src/learning/sync.ts`) | COMPLETE | File exists — 10368 bytes |

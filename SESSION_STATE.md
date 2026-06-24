@@ -22,16 +22,16 @@
 
 ## Last Completed Prompt
 
-r6-001 (re-run) — Inject `handlePreToolUse` into `assemblePrompt` in `src/engine/prompt-assembler.ts` (CONFIRMED COMPLETE)
+r6-004 — Verify PreCompact hook completeness and export wiring (CONFIRMED COMPLETE)
 
-Re-audit confirmed implementation is already in place from prior execution. No code changes needed. Gates blocked (exec gate requires approval). State files updated from live codebase audit.
+Codebase audit confirmed implementation is already in place. No code changes needed. Gates blocked (exec gate requires approval). State files updated from live codebase audit.
 
-**What was built:**
-- **`handlePreCompact`** now queries the database at save time: (1) `fix_patterns` WHERE `occurrence_count > 0` ORDER BY `last_seen DESC` LIMIT 20 — formats as `[CATEGORY][xN] message (fingerprint)`; (2) `governance_rules` WHERE `active = 1` ORDER BY `enforcement_count DESC` — formats as `[SCOPE] short_name: rule_text`. DB-sourced values are merged with caller-supplied arrays using `Set` dedup. `'unknown'` machine_id replaced with real `getMachineId(resolvedPath)` call.
-- **`loadLatestCompactSnapshot`** — already fully implemented; queries `compact_snapshots` by `build_id`, returns latest by `prompt_index DESC`.
-- **`buildPreCompactContextBlock`** — already fully implemented; renders all 6 state sections into a human-readable block.
-- **`integration.ts` exports** — all three (`handlePreCompact`, `loadLatestCompactSnapshot`, `buildPreCompactContextBlock`) already re-exported at line 238 — verified, no change needed.
-- TypeScript: `Pick<FixPattern, ...>` and `Pick<GovernanceRule, ...>` used for query row types; added `getMachineId` to imports from `./database.js`; added `type { FixPattern, GovernanceRule }` from `./types.js`. Clean by inspection.
+**What was verified:**
+- **`handlePreCompact`** (`src/learning/precompact.ts:21`): queries `fix_patterns` (occurrence_count > 0, ORDER BY last_seen DESC LIMIT 20) and `governance_rules` (active = 1, ORDER BY enforcement_count DESC) from DB at save time; merges with caller-supplied arrays via `Set` dedup; saves enriched state (including `queueStatus` and `currentAcceptanceCriteria`) as JSON to `compact_snapshots` table; uses `getMachineId(resolvedPath)` for machine identity.
+- **`loadLatestCompactSnapshot`** (`src/learning/precompact.ts:88`): fully implemented; queries `compact_snapshots` by `build_id`, returns latest snapshot by `prompt_index DESC`.
+- **`buildPreCompactContextBlock`** (`src/learning/precompact.ts:110`): fully implemented; renders all state sections (errors, governance rules, acceptance criteria, blockers, queue status) into a human-readable context block.
+- **`integration.ts` line 238**: all three functions re-exported: `export { handlePreCompact, loadLatestCompactSnapshot, buildPreCompactContextBlock } from './precompact.js'` — confirmed correct.
+- TypeScript type-safety verified by inspection: `Pick<FixPattern, 'error_message' | 'error_category' | 'error_fingerprint' | 'occurrence_count'>[]` and `Pick<GovernanceRule, 'rule_short_name' | 'rule_text' | 'scope' | 'enforcement_count'>[]` match the type definitions in `types.ts`. No unused locals or parameters.
 
 ---
 
@@ -43,7 +43,7 @@ Re-audit confirmed implementation is already in place from prior execution. No c
 
 ## Next Action
 
-Proceed to r6-005 (r6-001 re-audit complete; r6-002 through r6-004 previously passed).
+Proceed to r6-005 (r6-001 through r6-004 complete).
 
 ---
 
@@ -67,6 +67,6 @@ Proceed to r6-005 (r6-001 re-audit complete; r6-002 through r6-004 previously pa
 
 - `src/engine/prompt-assembler.ts` (r6-001: added `handlePreToolUse` import + call)
 - `src/phases/phase3-executor.ts` (r6-002: fixed `tokensConsumed` to `outcome.tokensEstimated`; r6-003: moved `handleSessionEnd` into finally block)
-- `src/learning/precompact.ts` (r6-004: enriched `handlePreCompact` with DB queries for fix_patterns + governance_rules; real machine_id)
-- `STATE_OF_THE_BUILD.md` (updated)
-- `SESSION_STATE.md` (this file)
+- `src/learning/precompact.ts` (r6-004: verified — enrichment with DB queries for fix_patterns + governance_rules already present; no code changes required)
+- `STATE_OF_THE_BUILD.md` (updated after r6-004 audit)
+- `SESSION_STATE.md` (this file — r6-004 last completed prompt section corrected)
