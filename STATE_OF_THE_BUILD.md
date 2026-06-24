@@ -2,6 +2,33 @@
 
 ---
 
+# r1-011 — FORGE 2.0 Learning Engine: Test Suite (`tests/learning-database.test.ts`, `tests/learning-fingerprint.test.ts`, `tests/learning-queries.test.ts`, `tests/learning-sync.test.ts`), 2026-06-23
+
+## Build Status: r1-011 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`tests/learning-database.test.ts`** (NEW FILE) — node:test suite for `src/learning/database.ts`: 8 tests covering `initializeForgeMemory` (14+ tables, idempotency, 20+ indexes, schema_version), `getMachineId` (16-char hex, consistent across calls), `getConnection` (returns working DB object, WAL mode).
+- **`tests/learning-fingerprint.test.ts`** (NEW FILE) — node:test suite for `src/learning/fingerprint.ts`: 7 tests covering `getErrorFingerprint` (same pattern → same fingerprint, different codes → different, 32-char hex, stack-order-independent), `generalizeFilePath` (wildcard entity dirs, keep framework dirs, normalize backslashes), `generalizeErrorMessage` (replace quoted strings, keep structural keywords).
+- **`tests/learning-queries.test.ts`** (NEW FILE) — node:test suite for `src/learning/queries.ts`: 8 tests covering `saveToForgeMemory` (UUID generation, auto machine_id, auto created_at ISO, invalid table rejection), `getForgeMemory` (empty array for no matches, WHERE filtering, LIMIT), `getGovernanceRules` (active-only filter), `getPendingEvolutions` (empty array baseline).
+- **`tests/learning-sync.test.ts`** (NEW FILE) — node:test suite for `src/learning/sync.ts`: 8 tests covering `acquireSyncLock` (creates lock file, valid JSON with machine_id+pid), `releaseSyncLock` (removes file, no-throw on nonexistent), `loadSyncConfig` (defaults for missing file), `syncForgeMemory` (graceful degradation for missing master), timestamps (`getLastSyncTimestamp` default epoch, `setLastSyncTimestamp` round-trip).
+- **`package.json`** (PATCHED) — `test` script updated from `node --test` to `node --import tsx --test tests/learning-database.test.ts tests/learning-fingerprint.test.ts tests/learning-queries.test.ts tests/learning-sync.test.ts` to enable TypeScript discovery via tsx.
+
+### Design invariants verified by inspection
+- All imports match actual exports from source files ✓
+- All test DB paths use `tmpdir()` with unique `Date.now()` suffix — no collision ✓
+- `after` hooks call `closeConnection` + `unlinkSync` for DB cleanup ✓
+- `better-sqlite3@12.11.1` present in pnpm virtual store at `node_modules/.pnpm/` ✓
+- `tsx` installed in devDependencies — TypeScript execution without compilation ✓
+- `initializeForgeMemory` creates exactly 14 tables (forge_meta + 13 from schema) ✓
+- Tests excluded from `tsconfig.json` `include: ["src/**/*.ts"]` — tsc gate checks src only ✓
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors (src/ only).
+2. `npm test` → all 31 tests pass (8+7+8+8).
+3. Confirm output shows `pass 31`, `fail 0`.
+
+---
+
 # r1-010 — FORGE 2.0 CLI: `src/cli/commands/learning.ts` + wired into `src/cli/index.ts`, 2026-06-23
 
 ## Build Status: r1-010 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
