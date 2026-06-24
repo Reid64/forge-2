@@ -2,6 +2,38 @@
 
 ---
 
+# r1-005 — FORGE 2.0 Learning Engine: `src/learning/loops.ts` complete implementation, 2026-06-23 (session #60)
+
+## Build Status: r1-005 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/loops.ts`** (REPLACED stub with FULL implementation) — Five Learning Loops:
+  - **Loop 1** `scorePromptExecution(execution, dbPath?)` — delegates to `savePromptScore`; records templateHash, taskType, techStackTags, firstPassSuccess, retryCount, tokensConsumed, gatePassRate, driftScore, projectName, buildId. Returns saved record id (empty string on failure, never throws).
+  - **Loop 2a** `captureError(error, dbPath?)` — calls `registerErrorQuery`; returns `{ fingerprint, isKnown, knownFix? }`. On failure falls back to calling `getErrorFingerprint` directly and returns `{ fingerprint, isKnown: false }`.
+  - **Loop 2b** `checkAutoElevation(fingerprint, dbPath?)` — loads the fix pattern; returns null if occurrence_count < 3, no fix_description, success_rate ≤ 0.5, or rule already exists. Otherwise creates a `governance_rules` record (`source: 'AUTO_ELEVATED'`) and back-links `governance_rule_id` on the fix pattern. Returns the new `GovernanceRule` or null.
+  - **Loop 3** `updateDecisionWeights(buildId, dbPath?)` — queries `decision_weights WHERE build_id = ?`; for each decision, counts downstream `prompt_scores` created after it, computes errorRate/retryRate, UPDATEs the row. No-op if no decisions or no downstream scores.
+  - **Loop 4** `loadCrossProjectKnowledge(techStackTags, projectName, dbPath?)` — returns `{ rules, skills, fixPatterns (2+ occurrences, top 50), outcomes (last 10), evolutions (PENDING) }`. On any failure returns all-empty arrays and logs the error. Never throws.
+  - **Loop 5a** `analyzeForEvolutions(buildId, dbPath?)` — three SQL analyses: (A) prompt templates with avg_pass < 0.5 over 3+ samples → TEMPLATE evolution; (B) fix_patterns with 3+ occurrences and no governance_rule_id → RULE evolution; (C) task types averaging > 2 retries over 2+ samples → GATE evolution. Saves all proposals to `pending_evolutions` and returns them.
+  - **Loop 5b** `presentEvolutions(dbPath?)` — returns all PENDING evolutions via `getPendingEvolutions`.
+  - **Loop 5c** `applyEvolution(evolutionId, approved, reviewNote?, dbPath?)` — calls `updateEvolutionStatus` with APPROVED or REJECTED.
+- **Unused variable fix**: `const _machineId = getMachineId(dbPath)` (prefixed per FORGE build rules; value not needed in Loop 5's analysis logic but `getMachineId` is called per spec).
+
+### Design invariants verified by inspection
+- All 7 exports are named exports; the verification script's destructured import resolves fully
+- All imported symbols (`savePromptScore`, `getForgeMemory`, `saveToForgeMemory`, `updateForgeMemory`, `getFixPattern`, `registerError as registerErrorQuery`, `getGovernanceRules`, `getRelevantSkills`, `getPendingEvolutions`, `updateEvolutionStatus`) exist in `queries.ts`
+- `getErrorFingerprint` imported from `fingerprint.ts` with the matching `{ errorCode, filePath, errorMessage, techStack }` parameter shape
+- Types (`FixPattern`, `GovernanceRule`, `PendingEvolution`, `SkillEntry`, `BuildOutcome`) imported from `types.ts` — all defined
+- Loop 2b auto-elevation: `governance_rule_id: null` guard uses `if (pattern.governance_rule_id) return null` — truthy check covers both `null` and empty string
+- Loop 3: raw SQL uses `db.prepare().all()` consistent with better-sqlite3 sync API used throughout `database.ts`
+- All catch blocks log to `console.error` with a `[FORGE Learning]` prefix and return safe defaults (empty arrays, `null`, `''`) — never throw, consistent with BEHAVIORAL_CONTRACTS non-fatal requirement
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-005 prompt spec (Loop 1 scoring, Loop 2 fix patterns × 2 captures, Loop 4 knowledge transfer arrays, Loop 5 presentEvolutions array) → all PASS.
+3. Proceed to r1-006: implement `src/learning/sync.ts`.
+
+---
+
 # r1-004 — FORGE 2.0 Learning Engine: `src/learning/fingerprint.ts` complete implementation, 2026-06-23 (session #59)
 
 ## Build Status: r1-004 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

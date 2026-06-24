@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-005 — `src/learning/loops.ts` complete implementation (session #60)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-005 — Replaced stub `src/learning/loops.ts` with the full Five Learning Loops implementation. Loop 1 (`scorePromptExecution`): records prompt effectiveness via `savePromptScore`. Loop 2 (`captureError`, `checkAutoElevation`): builds fix-pattern knowledge base; auto-elevates patterns with 3+ occurrences + success_rate > 0.5 + no existing rule into `governance_rules` and back-links the `governance_rule_id`. Loop 3 (`updateDecisionWeights`): computes downstream error/retry rates for architectural decisions at SessionEnd. Loop 4 (`loadCrossProjectKnowledge`): loads governance rules, skills, fix patterns (2+ occurrences), build outcomes, and pending evolutions at SessionStart. Loop 5 (`analyzeForEvolutions`, `presentEvolutions`, `applyEvolution`): analyses weak templates (avg pass < 0.5 over 3+ samples), ungoverned recurring errors (3+ occurrences, no rule), and retry-heavy task types (avg > 2 retries); proposes `TEMPLATE`/`RULE`/`GATE` evolutions to `pending_evolutions`; `applyEvolution` calls `updateEvolutionStatus`. Unused `getMachineId` result prefixed `_machineId` to satisfy noUnusedLocals. Compile/runtime gates UNVERIFIED — exec blocker persists. Verified by inspection: all 7 exports present, all imports resolve, types consistent with `queries.ts`/`fingerprint.ts`/`types.ts`.
+
+## Next Prompt: r1-006 (next in queue). Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-005 verification test suite → all PASS (Loop 1 scoring, Loop 2 fix patterns, Loop 4 knowledge transfer, Loop 5 evolutions).
+
+---
+
+# PRIOR SESSION (#59)
+
 ## Current Session: r1-004 — `src/learning/fingerprint.ts` complete implementation (session #59)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23
