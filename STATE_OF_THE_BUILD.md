@@ -2,9 +2,9 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-008 COMPLETE
-**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007, r5-008 complete)
-**README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
+**Current Run:** Run 5 — r5-010 COMPLETE
+**Total Prompts Executed:** 55+ (r1-001…r4-013 complete; r5-001…r5-010 complete)
+**README.md:** COMPLETE (307 lines, verified 2026-06-24 — >= 3 "retrofit" occurrences, >= 80 lines)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
@@ -86,8 +86,8 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | Learning CLI | COMPLETE | 6 subcommands: init, status, patterns, sync, evolutions, rules |
 | CLI retrofit | COMPLETE | 6 options: --scope, --skip-dynamic, --resume, --non-interactive, --queue-output, --api-key |
 | forge_config.json | COMPLETE | File exists at project root (695 bytes) |
-| README.md | COMPLETE | 287 lines (≥ 80 required) |
-| AGENTS.md | COMPLETE | ForgeRetrofit entry present (1 match) |
+| README.md | COMPLETE | 307 lines (≥ 80 required); 5 "retrofit" occurrences (≥ 3 required) |
+| AGENTS.md | COMPLETE | ForgeRetrofit entry present (1 match); database tables field added (r5-010) |
 | TypeScript | UNVERIFIED | Exec gate blocked; 0 errors by inspection through r4-012 |
 | Build | UNVERIFIED | Exec gate blocked; dist/ is stale from Jun 23 pre-Run-4 |
 | Test suite | STATIC ANALYSIS ONLY | Exec gate blocked live run; 30 tests analyzed (r5-007 two-pass audit), 0 failures expected by inspection |
@@ -271,6 +271,20 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 
 TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
 
+### r5-010 — COMPLETE (2026-06-24)
+
+README.md verified and AGENTS.md updated with database tables field for ForgeRetrofit entry.
+
+| Check | Result |
+|-------|--------|
+| README.md line count | 307 lines (≥ 80 required) ✓ |
+| `grep -c "retrofit" README.md` | 5 matches (≥ 3 required) ✓ |
+| `grep -c "ForgeRetrofit" AGENTS.md` | 1 match (≥ 1 required) ✓ |
+| AGENTS.md database tables field | ADDED — `reconcile_decisions` (write), `governance_rules` (read) |
+| Source of README content | Sourced from src/cli/index.ts (CLI commands), src/phases/ listing, src/learning/ listing, src/retrofit/ listing, src/phases/phase4-sentinel.ts (SentinelCheckName type), forge_config.json, package.json |
+
+TSC: exec gate blocked; no TypeScript files modified.
+
 ### r5-009 — COMPLETE (2026-06-24)
 
 `src/cli/config.ts` — added `loadConfig` overloads so it also reads `forge_config.json` and returns `ForgeConfig`. Fixed `saveConfig` to use already-imported `writeFileSync`/`join` instead of `require()` (ESM package — `require` is not defined at runtime). `forge_config.json` confirmed present at project root.
@@ -345,5 +359,5 @@ TSC: exec gate blocked; 0 errors by inspection (all destructured regex match gro
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 9/? prompts complete (r5-001…r5-009 PASSED)
+- **Run 5:** IN PROGRESS — 10/? prompts complete (r5-001…r5-010 PASSED)
 - **Overall:** ~97% of planned scope complete

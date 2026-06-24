@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-009 COMPLETE
+## Current Session: RUN 5 — r5-010 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-009 COMPLETE |
-| Current Prompt | r5-009 done; awaiting next prompt |
-| Prompts Executed This Run | 9 (r5-001…r5-009) |
+| Phase | r5-010 COMPLETE |
+| Current Prompt | r5-010 done; awaiting next prompt |
+| Prompts Executed This Run | 10 (r5-001…r5-010) |
 | Prompts Passed | 9 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
@@ -36,6 +36,8 @@
 ---
 
 ## Last Completed Prompt
+
+**r5-010** — README.md verified (307 lines, 5 "retrofit" occurrences). AGENTS.md updated — added `- **Dependencies:**` and `- **Database tables:**` fields to ForgeRetrofit entry documenting `reconcile_decisions` (write) and `governance_rules` (read). STATE_OF_THE_BUILD.md and SESSION_STATE.md updated. No TypeScript files modified; exec gate blocked live tsc run; 0 errors by inspection.
 
 **r5-009** — `src/cli/config.ts` completed. Added `loadConfig` overloads: `loadConfig(): EnvConfig` (existing) and `loadConfig(projectPath: string): ForgeConfig` (new — reads `forge_config.json`, calls `mergeWithDefaults`, falls back to `DEFAULT_FORGE_CONFIG` on error). Fixed `saveConfig` to drop `require('node:fs')`/`require('node:path')` calls and use the already-imported ESM `writeFileSync`/`join` — mandatory for `"type": "module"` packages where `require` is not defined. `forge_config.json` verified present at project root.
 
@@ -101,6 +103,7 @@
 | src/learning/precompact.ts | Full replacement — new API: PreCompactState interface + handlePreCompact + loadLatestCompactSnapshot + buildPreCompactContextBlock (r5-005) |
 | src/phases/phase3-executor.ts | Added 3 learning hook call blocks: handleSessionStart, handlePostToolUse, handleSessionEnd (r5-008) |
 | src/cli/config.ts | Added loadConfig overloads (ForgeConfig branch via forge_config.json + mergeWithDefaults); fixed saveConfig to use ESM imports instead of require() (r5-009) |
+| AGENTS.md | Added Dependencies + Database tables fields to ForgeRetrofit entry (r5-010) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
 
