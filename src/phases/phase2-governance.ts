@@ -100,7 +100,7 @@ export interface GovernanceDocResult {
 
 /** Gate 3 marker â€” Phase 2 always halts here for human approval (Contract 2). */
 export interface Gate3Status {
-  name: 'Gate 3 â€” Governance Approval';
+  name: 'Gate 3 -- Governance Approval';
   /** Always `awaiting_human_approval`: there is no bypass (Contract 2). */
   status: 'awaiting_human_approval';
   detail: string;
@@ -1162,7 +1162,7 @@ export async function runPhase2Governance(
     constrained: design.constrained,
     warnings,
     gate: {
-      name: 'Gate 3 â€” Governance Approval',
+      name: 'Gate 3 -- Governance Approval',
       status: 'awaiting_human_approval',
       detail:
         'Phase 2 complete. The build HALTS here until a human approves the governance package ' +

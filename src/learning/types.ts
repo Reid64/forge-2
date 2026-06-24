@@ -181,6 +181,38 @@ export interface BuildFingerprintRecord {
   machine_id: string;
 }
 
+export interface HookExecutionLog {
+  id: string;
+  hook_name: string;
+  event: string;
+  status: 'PASS' | 'FAIL' | 'TIMEOUT' | 'SKIP';
+  duration_ms: number;
+  output: string | null;
+  build_id: string;
+  prompt_number: number | null;
+  machine_id: string;
+  created_at: string;
+}
+
+export interface CompactSnapshot {
+  id: string;
+  build_id: string;
+  prompt_index: number;
+  state_json: string;
+  machine_id: string;
+  created_at: string;
+}
+
+export interface DecisionWeight {
+  id: string;
+  template_hash: string;
+  task_type: string;
+  downstream_error_rate: number;
+  sample_count: number;
+  updated_at: string | null;
+  created_at: string;
+}
+
 export const VALID_TABLES = [
   'forge_meta', 'prompt_scores', 'fix_patterns', 'decision_weights',
   'governance_rules', 'pending_evolutions', 'build_outcomes', 'skill_library',

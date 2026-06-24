@@ -1065,7 +1065,7 @@ export async function generateQueue(
   }
 
   const gate: Gate3Status = {
-    name: 'Gate 3 â€" Governance Approval',
+    name: 'Gate 3 -- Governance Approval',
     status: 'awaiting_human_approval',
     detail:
       `queue.yaml generated (${stats.totalPrompts} prompt(s), ${stats.parallelGroups} parallel group(s)). ` +

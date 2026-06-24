@@ -2,10 +2,10 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Post-Run 4 (ALL 13 prompts r4-001…r4-013 COMPLETE)
-**Total Prompts Executed:** 50+ (r1-001…r4-013 complete; queue-run5.yaml written)
+**Current Run:** Run 5 — r5-001 COMPLETE
+**Total Prompts Executed:** 51+ (r1-001…r4-013 complete; r5-001 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
-**TypeScript Status:** 0 errors by inspection through r4-012; exec gate blocks live tsc run
+**TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
 ---
@@ -110,7 +110,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 
 | File | Size | Purpose |
 |------|------|---------|
-| types.ts | 5,331 bytes | All Learning Engine type definitions incl. AdversaryFindingRecord, BuildFingerprintRecord |
+| types.ts | ~5,950 bytes | All Learning Engine type definitions incl. AdversaryFindingRecord, BuildFingerprintRecord, HookExecutionLog, CompactSnapshot, DecisionWeight (r5-001) |
 | database.ts | 14,850 bytes | SQLite init, 14 tables, connection management, machine identity |
 | queries.ts | 11,070 bytes | 15 read/write query functions |
 | loops.ts | 12,900 bytes | 5 learning loops incl. updateDecisionWeights, analyzeForEvolutions |
@@ -237,10 +237,13 @@ TypeScript status: 0 errors by inspection (exec gate blocks live run).
 
 ---
 
-## Run 5 — QUEUED
+## Run 5 — IN PROGRESS
 
 Queue file: `C:\Users\manag\Documents\FORGE\projects\forge-2\forge2-run5-20260624.yaml`
-Prompts: 1 (r5-ready — placeholder; replace with actual Run 5 prompts)
+
+### r5-001 — COMPLETE (2026-06-24)
+
+Database schema audit + types.ts hardening. Verified `database.ts` already contained all 14 tables including `hook_execution_log` (lines 270–284) and `compact_snapshots` (lines 286–294) — no changes to database.ts needed. Added three missing TypeScript interfaces to `src/learning/types.ts`: `HookExecutionLog`, `CompactSnapshot`, `DecisionWeight`. TSC: exec gate blocked; 0 errors by inspection.
 
 ---
 
@@ -250,5 +253,5 @@ Prompts: 1 (r5-ready — placeholder; replace with actual Run 5 prompts)
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** QUEUED — 0/1 prompts complete
-- **Overall:** ~95% of planned scope complete
+- **Run 5:** IN PROGRESS — 1/? prompts complete (r5-001 PASSED)
+- **Overall:** ~96% of planned scope complete

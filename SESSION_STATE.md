@@ -1,37 +1,40 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: POST-FIX-005 — fix-005 COMPLETE, Ready for Run 5
+## Current Session: RUN 5 — r5-001 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 ---
 
-## Phase: POST-FIX-005
+## Phase: RUN 5 — IN PROGRESS
 
 | Field | Value |
 |-------|-------|
-| Run Number | fix-005 (complete) |
-| Phase | POST-FIX-005 |
-| Current Prompt | None — fix-005 complete, forge2-run5-20260624.yaml written |
-| Prompts Executed This Run | 1 (fix-005: retrofit + learn wiring verification) |
+| Run Number | Run 5 |
+| Phase | r5-001 COMPLETE |
+| Current Prompt | r5-001 done; awaiting next prompt |
+| Prompts Executed This Run | 1 (r5-001: database schema audit + types.ts hardening) |
 | Prompts Passed | 1 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
-| retrofit command | WIRED — src/cli/index.ts lines 1246–1277, 6 options |
-| learn command | WIRED — registerLearningCommands line 1302, 6 subcommands |
+| hook_execution_log table | PRESENT — database.ts lines 270–284 (pre-existing) |
+| compact_snapshots table | PRESENT — database.ts lines 286–294 (pre-existing) |
+| HookExecutionLog interface | ADDED — src/learning/types.ts (r5-001) |
+| CompactSnapshot interface | ADDED — src/learning/types.ts (r5-001) |
+| DecisionWeight interface | ADDED — src/learning/types.ts (r5-001) |
 
 ---
 
 ## Last Completed Prompt
 
-**fix-005** — Wire retrofit and learn commands, verify build. Both commands confirmed present by source inspection: `retrofit` at src/cli/index.ts:1246–1277 (6 options), `learn` via registerLearningCommands at line 1302 with 6 subcommands in src/cli/commands/learning.ts. TypeScript: 0 errors by inspection (exec gate blocked tsc/build). Queue file forge2-run5-20260624.yaml written. STATE_OF_THE_BUILD.md and SESSION_STATE.md updated. Build clean, ready for Run 5.
+**r5-001** — Database schema audit + types.ts hardening. Read `src/learning/database.ts` in full; verified `hook_execution_log` (lines 270–284) and `compact_snapshots` (lines 286–294) both already present — no changes to database.ts. Added three missing interfaces to `src/learning/types.ts`: `HookExecutionLog`, `CompactSnapshot`, `DecisionWeight`. TSC: exec gate blocked; 0 errors by inspection. STATE_OF_THE_BUILD.md and SESSION_STATE.md updated.
 
 ---
 
 ## Next Action — What Remains Incomplete
 
-1. **Wire PreToolUse hook** (r5-001) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the only remaining feature gap. Queue: `queue-run5.yaml`.
+1. **Wire PreToolUse hook** (r5-002+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the primary remaining feature gap. Queue: `queue-run5.yaml`.
 
 2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output at Run 5 start. All previous verification was by inspection only due to exec gate.
 
