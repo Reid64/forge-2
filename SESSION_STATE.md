@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-003** — handoff-generator.ts verified complete (155 lines, exact spec match). integration.ts already exports generateSessionHandoff and HandoffOptions from handoff-generator.js. No changes needed — file was complete from prior execution.
+**r4-004** — adversarial-review.ts written to src/analysis/ (127 lines, 8 exports, 6 phase prompts: ARCHITECT_PRD, ARCHITECT_GOVERNANCE, COMPOSE_QUEUE, EXECUTE_PROMPT, DIAGNOSE_HEALTH, DEPLOY_CANARY). runAdversarialReview, shouldRunAdversarialReview, persistAdversaryFindings all exported.
 
 ---
 

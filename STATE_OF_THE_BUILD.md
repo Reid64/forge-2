@@ -50,7 +50,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 |--------|--------|----------|
 | Learning Engine | COMPLETE | 12 files in src/learning/, all core functions present |
 | RETROFIT Pipeline | COMPLETE | 10 files in src/retrofit/, runRetrofitPipeline exported, CLI wired |
-| Adversarial Review | COMPLETE | src/analysis/adversarial-review.ts = 127 lines (≥ 100 required) |
+| Adversarial Review | COMPLETE | src/analysis/adversarial-review.ts = 127 lines, 6 phase prompts, 8 exports (r4-004) |
 | Session Lifecycle | COMPLETE | src/learning/session-lifecycle.ts = 212 lines (≥ 120 required) |
 | Handoff Generator | COMPLETE | src/learning/handoff-generator.ts = 155 lines (≥ 100 required) |
 | Learning Loops | COMPLETE | updateDecisionWeights (line 120) + analyzeForEvolutions (line 198) in loops.ts |
