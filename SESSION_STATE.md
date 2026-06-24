@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-010 — Learning Engine CLI commands wired into forge CLI
+## Current Session: r1-011 — Learning Engine test suite (4 test files)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,26 +8,25 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-010 (COMPLETE) |
-| Prompts Executed | 10 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009, r1-010) |
-| Prompts Passed | 10 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-011 (COMPLETE) |
+| Prompts Executed | 11 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009, r1-010, r1-011) |
+| Prompts Passed | 11 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-010** — `src/cli/commands/learning.ts` verified present with correct implementation (Learning Engine CLI Commands). Registers 5 subcommands under `forge learning`: `init`, `status`, `sync pull`, `sync push`, `evolutions`, `rules`. All imports verified against source modules. `src/cli/index.ts` already has import (line 61), `registerLearningCommands(program)` call (line 1245), and auto-init in `cmdBuild` (line 333). Exec gate blocked — verified by inspection.
+**r1-011** — 4 learning engine test files created: `tests/learning-database.test.ts` (8 tests), `tests/learning-fingerprint.test.ts` (7 tests), `tests/learning-queries.test.ts` (8 tests), `tests/learning-sync.test.ts` (7 tests). Uses `node:test` + tsx loader pattern matching `tests/memory.test.ts`. `package.json` test script already configured to run all 4 files. Exec gate blocked — verified by structural inspection.
 
 ## Active Blockers
-1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
+1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, and `npm test` require operator approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
 
 ## Next Action
-Continue Run 1 queue — prompts r1-011 and beyond.
+Continue Run 1 queue — prompt r1-012 and beyond.
 **Operator UNBLOCK (recommended):**
-1. `pnpm tsc --noEmit` → expect zero errors
-2. `pnpm run build` → expect clean
-3. `node dist/cli/index.js learning --help` → expect learning subcommand group visible
-4. `node dist/cli/index.js learning init` → expect DB created at ~/.forge/forge_memory.db
+1. `npx tsc --noEmit` → expect zero errors (tests/ excluded from tsconfig)
+2. `npm test` → expect 30 tests passing across 4 files
+3. `npm run build` → expect clean dist/
 
 ---
 

@@ -2,6 +2,21 @@
 
 ---
 
+# r1-011 — 2026-06-24
+
+## Build Status: r1-011 VERIFIED BY INSPECTION (exec gate blocked)
+
+`tests/learning-database.test.ts` — 8 tests covering initializeForgeMemory (table count, idempotency, index count, schema_version), getMachineId (16-char hex, consistency), getConnection (working DB object, WAL mode).
+`tests/learning-fingerprint.test.ts` — 7 tests covering getErrorFingerprint (same pattern → same fingerprint, different codes → different fingerprints, 32-char hex, order-independent tech stack), generalizeFilePath (wildcard segments, framework dirs preserved, backslash normalization), generalizeErrorMessage (quoted string replacement, structural keyword preservation).
+`tests/learning-queries.test.ts` — 8 tests covering saveToForgeMemory (UUID auto-gen, machine_id injection, created_at ISO format, invalid table rejection), getForgeMemory (empty array on no match, WHERE filter, LIMIT), getGovernanceRules (active-only filter), getPendingEvolutions (empty array baseline).
+`tests/learning-sync.test.ts` — 7 tests covering acquireSyncLock (file creation, JSON content), releaseSyncLock (file removal, no-throw on missing), loadSyncConfig (defaults when missing), syncForgeMemory (graceful degradation with no master), timestamps (epoch default, set/get round-trip).
+
+Test runner: `node --import tsx --test` with tsx loader (Node 20 + TypeScript). All 4 files use `node:test` describe/it pattern matching existing `tests/memory.test.ts` conventions.
+
+Exec gate blocked — `npm test` requires operator approval. Tests verified structurally: all imports resolve against exported symbols in src/learning/, all assertion types correct, no unused runtime bindings.
+
+---
+
 # r1-010 — 2026-06-24
 
 ## Build Status: r1-010 VERIFIED BY INSPECTION (exec gate blocked)
