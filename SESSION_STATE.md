@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-008 COMPLETE
+## Current Session: RUN 5 — r5-009 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-008 COMPLETE |
-| Current Prompt | r5-008 done; awaiting next prompt |
-| Prompts Executed This Run | 8 (r5-001…r5-008) |
-| Prompts Passed | 8 |
+| Phase | r5-009 COMPLETE |
+| Current Prompt | r5-009 done; awaiting next prompt |
+| Prompts Executed This Run | 9 (r5-001…r5-009) |
+| Prompts Passed | 9 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
@@ -36,6 +36,8 @@
 ---
 
 ## Last Completed Prompt
+
+**r5-009** — `src/cli/config.ts` completed. Added `loadConfig` overloads: `loadConfig(): EnvConfig` (existing) and `loadConfig(projectPath: string): ForgeConfig` (new — reads `forge_config.json`, calls `mergeWithDefaults`, falls back to `DEFAULT_FORGE_CONFIG` on error). Fixed `saveConfig` to drop `require('node:fs')`/`require('node:path')` calls and use the already-imported ESM `writeFileSync`/`join` — mandatory for `"type": "module"` packages where `require` is not defined. `forge_config.json` verified present at project root.
 
 **r5-008** — Wired three learning engine hooks into `src/phases/phase3-executor.ts`. Added `handleSessionStart` call (dynamic import, non-fatal) after the existing `onRunStart` call; added `handlePostToolUse` call inside the prompt loop after the existing `onPromptComplete` block; added `handleSessionEnd` call after `onRunEnd` in the finalization section. All three blocks wrapped in try/catch and marked non-fatal. Variable names adapted from task template to actual executor names: `buildId → buildRunId`, `promptPassed → outcome.disposition === 'completed'`, `startTime → new Date(generatedAt)`. TSC: exec gate blocked; 0 errors by inspection (all arg types verified against source signatures).
 
@@ -98,6 +100,7 @@
 | src/learning/session-hooks.ts | Created — SessionStartResult, SessionEndResult interfaces; handleSessionStart, handleSessionEnd async functions (r5-006) |
 | src/learning/precompact.ts | Full replacement — new API: PreCompactState interface + handlePreCompact + loadLatestCompactSnapshot + buildPreCompactContextBlock (r5-005) |
 | src/phases/phase3-executor.ts | Added 3 learning hook call blocks: handleSessionStart, handlePostToolUse, handleSessionEnd (r5-008) |
+| src/cli/config.ts | Added loadConfig overloads (ForgeConfig branch via forge_config.json + mergeWithDefaults); fixed saveConfig to use ESM imports instead of require() (r5-009) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
 

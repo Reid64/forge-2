@@ -134,11 +134,27 @@ function envValue(key: string): string | null {
 }
 
 /**
- * Load FORGE configuration. Reads `.env` (if found) into `process.env` without
- * overwriting values already set in the shell, then snapshots the resolved config.
+ * Load FORGE configuration.
+ *
+ * Overload 1 (no args): reads `.env` into `process.env`, snapshots an `EnvConfig`.
  * Always returns a config — never throws.
+ *
+ * Overload 2 (projectPath): reads `forge_config.json` from that directory, merges
+ * with defaults, and returns a `ForgeConfig`. Falls back to `DEFAULT_FORGE_CONFIG`
+ * if the file is absent or unreadable.
  */
-export function loadConfig(): EnvConfig {
+export function loadConfig(): EnvConfig;
+export function loadConfig(projectPath: string): ForgeConfig;
+export function loadConfig(projectPath?: string): EnvConfig | ForgeConfig {
+  if (projectPath !== undefined) {
+    try {
+      const raw = readFileSync(join(projectPath, 'forge_config.json'), 'utf8');
+      const partial = JSON.parse(raw) as Partial<ForgeConfig>;
+      return mergeWithDefaults(partial);
+    } catch {
+      return { ...DEFAULT_FORGE_CONFIG };
+    }
+  }
   const warnings: string[] = [];
 
   // 1. Load a .env file into process.env (shell values win). ------------------
@@ -263,8 +279,6 @@ export function mergeWithDefaults(partial: Partial<ForgeConfig>): ForgeConfig {
 }
 
 export function saveConfig(projectPath: string, config: ForgeConfig): void {
-  const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-  const { join } = require('node:path') as typeof import('node:path');
   writeFileSync(join(projectPath, 'forge_config.json'), JSON.stringify(config, null, 2) + '\n', 'utf8');
 }
 

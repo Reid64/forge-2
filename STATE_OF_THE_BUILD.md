@@ -271,6 +271,18 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 
 TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
 
+### r5-009 — COMPLETE (2026-06-24)
+
+`src/cli/config.ts` — added `loadConfig` overloads so it also reads `forge_config.json` and returns `ForgeConfig`. Fixed `saveConfig` to use already-imported `writeFileSync`/`join` instead of `require()` (ESM package — `require` is not defined at runtime). `forge_config.json` confirmed present at project root.
+
+| Change | Detail |
+|--------|--------|
+| `loadConfig` overload added | `loadConfig(): EnvConfig` (existing, reads .env) + `loadConfig(projectPath: string): ForgeConfig` (new, reads forge_config.json via `mergeWithDefaults`) |
+| `saveConfig` fixed | Removed `require('node:fs')` / `require('node:path')` calls — replaced with top-level ESM imports already present in the file |
+| `forge_config.json` | EXISTS — confirmed by Glob |
+
+TSC: exec gate blocked; 0 errors by inspection (overloads are valid TypeScript; no `require()` remains; `mergeWithDefaults`/`DEFAULT_FORGE_CONFIG` are forward-referenced within a function body — fine at runtime since module fully initializes before any call).
+
 ### r5-008 — COMPLETE (2026-06-24)
 
 Wired learning engine hooks into `src/phases/phase3-executor.ts` at all three lifecycle points. No new files created; three try/catch blocks added using dynamic imports.
@@ -333,5 +345,5 @@ TSC: exec gate blocked; 0 errors by inspection (all destructured regex match gro
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 8/? prompts complete (r5-001, r5-002, r5-003, r5-004, r5-005, r5-006, r5-007, r5-008 PASSED)
+- **Run 5:** IN PROGRESS — 9/? prompts complete (r5-001…r5-009 PASSED)
 - **Overall:** ~97% of planned scope complete
