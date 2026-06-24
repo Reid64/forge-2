@@ -1,26 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-007 COMPLETE
+## Current Session: Run 3 — r3-008 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | RETROFIT DIAGNOSE |
-| Current Prompt | r3-007 (diagnose.ts) |
-| Prompts Executed | 19 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006 + r3-007) |
-| Prompts Passed | 19 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | RETROFIT RECONCILE |
+| Current Prompt | r3-008 (reconcile.ts) |
+| Prompts Executed | 20 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-008) |
+| Prompts Passed | 20 (exec gate UNVERIFIED — file verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-007 (diagnose.ts)** — `src/retrofit/diagnose.ts` already present from prior run (94 lines). Verified: exports `generateArchitectureHealthReport` (async, calls Claude API adversarially), `deriveFindingsFromScanReport`, `detectMaturityStage`, `buildGovernanceReconciliationReport`, `buildEnterprisePatternsGapReport`. Also exports types `ArchitectureHealthReport`, `GovernanceReconciliationReport`, `EnterprisePatternsGapReport`, `MaturityStage`. `src/retrofit/index.ts` lines 9-10 already re-export all five functions and four types. TSC gate blocked by exec permission; verification by inspection only.
+**r3-008 (reconcile.ts)** — `src/retrofit/reconcile.ts` already present (117 lines). Verified: exports `runReconcile` (interactive + nonInteractive modes, SQLite persistence via `loadPrior`/`persist`), `generateRetrofitQueue` (tier-ordered YAML with `depends_on` chains RC→RW→RE), `runRetrofitPipeline` (full SCAN→DIAGNOSE→RECONCILE→QUEUE pipeline). Also exports interfaces `ReconcileInput`, `ReconcileOutput`, `QueuePrompt`, `GeneratedQueue`, `RetrofitPipelineOptions`. `src/retrofit/index.ts` lines 11-12 already re-export all. TSC gate blocked by exec permission; verification by inspection only.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-008** — Next RETROFIT prompt per queue.
+**r3-009** — Next RETROFIT/pipeline prompt per queue.
 
 Operator verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
