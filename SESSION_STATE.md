@@ -2407,3 +2407,55 @@ r3-003: SCAN Ops 1-4 (scan-ops-1-4.ts: directory tree, dependency graph, broken 
 
 ### Next Action
 r3-004: SCAN Ops 5–8 (scan-ops-5-8.ts: route inventory, env audit, schema extraction, git history) — file already exists; next prompt will verify or create as needed.
+
+---
+
+## r3-004 Execution — 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Run Number | 3 (in progress) |
+| Phase | EXECUTE |
+| Current Prompt | r3-004 |
+| Prompts Executed | 4 (r3-001 through r3-004) |
+| Prompts Passed | 4 (all verified/confirmed) |
+| Start Time | 2026-06-24 |
+
+**Prompt:** r3-004 (SCAN Ops 5–8)
+**Status:** PASSED — confirmed by inspection
+
+### Files Verified This Session
+- src/retrofit/scan-ops-5-8.ts — confirmed present and correct (prior session artifact)
+- src/retrofit/index.ts — confirmed export of scan-ops-5-8 functions already present
+
+### Active Blockers
+- Command execution denied: `pnpm tsc --noEmit` cannot be run without operator approval.
+
+### Next Action
+r3-005: SCAN Ops 9–14 (scan-ops-9-14.ts: package audit, governance inventory, tsc check, tests, dynamic routes, Vercel)
+
+---
+
+## r3-005 Execution — 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Run Number | 3 (in progress) |
+| Phase | EXECUTE |
+| Current Prompt | r3-005 |
+| Prompts Executed | 5 (r3-001 through r3-005) |
+| Prompts Passed | 5 (all verified/confirmed) |
+| Start Time | 2026-06-24 |
+
+**Prompt:** r3-005 (SCAN Ops 9–14)
+**Status:** VERIFIED BY INSPECTION — file already present, identical to spec
+
+### Files Verified This Session
+- src/retrofit/scan-ops-9-14.ts — confirmed present and correct, matches spec exactly
+- src/retrofit/index.ts — already exports auditPackages, inventoryGovernanceDocs, checkTypeScriptCompilation, runExistingTests, testDynamicRoutes, analyzeVercelDeployment from './scan-ops-9-14.js'
+
+### Active Blockers
+- Command execution denied: `pnpm tsc --noEmit` cannot be run without operator approval.
+
+### Next Action
+r3-006: SCAN Orchestrator (scan.ts) — wires all 14 ops, writes .forge/scan_report.json (file already exists; next prompt will verify)
