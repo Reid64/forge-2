@@ -142,7 +142,7 @@ export function onRunStart(projectPath: string, buildId: string, runNumber: numb
   try {
     execSync(
       `git -C "${projectPath}" tag "FORGE-RUN-${runNumber}-START" 2>/dev/null || true`,
-      { stdio: 'pipe', shell: true }
+      { stdio: 'pipe' }
     );
   } catch { /* non-fatal */ }
 
@@ -202,8 +202,8 @@ export function onRunEnd(opts: RunEndOptions): void {
   } catch { /* non-fatal */ }
 
   try {
-    execSync(`git -C "${projectPath}" add -A && git -C "${projectPath}" commit -m "FORGE-SESSION-END-RUN-${runNumber}-${endReason}" --allow-empty 2>/dev/null || true`, { stdio: 'pipe', shell: true });
-    execSync(`git -C "${projectPath}" tag "FORGE-RUN-${runNumber}-END" 2>/dev/null || true`, { stdio: 'pipe', shell: true });
+    execSync(`git -C "${projectPath}" add -A && git -C "${projectPath}" commit -m "FORGE-SESSION-END-RUN-${runNumber}-${endReason}" --allow-empty 2>/dev/null || true`, { stdio: 'pipe' });
+    execSync(`git -C "${projectPath}" tag "FORGE-RUN-${runNumber}-END" 2>/dev/null || true`, { stdio: 'pipe' });
   } catch { /* non-fatal */ }
 
   removeForgeLock(projectPath);

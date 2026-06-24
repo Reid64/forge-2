@@ -1,6 +1,16 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r4-007 — adversary_findings + build_fingerprints TypeScript interfaces added (2026-06-24)
+## Current Session: fix-002 — session-lifecycle.ts TypeScript errors fixed (2026-06-24)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-24 (autonomous FORGE session fix-002)
+
+## Last Completed Prompt: fix-002 COMPLETE. Removed `shell: true` from 3 `execSync` option objects in `src/learning/session-lifecycle.ts` (lines 145, 205, 206). The `shell` property is not assignable to `ExecSyncOptionsWithStringEncoding` — caused 3 TS2353 errors. Each replaced `{ stdio: 'pipe', shell: true }` with `{ stdio: 'pipe' }`. tsc verification exec-DENIED (known intermittent gate); fix confirmed correct by inspection. STATE_OF_THE_BUILD.md updated.
+
+## Next Prompt: Per queue — next prompt in sequence after fix-002.
+
+---
+
+# PRIOR SESSION (r4-007) — adversary_findings + build_fingerprints TypeScript interfaces added (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-24 (autonomous FORGE session r4-007)
 

@@ -2,6 +2,22 @@
 
 ---
 
+# FIX — session-lifecycle.ts TypeScript errors resolved, 2026-06-24 (fix-002)
+
+## Build Status: AUTHORED. Three `shell: true` occurrences in `src/learning/session-lifecycle.ts` removed (lines 145, 205, 206). `shell` is not a valid property on `ExecSyncOptionsWithStringEncoding`; removing it resolves the TS2353 assignability errors. Compile gate is operator-**UNVERIFIED** this session (exec gate denied — known intermittent blocker per memory). By-inspection confirmed: all three `execSync` call sites now pass only `{ stdio: 'pipe' }`, which is valid.
+
+### Files changed
+- `src/learning/session-lifecycle.ts` — removed `shell: true` from 3 `execSync` option objects (lines 145, 205, 206)
+
+### By-inspection type review
+`execSync` from `node:child_process` accepts `ExecSyncOptionsWithStringEncoding`. The `shell` property is not part of that interface when using the overload that accepts `stdio: 'pipe'` as a string literal. Removing the property entirely eliminates the three TS2353 errors.
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit 2>&1 | grep "session-lifecycle"` → expect no output (zero errors in this file).
+2. `pnpm tsc --noEmit` → expect zero errors project-wide.
+
+---
+
 # RE-VERIFICATION — PDF Generator (pdf-lib): `src/tools/pdf-generator.ts` audited complete, 2026-06-11 (session #55)
 
 ## Build Status: RE-RAN the PDF Generator brief verbatim for a third session and again found it **already fully implemented on disk** (authored #53, audited #54, re-audited here #55) — no re-authoring needed or performed. `pdf-lib@^1.17.1` is declared in `package.json` AND installed (`node_modules/pdf-lib` audited PRESENT), so the brief's "install pdf-lib" step is already satisfied. Compile/test gates remain operator-**UNVERIFIED** this session: `node_modules/.bin/tsc --noEmit`, `npx tsc --noEmit` (Bash + PowerShell), and the bare `node_modules/.bin/tsc` form were each DENIED ("requires approval") — the exec blocker recurred (intermittent: it worked once on 2026-06-11 per memory). Per Iron Law 3 this is reported as authored + by-inspection-reviewed, NOT a green gate.
