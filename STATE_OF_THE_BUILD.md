@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Post-Section-1
-**Total Prompts Executed:** 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014)
+**Current Run:** Run 3 — r3-003 COMPLETE (re-verified)
+**Total Prompts Executed:** 15 this session (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
 
 ---
