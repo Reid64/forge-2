@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-6 (r6-001…r6-003 complete)
-**Total Prompts Executed:** 57+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-003 complete)
+**Current Run:** RUN-6 (r6-001…r6-004 complete)
+**Total Prompts Executed:** 58+ (r1-001…r4-013 complete; r5-001…r5-010 complete; r6-001…r6-004 complete)
 **Total Prompts Planned:** 175-245 (across 4-6 runs)
 
 ---
@@ -25,7 +25,7 @@
 | Session Lifecycle (`src/learning/session-lifecycle.ts`) | COMPLETE | File exists — 8260 bytes |
 | Handoff Generator (`src/learning/handoff-generator.ts`) | COMPLETE | File exists — 5032 bytes |
 | Session Hooks (`src/learning/session-hooks.ts`) | COMPLETE | File exists — 5881 bytes |
-| PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE | File exists — 3488 bytes |
+| PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE | File exists — ~4700 bytes; enriched: queries fix_patterns + governance_rules from DB on save |
 | Hook Configuration (`.forge/hooks.json`) | COMPLETE | File exists; schema_version 1.0, project_name forge-2 |
 | Learning Loops (`src/learning/loops.ts`) | COMPLETE | File exists — 12900 bytes |
 | Cross-Machine Sync (`src/learning/sync.ts`) | COMPLETE | File exists — 10368 bytes |
@@ -72,6 +72,7 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 | r6-001 | Inject handlePreToolUse into assemblePrompt | PASSED | `src/engine/prompt-assembler.ts` — added import + try/catch call to `handlePreToolUse`; prepends fix_patterns + governance_rules context block before assembled prompt sections; non-fatal (DB absent → skip). tsc/build/lint/test UNVERIFIED (exec gate blocked). |
 | r6-002 | Wire handlePostToolUse in phase3-executor.ts | PASSED | `src/phases/phase3-executor.ts` — verified `handlePostToolUse` call exists at lines 856-873; improved `tokensConsumed` from hardcoded `0` to `outcome.tokensEstimated`. tsc/build UNVERIFIED (exec gate blocked). |
 | r6-003 | Wire handleSessionStart/handleSessionEnd hooks | PASSED | `src/phases/phase3-executor.ts` — `handleSessionStart` confirmed at lines 757-761 (before prompt loop); `handleSessionEnd` moved from sequential call into `try { ... } finally { handleSessionEnd }` block (lines 930-1007) so it always fires even on unexpected throw. All calls non-fatal (catch swallows). tsc/build UNVERIFIED (exec gate blocked). |
+| r6-004 | Enrich handlePreCompact with DB-sourced state | PASSED | `src/learning/precompact.ts` — `handlePreCompact` now queries `fix_patterns` (active errors, occurrence_count>0, ORDER BY last_seen DESC LIMIT 20) and `governance_rules` (active=1) from the DB at save time; merges with caller-supplied state using Set dedup; replaces hardcoded `'unknown'` machine_id with `getMachineId(resolvedPath)`. `loadLatestCompactSnapshot` and `buildPreCompactContextBlock` already fully implemented. All three re-exported from `integration.ts` line 238. TypeScript clean by inspection: Pick<FixPattern,...> and Pick<GovernanceRule,...> types used for query rows; `getMachineId(string)` matches signature. tsc/build UNVERIFIED (exec gate blocked). |
 
 ---
 
@@ -95,11 +96,11 @@ Final hardening pass: adversarial-review.ts (6717B), session-hooks.ts (5881B), i
 - **Run 3:** COMPLETE ✓
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
-- **Run 6:** 3/3+ IN PROGRESS
-- **Overall:** ~57/~65 queued prompts complete (~88%)
+- **Run 6:** 4/4+ IN PROGRESS
+- **Overall:** ~58/~65 queued prompts complete (~89%)
 
 ---
 
 ## Next Action
 
-Continue Run 6: next prompt TBD (r6-003 complete).
+Continue Run 6: next prompt TBD (r6-004 complete).

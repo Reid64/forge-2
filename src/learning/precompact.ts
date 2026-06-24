@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { getConnection } from './database.js';
+import { getConnection, getMachineId } from './database.js';
+import type { FixPattern, GovernanceRule } from './types.js';
 
 export interface PreCompactState {
   buildId: string;
@@ -29,19 +30,54 @@ export async function handlePreCompact(
 
   try {
     const db = getConnection(resolvedPath);
+
+    // Fetch active errors from fix_patterns (recent, recurring errors)
+    const fixPatternRows = db.prepare(`
+      SELECT error_message, error_category, error_fingerprint, occurrence_count
+      FROM fix_patterns
+      WHERE occurrence_count > 0
+      ORDER BY last_seen DESC
+      LIMIT 20
+    `).all() as Pick<FixPattern, 'error_message' | 'error_category' | 'error_fingerprint' | 'occurrence_count'>[];
+
+    const dbErrors = fixPatternRows.map(
+      (r) => `[${r.error_category}][x${r.occurrence_count}] ${r.error_message} (${r.error_fingerprint})`
+    );
+
+    // Fetch active governance rules from governance_rules
+    const ruleRows = db.prepare(`
+      SELECT rule_short_name, rule_text, scope, enforcement_count
+      FROM governance_rules
+      WHERE active = 1
+      ORDER BY enforcement_count DESC
+    `).all() as Pick<GovernanceRule, 'rule_short_name' | 'rule_text' | 'scope' | 'enforcement_count'>[];
+
+    const dbRules = ruleRows.map(
+      (r) => `[${r.scope}] ${r.rule_short_name}: ${r.rule_text}`
+    );
+
+    // Merge caller-supplied state with DB-sourced data (DB values supplement, not replace)
+    const enrichedState: PreCompactState = {
+      ...state,
+      activeErrors: [...new Set([...state.activeErrors, ...dbErrors])],
+      activeGovernanceRules: [...new Set([...state.activeGovernanceRules, ...dbRules])],
+    };
+
     const snapshotId = randomUUID();
+    const machineId = getMachineId(resolvedPath);
 
     db.prepare(`
       INSERT INTO compact_snapshots (id, build_id, prompt_index, state_json, machine_id, created_at)
-      VALUES (?, ?, ?, ?, 'unknown', datetime('now'))
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
     `).run(
       snapshotId,
-      state.buildId,
-      state.promptIndex,
-      JSON.stringify(state)
+      enrichedState.buildId,
+      enrichedState.promptIndex,
+      JSON.stringify(enrichedState),
+      machineId
     );
 
-    console.log(`[PRECOMPACT] Context snapshot saved: prompt ${state.promptIndex}, ${state.activeErrors.length} active errors, ${state.activeGovernanceRules.length} rules`);
+    console.log(`[PRECOMPACT] Context snapshot saved: prompt ${enrichedState.promptIndex}, ${enrichedState.activeErrors.length} active errors (${dbErrors.length} from DB), ${enrichedState.activeGovernanceRules.length} rules (${dbRules.length} from DB)`);
     return { saved: true, snapshotId };
   } catch (e: unknown) {
     console.warn(`[PRECOMPACT] Failed to save snapshot: ${String(e)}`);
