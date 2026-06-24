@@ -1,22 +1,22 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-005 — loops.ts complete (five learning loops)
+## Current Session: r1-006 — sync.ts replacement complete
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-23
+## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-005 |
-| Prompts Executed | 5 (r1-001b, r1-002, r1-003, r1-004, r1-005) |
-| Prompts Passed | 5 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-006 |
+| Prompts Executed | 6 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006) |
+| Prompts Passed | 6 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-005** — `src/learning/loops.ts` fully implemented (327 lines). Five learning loops: Loop 1 `scorePromptExecution` → delegates to savePromptScore; Loop 2 `captureError` + `checkAutoElevation` → error registration + auto-elevate to governance rule at 3+ occurrences; Loop 3 `updateDecisionWeights` → downstream error/retry rate computation via prompt_scores; Loop 4 `loadCrossProjectKnowledge` → loads rules/skills/fix_patterns/build_outcomes/evolutions; Loop 5 `analyzeForEvolutions` → 3 analysis passes (weak templates, ungoverned errors, retry-heavy task types) → PENDING evolution proposals. Plus `presentEvolutions` and `applyEvolution`. All imports verified against dependencies. ESLint-safe (`_machineId` prefix for unused var). Exec gate blocked — code verified by manual review against spec.
+**r1-006** — `src/learning/sync.ts` replaced with complete Cross-Machine Sync Protocol implementation. Lock acquire/release (stale detection, finally-block safety), loadSyncConfig, getLastSyncTimestamp, setLastSyncTimestamp, syncForgeMemory (graceful degradation), syncPull (readonly master, INSERT OR IGNORE), syncPush (lock-guarded, append-only, lock released in finally). forge_meta excluded from SYNCABLE_TABLES. Per-table error isolation. Fixed unused `getMachineId` import (was failing `noUnusedLocals`). Exec gate blocked — code verified by manual review against spec.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
@@ -26,9 +26,9 @@
 1. `npx tsc --noEmit` → expect zero errors
 2. `pnpm run build` → expect clean
 3. `pnpm lint` → expect clean
-4. node test → expect Loop 1-5 ALL PASS, R1-005 ALL TESTS PASS
+4. node test → expect R1-006 ALL TESTS PASS
 
-**Then continue queue: next prompt r1-006 (hooks-enhanced.ts or sync.ts per queue)**
+**Then continue queue: next prompt r1-007**
 
 ---
 

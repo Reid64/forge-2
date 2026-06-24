@@ -2,6 +2,28 @@
 
 ---
 
+# r1-006 RE-EXECUTION — 2026-06-24
+
+## Build Status: r1-006 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/sync.ts` — Cross-Machine Sync Protocol, fully implemented.
+
+- **`acquireSyncLock()`** → busy-wait loop with stale-lock detection (>2 min), creates lock file with machine_id + pid, returns bool ✓
+- **`releaseSyncLock()`** → safe unlink; never throws ✓
+- **`loadSyncConfig()`** → reads `~/.forge/sync_config.json`, merges defaults ✓
+- **`getLastSyncTimestamp()`** → reads `forge_meta` key `last_sync_timestamp`, returns epoch on miss ✓
+- **`setLastSyncTimestamp()`** → INSERT OR REPLACE into `forge_meta` ✓
+- **`syncForgeMemory()`** → graceful degradation (master missing → return 0), routes to syncPull/syncPush ✓
+- **`syncPull()`** → reads master readonly, INSERTs OR IGNOREs rows with `machine_id != local AND created_at > lastSync` ✓
+- **`syncPush()`** → acquires lock, INSERTs OR IGNOREs local rows with `machine_id = local AND created_at > lastSync`, lock released in `finally` ✓
+- **`forge_meta` excluded from sync** — SYNCABLE_TABLES filters it out ✓
+- **Per-table error isolation** — errors on one table logged + skipped; sync continues ✓
+- **Unused import fix** — removed `getMachineId` from import (was unused, would fail `noUnusedLocals`) ✓
+
+Exec gate blocked — `npx tsc --noEmit` and node verification require operator approval.
+
+---
+
 # r1-005 RE-EXECUTION — 2026-06-23
 
 ## Build Status: r1-005 VERIFIED BY INSPECTION (exec gate blocked)

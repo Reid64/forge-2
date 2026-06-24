@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { getConnection, getMachineId } from './database.js';
+import { getConnection } from './database.js';
 import { VALID_TABLES, type SyncConfig } from './types.js';
 
 const DEFAULT_SYNC_CONFIG_PATH = join(homedir(), '.forge', 'sync_config.json');
