@@ -2,9 +2,39 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 3 — r3-012 complete
-**Total Prompts Executed:** 36 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012)
+**Current Run:** Run 3 — r3-013 complete
+**Total Prompts Executed:** 37 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-015 + re-verify + r3-002 re-exec + r3-004 + r3-006 + r3-007 + r3-008 + r3-009 + r3-010 + r3-011 + r3-012 + r3-013)
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
+
+---
+
+## r3-013 — SENTINEL CLI COMMAND AUDIT (2026-06-24)
+
+### Status: COMPLETE (sentinel command already present — verified by inspection, no code changes required)
+
+**Task:** Add standalone `sentinel` CLI command to `src/cli/index.ts` if not already present; verify `runSentinelRing` export in `phase4-sentinel.ts`.
+
+**Finding:** Both artifacts are **already fully implemented**:
+
+**CLI command** (`src/cli/index.ts`, lines 1,268–1,289):
+- `forge sentinel <project-path>` command registered via Commander ✓
+- `--ring <ring>` option: `1`, `2`, `3`, or `all` (default `all`) ✓
+- `--prompt-number <n>` option with default `'1'` ✓
+- `--final` flag to force Ring 3 ✓
+- Dynamically imports `runSentinelRing` from `../phases/phase4-sentinel.js` ✓
+- Ring 2 skip logic: `promptNumber % 10 !== 0 && !isFinal` ✓
+- Ring 3 skip logic: `!isFinal` ✓
+- `process.exit(1)` on first failed ring ✓
+
+**`runSentinelRing` export** (`src/phases/phase4-sentinel.ts`, lines 3,621–3,636):
+- Signature: `runSentinelRing(ring: number, projectPath: string, promptNumber: number): Promise<{ passed: boolean; results: unknown[] }>` ✓
+- Ring 2: sets `options.ring2 = { promptNumber, isFinalPrompt: true }` ✓
+- Ring 3: sets `options.ring3 = { forceRun: true, isFinalPrompt: true }` ✓
+- Returns `{ passed: result.passed, results: result.checks }` ✓
+
+**No code changes required.** All CLI sentinel spec requirements already satisfied.
+
+**Exec gate:** `pnpm tsc --noEmit` and `pnpm build` blocked (intermittent per recorded history). No new code introduced — zero TypeScript errors expected. `node dist/cli/index.js sentinel --help` will show the command once built.
 
 ---
 
