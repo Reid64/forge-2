@@ -146,6 +146,8 @@ TypeScript error fixes (sync.ts .transaction() calls), types hardening (Adversar
 
 **r4-010:** Test suite static analysis complete. Exec gate blocked live `pnpm test` execution (all node/pnpm invocations require approval in this session). Static review of all 4 node:test files (30 tests): learning-database.test.ts (8 tests), learning-fingerprint.test.ts (7 tests), learning-queries.test.ts (8 tests), learning-sync.test.ts (7 tests). Each test assertion verified against the implementation by code inspection. Zero bugs found. Zero source files modified. Implementations correct: 14 tables + 26 indexes in database.ts; generalizeFilePath/generalizeErrorMessage/getErrorFingerprint logic verified; saveToForgeMemory UUID + machine_id + ISO created_at generation correct; sync lock management and defaults correct. Static result: 30/30 expected PASS.
 
+**r4-011:** `src/cli/config.ts` verified COMPLETE by full file inspection. All four required exports confirmed present and matching spec exactly: `ForgeConfig` interface (line 236), `DEFAULT_FORGE_CONFIG` (line 245), `mergeWithDefaults` (line 254), `saveConfig` (line 265). `forge_config.json` confirmed EXISTS at project root (confirmed by Glob). No code changes required. Exec gate blocked live `pnpm tsc --noEmit` run; 0 errors by inspection.
+
 ---
 
 ## r4-001 Re-run Verification (2026-06-24)
