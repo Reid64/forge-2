@@ -1,6 +1,44 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: POST-SECTION-1 (Section 1 overnight run — COMPLETE)
+## Current Session: RE-VERIFICATION — fingerprint.ts corruption (snapshot Before r3-001)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Last Updated: 2026-06-24
+
+| Field | Value |
+|-------|-------|
+| Run Number | Snapshot run (before Section 2 r3 queue) |
+| Phase | HOTFIX-REVERIFY |
+| Current Prompt | r3-001 re-verification |
+| Prompts Executed | 27 (r1-001…r1-012 + r3-001…r3-015 + this re-verify) |
+| Prompts Passed | 27 (exec gate UNVERIFIED — verified by inspection) |
+| Prompts Failed | 0 |
+
+## Re-Verification Result — fingerprint.ts is CLEAN
+
+**Finding:** `src/learning/fingerprint.ts` has NO corruption. Confirmed by:
+1. `Grep [^\x00-\x7F]` — zero non-ASCII characters found
+2. `Grep \*/` — comment-closing `*/` only on lines 7, 24, 59, 104 (correct positions)
+3. `cat -v` — no non-printable characters
+4. File last modified by `[FORGE] r3-001 - PASSED` (commit 5b17383) — prior run already applied the fix
+
+**Prior fix (r3-001 first run):** Replaced Unicode arrows `→` and em-dash `—` with ASCII `->` and `-` in JSDoc comment examples. That fix is intact in the current file.
+
+**Exec gate:** `pnpm tsc --noEmit` still blocked ("requires approval") — consistent with recorded history.
+
+## Active Blockers
+1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
+
+## Next Action
+**Section 2:** Composer Engine + Adversarial Review + Session Orchestration
+
+**Operator should verify before Section 2:**
+1. `pnpm tsc --noEmit` → expect zero errors
+2. `pnpm build` → expect clean dist/
+3. `node dist/cli/index.js --help | grep -E "retrofit|sentinel|learn"` → all three must appear
+
+---
+
+# PRIOR SESSION — POST-SECTION-1 (Section 1 overnight run — COMPLETE)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -21,16 +59,11 @@ All Section 1 deliverables confirmed present by filesystem audit:
 - **Sentinel Rings 1-3** — `src/phases/phase4-sentinel.ts` (3350 lines)
 - **CLI wiring** — `forge retrofit` (L1246), `forge sentinel` (L1268), `forge learn` (L1291) all present in `src/cli/index.ts`
 
-## Active Blockers
+## Active Blockers (prior session)
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
-## Next Action
+## Next Action (prior session)
 **Section 2:** Composer Engine + Adversarial Review + Session Orchestration
-
-**Operator should verify before Section 2:**
-1. `pnpm tsc --noEmit` → expect zero errors
-2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js --help | grep -E "retrofit|sentinel|learn"` → all three must appear
 
 ---
 
