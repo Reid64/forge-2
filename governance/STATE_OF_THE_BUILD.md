@@ -2,6 +2,35 @@
 
 ---
 
+# r6-002 — handlePostToolUse call verified in phase3-executor.ts, 2026-06-24
+
+## Build Status: VERIFIED (code inspection). `handlePostToolUse` from `src/learning/hooks-enhanced.ts` is called in `src/phases/phase3-executor.ts` at lines 857–872 of the main prompt loop, immediately after each `executePrompt` returns. The call is wrapped in `try/catch` (learning failures cannot crash the build) and passes all required parameters: `buildId`, `promptId`, `taskType`, `firstPassSuccess`, `retryCount`, `tokensConsumed`, `errorOutput`, `filesModified`, `projectName`, plus `techStackTags` for completeness. Compile gate is operator-**UNVERIFIED** this session — exec gate denied (known intermittent blocker per memory). By-inspection: the call site uses dynamic import (`await import('../learning/hooks-enhanced.js')`), passes all typed fields consistent with the `handlePostToolUse` opts interface, and matches the `gatPassRate` field name used in both the function signature and caller (intentional spelling — both sides consistent). No code changes required; implementation was already correct.
+
+### Files changed
+- None — `handlePostToolUse` call was already present and correct in `src/phases/phase3-executor.ts` (lines 857–872)
+
+### Codebase audit (r6-002)
+Full source tree audited. All modules present:
+- `src/phases/`: phase0-scout, phase1a-prd, phase1b-architect, phase1c-ingest, phase2-governance, phase3-executor, phase4-sentinel, phase5-learner — ALL PRESENT
+- `src/retrofit/`: types, preflight, scan-ops-1-4, scan-ops-5-8, scan-ops-9-14, scan, diagnose, reconcile, pipeline, index — ALL PRESENT (Run 2 complete)
+- `src/learning/`: database, queries, loops, hooks-enhanced, sync, session, integration, fingerprint, precompact, types, handoff-generator, session-lifecycle — ALL PRESENT (Run 1 complete)
+- `src/engine/`: queue-generator, parallel-scheduler, failure-predictor, prompt-rewriter, prompt-decomposer, claude-runner, git-manager, model-router, hook-manager, free-tier-manager, provider-router, governance-gate — ALL PRESENT
+- `src/analysis/`: cost-estimator, adversarial-review, agent-creator, template-evolver, six-laws-verifier, pattern-extractor, instinct-extractor, pass-at-k — ALL PRESENT
+- `src/memory/`: builds, prompts, resolutions, agents, insights, telemetry, profiles, patterns, brands, governance, scheduled-tasks, index, client, session-hooks, errors — ALL PRESENT
+- `src/tools/`: all 24+ tools including forge-logger, log-search, codebase-rag, dead-code-scanner, incremental-tester, security-scanner, architecture-guard, etc. — ALL PRESENT
+- `src/cli/`: index, commands/learning, repair-command — ALL PRESENT
+- `src/monitoring/`: deploy-agent, telemetry-receiver — ALL PRESENT
+- `src/types/`: index, build, governance, patterns, better-sqlite3.d.ts — ALL PRESENT
+
+### By-inspection type review
+`handlePostToolUse` at lines 857–872 of phase3-executor.ts: dynamic import from `'../learning/hooks-enhanced.js'` resolves at runtime. All required fields passed with correct types: `buildId: string`, `promptId: string`, `taskType: string`, `firstPassSuccess: boolean`, `retryCount: number`, `tokensConsumed: number`, `errorOutput: string`, `filesModified: string[]`, `projectName: string`. The `gatPassRate` field (intentional shared spelling) is also passed. The entire call is inside a `try {} catch { /* non-fatal */ }` block.
+
+### UNBLOCK (operator, from a permitted session)
+1. `pnpm tsc --noEmit` → expect zero errors.
+2. `pnpm run build` → expect clean build.
+
+---
+
 # FIX — session-lifecycle.ts TypeScript errors resolved, 2026-06-24 (fix-002)
 
 ## Build Status: AUTHORED. Three `shell: true` occurrences in `src/learning/session-lifecycle.ts` removed (lines 145, 205, 206). `shell` is not a valid property on `ExecSyncOptionsWithStringEncoding`; removing it resolves the TS2353 assignability errors. Compile gate is operator-**UNVERIFIED** this session (exec gate denied — known intermittent blocker per memory). By-inspection confirmed: all three `execSync` call sites now pass only `{ stdio: 'pipe' }`, which is valid.

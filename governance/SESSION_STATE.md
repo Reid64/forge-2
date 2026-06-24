@@ -1,6 +1,16 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: fix-002 — session-lifecycle.ts TypeScript errors fixed (2026-06-24)
+## Current Session: r6-002 — handlePostToolUse call verified in phase3-executor.ts (2026-06-24)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-24 (autonomous FORGE session r6-002)
+
+## Last Completed Prompt: r6-002 VERIFIED (code inspection). `handlePostToolUse` from `src/learning/hooks-enhanced.ts` confirmed present and correct in `src/phases/phase3-executor.ts` at lines 857–872. Call is wrapped in try-catch (learning failures cannot crash the build). All required parameters passed: buildId, promptId, taskType, firstPassSuccess, retryCount, tokensConsumed, errorOutput, filesModified, projectName. No code changes were required — implementation was already in place from prior run. Compile/build gates exec-DENIED (known intermittent gate); verified correct by inspection. STATE_OF_THE_BUILD.md updated.
+
+## Next Prompt: Per queue — next prompt in sequence after r6-002.
+
+---
+
+# PRIOR SESSION (fix-002) — session-lifecycle.ts TypeScript errors fixed (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-24 (autonomous FORGE session fix-002)
 
