@@ -2,6 +2,44 @@
 
 ---
 
+# r3-014 — LEARNING CLI AUDIT & COMPLETE (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Audit and complete the `forge learn` CLI commands in `src/cli/commands/learning.ts`.
+
+**Audit findings (pre-change):**
+- Command registered as `learning` (full word) — task requires `learn`.
+- `forge learn patterns` subcommand was entirely missing.
+- `forge learn sync` was a parent-only namespace (required `pull` or `push` subcommand); calling it alone showed help, not a sync.
+- `any` types used in `init` and `status` commands — flagged by strict ESLint.
+
+**Changes made to `src/cli/commands/learning.ts`:**
+
+1. **Renamed** `program.command('learning')` → `program.command('learn')` — all subcommands (init, status, sync, evolutions, rules) remain identical in behavior.
+
+2. **Added `forge learn patterns`** — queries `fix_patterns` table (local SQLite) sorted by `success_rate DESC, occurrence_count DESC` using `getForgeMemory()` from `src/learning/queries.ts`. Prints error category, fingerprint prefix, occurrence count, success rate (green/yellow/red), fix description.
+
+3. **Replaced `forge learn sync pull/push` subcommands** with single `forge learn sync` command:
+   - No flags: bidirectional (pull then push).
+   - `--pull`: pull only (master → local).
+   - `--push`: push only (local → master).
+   - Calls `syncForgeMemory()` from `src/learning/sync.ts`.
+
+4. **Fixed `any` types** → `{ name: string }[]` and `{ count: number } | undefined` where appropriate.
+
+**Command inventory after change:**
+- `forge learn init` — initialize SQLite DB
+- `forge learn status` — DB size, machine, last sync, key metrics (total scored, fix patterns, active rules), all table row counts
+- `forge learn patterns` — top fix patterns by success rate (NEW)
+- `forge learn sync [--pull] [--push]` — cross-machine sync (replaced pull/push subcommands)
+- `forge learn evolutions` — pending self-modification proposals
+- `forge learn rules` — active governance rules
+
+**Gates:** tsc/build unverifiable (exec gate blocked). Zero TypeScript errors expected — all imports verified against source exports; types are strict-mode compliant.
+
+---
+
 # r3-013 — SENTINEL STANDALONE CLI COMMAND (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

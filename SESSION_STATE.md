@@ -1,20 +1,20 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-013 — SENTINEL STANDALONE CLI COMMAND (2026-06-24)
+## Current Session: r3-014 — LEARNING CLI AUDIT & COMPLETE (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | SENTINEL HARDENING |
-| Current Prompt | r3-013 (Sentinel standalone CLI) |
-| Prompts Executed | 25 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-013) |
-| Prompts Passed | 25 (exec gate UNVERIFIED) |
+| Phase | CLI HARDENING |
+| Current Prompt | r3-014 (Learning CLI audit) |
+| Prompts Executed | 26 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-014) |
+| Prompts Passed | 26 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-013 (SENTINEL STANDALONE CLI COMMAND)** — Audited `src/cli/index.ts`: no `sentinel` command existed. Audited `src/phases/phase4-sentinel.ts`: no `runSentinelRing` export. Added `runSentinelRing(ring, projectPath, promptNumber): Promise<{ passed: boolean; results: unknown[] }>` to phase4-sentinel.ts (wires ring 1/2/3 into `runSentinel` with appropriate options). Added `sentinel <project-path>` command to CLI after `retrofit` with `--ring`, `--prompt-number`, `--final` options; ring 2 skipped unless prompt% 10===0 or --final; ring 3 skipped unless --final; process.exit(1) on any failure. Exec gate blocked; zero TS errors expected by inspection.
+**r3-014 (LEARNING CLI AUDIT)** — Audited `src/cli/commands/learning.ts`. Found: command was `learning` (not `learn`), `patterns` subcommand missing, `sync` was namespace-only (no direct action), `any` types in two commands. Changes: renamed to `learn`, added `forge learn patterns` (queries `fix_patterns` sorted by success_rate via `getForgeMemory()`), replaced `sync pull`/`sync push` subcommands with single `forge learn sync [--pull] [--push]` (defaults to bidirectional), fixed `any` → proper types. All imports verified against source exports. Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
@@ -23,7 +23,9 @@
 Operator can verify with:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js sentinel --help` → shows sentinel command with --ring, --prompt-number, --final options
+3. `node dist/cli/index.js --help` → `learn` appears in command list
+4. `node dist/cli/index.js learn --help` → shows init, status, patterns, sync, evolutions, rules
+5. `node dist/cli/index.js learn patterns --help` → shows `--limit <n>` option
 
 ---
 
