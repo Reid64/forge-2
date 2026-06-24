@@ -113,8 +113,8 @@ RETROFIT pipeline: 10 files in src/retrofit/
 ### Run 3 — COMPLETE (r3-001 … r3-015 + hotfixes)
 Adversarial review, session lifecycle, handoff generator, loops enhancement, sync hardening
 
-### Run 4 — COMPLETE (r4-001 … r4-012)
-TypeScript error fixes (sync.ts .transaction() calls), types hardening (AdversaryFindingRecord, BuildFingerprintRecord), sync verification, adversarial review module, session lifecycle verification, handoff generator verification, learning loops verification, learning CLI verification, CLI retrofit command wiring, forge_config.json, README.md
+### Run 4 — COMPLETE (r4-001 … r4-013)
+TypeScript error fixes (sync.ts .transaction() calls), types hardening (AdversaryFindingRecord, BuildFingerprintRecord), sync verification, adversarial review module, session lifecycle verification, handoff generator verification (r4-003: 155 lines, exact spec match), learning loops verification, learning CLI verification, CLI retrofit command wiring, forge_config.json, README.md
 
 ---
 
