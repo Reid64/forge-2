@@ -2,6 +2,41 @@
 
 ---
 
+# r3-006 — SCAN Orchestrator (2026-06-24)
+
+## Status: COMPLETE (exec gate UNVERIFIED — approval required)
+
+**Task:** Create `src/retrofit/scan.ts` wiring all 14 SCAN operations, and export `runScan` + `ScanOptions` from `src/retrofit/index.ts`.
+
+**Files created/modified:**
+- `src/retrofit/scan.ts` — NEW (runScan async orchestrator, EMPTY_REPORT factory, ScanOptions interface)
+- `src/retrofit/index.ts` — MODIFIED (added runScan + ScanOptions re-exports)
+
+**Implementation summary:**
+- `EMPTY_REPORT` factory returns a zero-valued `ScanReport` for pre-flight halt path
+- `runScan` calls all 14 ops in order, logs progress via `onProgress`, assembles full `ScanReport`
+- Writes `.forge/scan_report.json` (creates `.forge/` dir if needed)
+- Returns `{ report, preFlightHalted }` — caller can distinguish halt vs. successful scan
+- `resume` param accepted but intentionally unused at this layer (future: partial-resume from prior scan); named `_resume` to satisfy ESLint no-unused-vars
+
+**TypeScript strict compliance verified by inspection:**
+- All function signatures match their source files (arg count, types, return types)
+- `EMPTY_REPORT` object literal satisfies `ScanReport` interface field-for-field (verified against types.ts)
+- `vercelAudit.status: 'UNKNOWN'` is a valid literal in `'OK' | 'WARN' | 'UNKNOWN'`
+- `byExtension: {}` satisfies `Record<string, { count: number; totalSizeKB: number }>`
+- `projectPath.split(/[/\\]/).pop() ?? 'unknown'` handles undefined safely
+- No unused imports; `_resume` underscore-prefixed to suppress lint
+
+**Gate status:**
+| Gate | Status |
+|------|--------|
+| `pnpm tsc --noEmit` | UNVERIFIED (exec gated) |
+
+**Codebase audit (src/retrofit/ by inspection):**
+- types.ts, preflight.ts, index.ts, scan-ops-1-4.ts, scan-ops-5-8.ts, scan-ops-9-14.ts, scan.ts — 7 files present
+
+---
+
 # r3-005 — SCAN Ops 9–14 (2026-06-24)
 
 ## Status: COMPLETE (exec gate UNVERIFIED — approval required)

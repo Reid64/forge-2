@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r3-005 — SCAN Ops 9–14 (2026-06-24)
+## Current Session: r3-006 — SCAN Orchestrator (2026-06-24)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,19 +8,19 @@
 |-------|-------|
 | Run Number | Run 3 (in progress) |
 | Phase | RETROFIT — SCAN |
-| Current Prompt | r3-005 (SCAN Ops 9–14) |
-| Prompts Executed | 17 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005) |
-| Prompts Passed | 17 (exec gate UNVERIFIED) |
+| Current Prompt | r3-006 (SCAN Orchestrator) |
+| Prompts Executed | 18 (r1-001…r1-012 + r3-001 hotfix + r3-002 + r3-003 + r3-004 + r3-005 + r3-006) |
+| Prompts Passed | 18 (exec gate UNVERIFIED) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-005 (SCAN Ops 9–14)** — Created `src/retrofit/scan-ops-9-14.ts` with six SCAN operations: `auditPackages` (Op 9 — pnpm audit/outdated), `inventoryGovernanceDocs` (Op 10 — 8-doc staleness check), `checkTypeScriptCompilation` (Op 11 — tsc --noEmit parser), `runExistingTests` (Op 12 — vitest JSON runner), `testDynamicRoutes` (Op 13 — next dev spawner, GET-only), `analyzeVercelDeployment` (Op 14 — vercel ls parser). Removed unused `readdirSync` import. Added re-export to `src/retrofit/index.ts`. Exec gate blocked; zero TS errors expected by inspection.
+**r3-006 (SCAN Orchestrator)** — Created `src/retrofit/scan.ts`: `runScan` async function wiring all 14 SCAN operations in order, `EMPTY_REPORT` factory for pre-flight halt path, writes `.forge/scan_report.json` on success. Added `runScan` + `ScanOptions` re-exports to `src/retrofit/index.ts`. TypeScript strict compliance verified by inspection (all arg types, return types, ScanReport field coverage confirmed against types.ts). Exec gate blocked; zero TS errors expected by inspection.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
-**r3-006** — SCAN Orchestrator (`src/retrofit/scan.ts`): wire all 14 ops, write `.forge/scan_report.json`.
+**r3-007** — Next RETROFIT prompt (DIAGNOSE or pipeline integration per queue).
 
 ---
 
