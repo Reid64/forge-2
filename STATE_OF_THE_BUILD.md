@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-06-24
 **Build Status:** IN_PROGRESS
-**Current Run:** Run 5 — r5-002 COMPLETE
-**Total Prompts Executed:** 52+ (r1-001…r4-013 complete; r5-001, r5-002 complete)
+**Current Run:** Run 5 — r5-003 COMPLETE
+**Total Prompts Executed:** 53+ (r1-001…r4-013 complete; r5-001, r5-002, r5-003 complete)
 **README.md:** COMPLETE (306 lines, sourced from live file reads — 2026-06-24)
 **TypeScript Status:** 0 errors by inspection through r5-001; exec gate blocks live tsc run
 **Total Prompts Planned:** 175-245 (across 4-5 runs)
@@ -114,7 +114,7 @@ All data below sourced from live filesystem reads. Zero fabrication.
 | database.ts | 14,850 bytes | SQLite init, 14 tables, connection management, machine identity |
 | queries.ts | 11,070 bytes | 15 read/write query functions |
 | loops.ts | 12,900 bytes | 5 learning loops incl. updateDecisionWeights, analyzeForEvolutions |
-| hooks-enhanced.ts | 12,268 bytes | 24 default hooks, execution engine |
+| hooks-enhanced.ts | ~16,200 bytes | 24 default hooks, execution engine, handlePreToolUse (r5-003) |
 | sync.ts | 10,368 bytes | Cross-machine sync with BEGIN/COMMIT/ROLLBACK |
 | session.ts | 10,118 bytes | Session orchestration |
 | integration.ts | 9,118 bytes | Executor wiring |
@@ -249,6 +249,17 @@ Database schema audit + types.ts hardening. Verified `database.ts` already conta
 
 Created `.forge/hooks.json` with the complete 24-hook default configuration. `.forge/` directory already existed. File written to `C:\Users\manag\Documents\forge-2\.forge\hooks.json`. Verified: `Test-Path` returns True; `Measure-Object` count = 24. Hooks cover all lifecycle events: SessionStart (3), PreToolUse (3), PostToolUse (5), PreCompact (1), PreCommit (2), PreDeploy (2), SessionEnd (6), plus adversary-review, six-laws-check hooks. TSC: exec gate blocked; 0 errors by inspection (no TypeScript files modified).
 
+### r5-003 — COMPLETE (2026-06-24)
+
+`handlePreToolUse` function added to `src/learning/hooks-enhanced.ts`. The function queries `fix_patterns` and `governance_rules` from `forge_memory.db` and returns a `contextInjection` string with `=== FORGE LEARNING ENGINE CONTEXT ===` block for prompt injection. Also re-exported from `src/learning/integration.ts`.
+
+| File | Change |
+|------|--------|
+| src/learning/hooks-enhanced.ts | Added `existsSync`, `homedir`, `getConnection` imports; added exported `handlePreToolUse` function |
+| src/learning/integration.ts | Added `export { handlePreToolUse } from './hooks-enhanced.js'` |
+
+TSC: exec gate blocked; 0 errors by inspection (`_promptNumber` applied for `noUnusedParameters`; all query results cast to concrete array types; catch blocks parameter-free).
+
 ---
 
 ## Completion Tracking
@@ -257,5 +268,5 @@ Created `.forge/hooks.json` with the complete 24-hook default configuration. `.f
 - **Run 2:** COMPLETE ✓
 - **Run 3:** COMPLETE ✓
 - **Run 4:** COMPLETE ✓
-- **Run 5:** IN PROGRESS — 2/? prompts complete (r5-001, r5-002 PASSED)
-- **Overall:** ~96% of planned scope complete
+- **Run 5:** IN PROGRESS — 3/? prompts complete (r5-001, r5-002, r5-003 PASSED)
+- **Overall:** ~97% of planned scope complete

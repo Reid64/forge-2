@@ -1,5 +1,7 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { getConnection } from './database.js';
 
 export const HOOKS_VERSION = '1.0.0';
 
@@ -442,3 +444,106 @@ export function writeDefaultHooksConfig(projectPath: string, projectName: string
   const hooks = generateDefaultHooksConfig(projectName);
   writeFileSync(join(forgeDir, 'hooks.json'), JSON.stringify(hooks, null, 2), 'utf8');
 }
+
+// ---------------------------------------------------------------------------
+// handlePreToolUse — queries fix_patterns + governance_rules for context injection
+// ---------------------------------------------------------------------------
+
+export async function handlePreToolUse(
+  taskType: string,
+  techStackTags: string[],
+  _promptNumber: number,
+  dbPath?: string
+): Promise<{ contextInjection: string; patternsFound: number; rulesFound: number }> {
+  const resolvedPath = dbPath ?? join(homedir(), '.forge', 'forge_memory.db');
+
+  if (!existsSync(resolvedPath)) {
+    return { contextInjection: '', patternsFound: 0, rulesFound: 0 };
+  }
+
+  try {
+    const db = getConnection(resolvedPath);
+
+    // Query fix patterns with high success rate for this task type
+    const patterns = db.prepare(`
+      SELECT fix_description, fix_diff, error_category, success_rate, occurrence_count
+      FROM fix_patterns
+      WHERE (success_rate > 0.7 OR (success_rate > 0.5 AND occurrence_count >= 5))
+        AND (tech_stack_tags LIKE ? OR tech_stack_tags = '[]' OR tech_stack_tags IS NULL)
+      ORDER BY (success_rate * occurrence_count) DESC
+      LIMIT 5
+    `).all(`%${techStackTags[0] ?? 'typescript'}%`) as Array<{
+      fix_description: string | null;
+      fix_diff: string | null;
+      error_category: string;
+      success_rate: number;
+      occurrence_count: number;
+    }>;
+
+    // Query active governance rules
+    const rules = db.prepare(`
+      SELECT rule_text, rule_short_name, enforcement_count
+      FROM governance_rules
+      WHERE active = 1
+        AND (scope = 'GLOBAL' OR task_type = ? OR task_type IS NULL)
+      ORDER BY enforcement_count DESC
+      LIMIT 10
+    `).all(taskType) as Array<{
+      rule_text: string;
+      rule_short_name: string;
+      enforcement_count: number;
+    }>;
+
+    if (patterns.length === 0 && rules.length === 0) {
+      return { contextInjection: '', patternsFound: 0, rulesFound: 0 };
+    }
+
+    const lines: string[] = [
+      '=== FORGE LEARNING ENGINE CONTEXT ===',
+    ];
+
+    if (rules.length > 0) {
+      lines.push('');
+      lines.push('ACTIVE GOVERNANCE RULES (must be followed):');
+      for (const r of rules) {
+        lines.push(`  - ${r.rule_text}`);
+      }
+    }
+
+    if (patterns.length > 0) {
+      lines.push('');
+      lines.push('KNOWN FIX PATTERNS (apply proactively):');
+      for (const p of patterns) {
+        const desc = p.fix_description ?? `Fix for ${p.error_category} errors`;
+        const rate = (p.success_rate * 100).toFixed(0);
+        lines.push(`  - [${p.error_category}] ${desc} (${rate}% success, ${p.occurrence_count} occurrences)`);
+        if (p.fix_diff && p.fix_diff.length < 300) {
+          lines.push(`    ${p.fix_diff}`);
+        }
+      }
+    }
+
+    lines.push('');
+    lines.push('=== END LEARNING CONTEXT ===');
+    lines.push('');
+
+    // Update enforcement counts
+    if (rules.length > 0) {
+      const updateStmt = db.prepare(
+        "UPDATE governance_rules SET enforcement_count = enforcement_count + 1, last_enforced = datetime('now') WHERE rule_short_name = ?"
+      );
+      for (const r of rules) {
+        try { updateStmt.run(r.rule_short_name); } catch { /* non-fatal */ }
+      }
+    }
+
+    return {
+      contextInjection: lines.join('\n'),
+      patternsFound: patterns.length,
+      rulesFound: rules.length,
+    };
+  } catch {
+    return { contextInjection: '', patternsFound: 0, rulesFound: 0 };
+  }
+}
+

@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN 5 — r5-002 COMPLETE
+## Current Session: RUN 5 — r5-003 COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | Run Number | Run 5 |
-| Phase | r5-002 COMPLETE |
-| Current Prompt | r5-002 done; awaiting next prompt |
-| Prompts Executed This Run | 2 (r5-001: types.ts hardening; r5-002: hooks.json) |
-| Prompts Passed | 2 |
+| Phase | r5-003 COMPLETE |
+| Current Prompt | r5-003 done; awaiting next prompt |
+| Prompts Executed This Run | 3 (r5-001: types.ts hardening; r5-002: hooks.json; r5-003: handlePreToolUse) |
+| Prompts Passed | 3 |
 | Prompts Failed | 0 |
 | First Pass Rate | 100% (by inspection) |
 | TypeScript | 0 errors — verified by inspection (exec gate blocked live run) |
@@ -24,18 +24,19 @@
 | CompactSnapshot interface | ADDED — src/learning/types.ts (r5-001) |
 | DecisionWeight interface | ADDED — src/learning/types.ts (r5-001) |
 | .forge/hooks.json | CREATED — 24 hooks, all lifecycle events covered (r5-002) |
+| handlePreToolUse | ADDED — src/learning/hooks-enhanced.ts; exported from integration.ts (r5-003) |
 
 ---
 
 ## Last Completed Prompt
 
-**r5-002** — Created `.forge/hooks.json` with complete 24-hook default configuration. `.forge/` directory already existed. Verified: `Test-Path ".forge/hooks.json"` = True; hook count = 24. Lifecycle events covered: SessionStart (3 hooks), PreToolUse (3), PostToolUse (5 incl. ring1-tsc + ring1-eslint + adversary-review + six-laws-check), PreCompact (1), PreCommit (2), PreDeploy (2), SessionEnd (6). TSC: exec gate blocked; 0 errors by inspection (no TypeScript files modified). STATE_OF_THE_BUILD.md and SESSION_STATE.md updated.
+**r5-003** — Added `handlePreToolUse` to `src/learning/hooks-enhanced.ts`. Function queries `fix_patterns` (success_rate > 0.7 or > 0.5 + 5+ occurrences) and `governance_rules` (active=1, GLOBAL or matching task_type) from forge_memory.db, builds `=== FORGE LEARNING ENGINE CONTEXT ===` block for prompt injection, updates enforcement_count after injection. Returns `{contextInjection, patternsFound, rulesFound}`. Re-exported from `integration.ts`. TSC: exec gate blocked; 0 errors by inspection.
 
 ---
 
 ## Next Action — What Remains Incomplete
 
-1. **Wire PreToolUse hook** (r5-003+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` does not query fix_patterns/governance_rules from forge_memory.db and does not inject `=== FORGE LEARNING ENGINE CONTEXT ===` into assembled prompts. This is the primary remaining feature gap. Queue: `queue-run5.yaml`.
+1. **Wire handlePreToolUse into prompt assembler** (r5-004+) — `src/engine/prompt-assembler.ts` `assemblePrompt()` still does not call `handlePreToolUse` and inject the returned `contextInjection` into assembled prompts. `handlePreToolUse` is now implemented and exported; it needs to be consumed by the assembler.
 
 2. **Run `pnpm tsc --noEmit`** — Verify 0 TypeScript errors with live tsc output at Run 5 start. All previous verification was by inspection only due to exec gate.
 
@@ -67,7 +68,7 @@
 | forge_memory.db | Not yet created (created at first run of CLI) |
 | forge_config.json | EXISTS at project root |
 | dist/ | STALE — built Jun 23, missing Run 3/4 modules |
-| src/learning/ | 12 files COMPLETE |
+| src/learning/ | 12 files COMPLETE (hooks-enhanced.ts now has handlePreToolUse) |
 | src/retrofit/ | 10 files COMPLETE |
 | src/analysis/adversarial-review.ts | 127 lines COMPLETE |
 
@@ -79,6 +80,8 @@
 |------|--------|
 | src/learning/types.ts | Added HookExecutionLog, CompactSnapshot, DecisionWeight interfaces (r5-001) |
 | .forge/hooks.json | Created — 24-hook default configuration (r5-002) |
+| src/learning/hooks-enhanced.ts | Added handlePreToolUse function + 3 imports (r5-003) |
+| src/learning/integration.ts | Added handlePreToolUse re-export (r5-003) |
 | STATE_OF_THE_BUILD.md | Updated each prompt |
 | SESSION_STATE.md | Updated each prompt |
 
