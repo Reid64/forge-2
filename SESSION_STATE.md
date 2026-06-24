@@ -94,6 +94,18 @@ cd C:\Users\manag\Documents\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"
 
 ---
 
+## fix-004 Applied (2026-06-24)
+
+Snapshot `[FORGE-SNAPSHOT] Before fix-004` was taken before this fix. Seven TypeScript errors fixed in `src/retrofit/scan-ops-9-14.ts`:
+
+1. Lines 45 (×5): Wrapped `errors.push(...)` in `if (m[1] && m[2] && m[3] && m[4] && m[5])` guard — eliminates all five `string | undefined` type errors from regex match group access.
+2. Line 51: Removed `shell: true` from `execSync` opts in `runExistingTests` — type mismatch eliminated.
+3. Line 81: Removed `shell: true` from `execSync` opts in `analyzeVercelDeployment` — type mismatch eliminated.
+
+TSC verification: exec gate blocked; 0 errors by inspection.
+
+---
+
 ## fix-003 Applied (2026-06-24)
 
 Snapshot `[FORGE-SNAPSHOT] Before fix-003` was taken before this fix. Three TypeScript errors fixed in `src/retrofit/scan-ops-1-4.ts`:

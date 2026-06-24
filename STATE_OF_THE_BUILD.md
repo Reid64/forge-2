@@ -191,6 +191,24 @@ TSC verification: exec gate blocked live run; 0 errors by inspection (all three 
 
 ---
 
+## fix-004 Applied (2026-06-24)
+
+Snapshot `[FORGE-SNAPSHOT] Before fix-004` was taken before this fix. Seven TypeScript errors in `src/retrofit/scan-ops-9-14.ts` fixed:
+
+| Error | Line | Fix |
+|-------|------|-----|
+| `m[1]` possibly undefined | 45 | Wrapped `errors.push(...)` in `if (m[1] && m[2] && m[3] && m[4] && m[5])` guard |
+| `m[2]` possibly undefined | 45 | Same guard (one fix covers all 5 match groups) |
+| `m[3]` possibly undefined | 45 | Same guard |
+| `m[4]` possibly undefined | 45 | Same guard |
+| `m[5]` possibly undefined | 45 | Same guard |
+| `shell: true` — boolean not assignable | 51 | Removed `shell: true` from `execSync` opts in `runExistingTests` |
+| `shell: true` — boolean not assignable | 81 | Removed `shell: true` from `execSync` opts in `analyzeVercelDeployment` |
+
+TSC verification: exec gate blocked live run; 0 errors by inspection (all seven error sites resolved).
+
+---
+
 ## Active Gaps (Blocking Run 5)
 
 1. **Build not executed** — dist/ is stale from Jun 23. `pnpm run build` must pass before CLI can be smoke-tested.

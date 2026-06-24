@@ -42,13 +42,17 @@ export function checkTypeScriptCompilation(projectPath: string): CompilationErro
   const errors: CompilationError[] = [];
   const re = /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(output)) !== null) errors.push({ file: m[1], line: +m[2], column: +m[3], code: m[4], message: m[5].trim() });
+  while ((m = re.exec(output)) !== null) {
+    if (m[1] && m[2] && m[3] && m[4] && m[5]) {
+      errors.push({ file: m[1], line: +m[2], column: +m[3], code: m[4], message: m[5].trim() });
+    }
+  }
   return errors;
 }
 
 export function runExistingTests(projectPath: string): { testFilesFound: number; passed: number|null; failed: number|null } {
   let testFilesFound = 0;
-  try { testFilesFound = parseInt(execSync('find . -name "*.test.ts" -o -name "*.spec.ts" 2>/dev/null | grep -v node_modules | wc -l', { cwd: projectPath, stdio: 'pipe', shell: true }).toString().trim(), 10) || 0; } catch {}
+  try { testFilesFound = parseInt(execSync('find . -name "*.test.ts" -o -name "*.spec.ts" 2>/dev/null | grep -v node_modules | wc -l', { cwd: projectPath, stdio: 'pipe' }).toString().trim(), 10) || 0; } catch {}
   const hasVitest = existsSync(join(projectPath, 'vitest.config.ts')) || existsSync(join(projectPath, 'vitest.config.js'));
   if (!hasVitest) return { testFilesFound, passed: null, failed: null };
   try { const raw = execSync('npx vitest run --reporter=json', { cwd: projectPath, stdio: 'pipe', timeout: 120_000 }).toString(); const data = JSON.parse(raw); return { testFilesFound, passed: data.numPassedTests ?? 0, failed: data.numFailedTests ?? 0 }; }
@@ -78,7 +82,7 @@ export async function testDynamicRoutes(projectPath: string, routes: Array<{type
 export function analyzeVercelDeployment(projectPath: string, vercelAvailable: boolean): VercelDeployInfo {
   if (!vercelAvailable) return { url: null, lastDeployedAt: null, daysSinceDeploy: null, status: 'UNKNOWN' };
   try {
-    const raw = execSync('vercel ls --json 2>/dev/null | head -c 4096', { cwd: projectPath, stdio: 'pipe', shell: true }).toString();
+    const raw = execSync('vercel ls --json 2>/dev/null | head -c 4096', { cwd: projectPath, stdio: 'pipe' }).toString();
     const dep = (Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [JSON.parse(raw)])[0];
     if (!dep) return { url: null, lastDeployedAt: null, daysSinceDeploy: null, status: 'UNKNOWN' };
     const createdAt = dep.created ? new Date(dep.created).toISOString() : null;
