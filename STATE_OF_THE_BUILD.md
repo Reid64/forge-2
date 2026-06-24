@@ -2,6 +2,41 @@
 
 ---
 
+# r1-008 — FORGE 2.0 Learning Engine: `src/learning/precompact.ts` + `src/learning/session.ts` complete implementation, 2026-06-23 (session #63)
+
+## Build Status: r1-008 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/precompact.ts`** (REPLACED stub with FULL implementation) — PreCompact Context Preservation:
+  - **`shouldPreCompact(promptIndex, totalPrompts)`** — returns true if `promptIndex/totalPrompts >= 0.8` OR `promptIndex > 30 AND promptIndex % 10 === 0`.
+  - **`invokePreCompactSave(context, dbPath?)`** — queries `fix_patterns` for active unresolved errors (occurrence_count > 0, fix_diff IS NULL), queries `governance_rules` for active rules, runs `git status --porcelain` via `execSync`. Packages into `SnapshotState` and saves to `compact_snapshots` via `saveToForgeMemory`. Returns snapshot id.
+  - **`restoreCompactedContext(buildId, dbPath?)`** — reads most-recent `compact_snapshots` row for buildId via `db.prepare().get()`. Parses `state_json`. Formats recovery block: `=== FORGE CONTEXT RECOVERY ===` / Phase / Prompt / Active errors (count + per-error details) / Governance rules (count + summaries) / Acceptance criteria / `=== END RECOVERY ===`. Returns null if no snapshot exists or state_json is malformed.
+- **`src/learning/session.ts`** (REPLACED stub with FULL implementation) — Session Orchestration:
+  - **`getBuildFingerprint(projectPath)`** — walks all project files recursively via `readdirSync({ withFileTypes: true })`, skipping `node_modules`, `.next`, `.git`, `dist`, `build`, `coverage`, and `.forge/session_state.json`. For each file: `relativePath|SHA256(content)`. Sorts paths for determinism. Returns SHA-256 of composite as 64-char hex.
+  - **`exportSessionState(params)`** — gets git branch (`--show-current`), commit (`rev-parse HEAD`), dirty flag (`status --porcelain`). Computes fingerprint. Writes `.forge/session_state.json` with build identity, execution position, git state, fingerprint, queue status, run stats, first_pass_rate. Writes to `build_outcomes` table via `saveToForgeMemory`.
+  - **`resumeForgeSession(projectPath, _dbPath?)`** — reads `.forge/session_state.json`. Returns `{ canResume: false }` if absent. Computes current fingerprint, compares to stored. Returns `{ canResume: true, state, fingerprintMatch }`.
+  - **`testCrashRecovery(projectPath, dbPath?)`** — checks `.forge/forge_running.lock`. If exists and `> 5 min` old (via `statSync.mtimeMs`), returns `{ crashed: true }`. Reads lock `build_id`, queries `compact_snapshots` for recovery point via `getForgeMemory`. Returns `{ crashed: false }` if lock is fresh or absent.
+  - **`setForgeLock(projectPath, buildId)`** — creates `.forge/forge_running.lock` with `{ build_id, machine_id, started_at, pid }`.
+  - **`removeForgeLock(projectPath)`** — unlinks `.forge/forge_running.lock`. Swallows all errors (idempotent).
+  - **`exportSessionHandoff(projectPath, sessionState)`** — generates `.forge/SESSION_HANDOFF.md` with 8 sections: Build Summary, Completed This Run, Failed This Run, Active Blockers, Queue Status, Next Run Plan, Environment Notes, Learning Highlights.
+
+### Design invariants verified by inspection
+- `shouldPreCompact`: test cases verified mentally: 40/50=0.8 → true; 5/50=0.1 → false; 40/100 with 40>30 and 40%10===0 → true ✓
+- `noUncheckedIndexedAccess`: `snapshots[0]` checked with `!== undefined`; `readdirSync` IIFE returns `[]` on error, so `for...of` always safe ✓
+- `noUnusedParameters`: `_dbPath` in `resumeForgeSession` prefixed with underscore ✓
+- `noUnusedLocals`: all constants used; no orphaned imports ✓
+- `strictNullChecks`: `(state as Record<string, unknown>)['fingerprint'] as string | undefined`; `(lockData['build_id'] as string | undefined)` ✓
+- All imports used: `createHash`, `execSync`, `readdirSync/readFileSync/writeFileSync/existsSync/unlinkSync/mkdirSync/statSync`, `Dirent`, `join/relative/basename`, `getMachineId`, `saveToForgeMemory`, `getForgeMemory` ✓
+- `removeForgeLock` swallows errors — satisfies "never throws" contract ✓
+- `exportSessionState` uses `saveToForgeMemory` without dbPath (function has no dbPath parameter per spec) ✓
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-008 prompt spec (PreCompact triggers, lock management) → `R1-008 ALL TESTS PASS`.
+3. Proceed to next prompt in queue (r1-009).
+
+---
+
 # r1-007 — FORGE 2.0 Learning Engine: `src/learning/hooks-enhanced.ts` complete implementation, 2026-06-23 (session #62)
 
 ## Build Status: r1-007 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.

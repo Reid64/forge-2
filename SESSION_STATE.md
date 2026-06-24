@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-008 — `src/learning/precompact.ts` + `src/learning/session.ts` complete implementation (session #63)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-008 — Replaced stub `src/learning/precompact.ts` with full PreCompact Context Preservation: `shouldPreCompact` (>=80% or every 10th prompt after #30), `invokePreCompactSave` (queries unresolved fix_patterns + active governance_rules + git status → saves to compact_snapshots), `restoreCompactedContext` (reads most-recent snapshot, formats FORGE CONTEXT RECOVERY block). Replaced stub `src/learning/session.ts` with full Session Orchestration: `getBuildFingerprint` (SHA-256 of sorted relativePath|fileHash composite, excludes node_modules/.next/.git/dist/build/coverage/.forge/session_state.json), `exportSessionState` (git branch+commit+dirty, fingerprint, writes session_state.json + build_outcomes row), `resumeForgeSession` (reads session_state.json, compares fingerprints), `testCrashRecovery` (checks lock age > 5 min via statSync.mtimeMs, queries compact_snapshots for recovery point), `setForgeLock` (writes forge_running.lock with build_id/machine_id/started_at/pid), `removeForgeLock` (idempotent unlink), `exportSessionHandoff` (writes SESSION_HANDOFF.md with 8 sections). All TypeScript strict invariants verified by inspection. Compile/runtime gates UNVERIFIED — exec blocker persists.
+
+## Next Prompt: r1-009 (next in queue). Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-008 verification tests (PreCompact triggers, lock management) → `R1-008 ALL TESTS PASS`.
+
+---
+
+# PRIOR SESSION (#62)
+
 ## Current Session: r1-007 — `src/learning/hooks-enhanced.ts` complete implementation (session #62)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23
