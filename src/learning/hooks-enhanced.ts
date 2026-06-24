@@ -1,2 +1,444 @@
-// FORGE 2.0 Learning Engine — Enhanced Hooks (stub — implemented in r1-007)
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 export const HOOKS_VERSION = '1.0.0';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type EnhancedHookEvent =
+  | 'SessionStart'
+  | 'PreToolUse'
+  | 'PostToolUse'
+  | 'PreCommit'
+  | 'PreCompact'
+  | 'PreDeploy'
+  | 'PostDeploy'
+  | 'SessionEnd';
+
+export interface HookConditions {
+  file_pattern?: string;
+  exclude_pattern?: string;
+  task_types?: string[];
+  min_prompt_number?: number;
+  phases?: string[];
+}
+
+export interface HookDefinition {
+  name: string;
+  event: EnhancedHookEvent;
+  action: string;
+  script: string | null;
+  blocking: boolean;
+  timeout_seconds: number;
+  enabled: boolean;
+  priority: number;
+  description: string;
+  conditions?: HookConditions;
+}
+
+export interface HookContext {
+  project_path: string;
+  build_id: string;
+  prompt_number: number;
+  file?: string;
+  files?: string[];
+  last_commit?: string;
+  task_type?: string;
+  phase?: string;
+}
+
+// ---------------------------------------------------------------------------
+// matchGlob
+// ---------------------------------------------------------------------------
+
+function matchSingleSegment(pattern: string, segment: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  const regexStr = '^' + escaped.replace(/\*/g, '[^/]*') + '$';
+  return new RegExp(regexStr).test(segment);
+}
+
+function matchSegments(patternSegs: string[], pathSegs: string[]): boolean {
+  if (patternSegs.length === 0 && pathSegs.length === 0) return true;
+  if (patternSegs.length === 0) return false;
+
+  // Safe: length checked above
+  const first = patternSegs[0] as string;
+  const restPattern = patternSegs.slice(1);
+
+  if (first === '**') {
+    for (let i = 0; i <= pathSegs.length; i++) {
+      if (matchSegments(restPattern, pathSegs.slice(i))) return true;
+    }
+    return false;
+  }
+
+  if (pathSegs.length === 0) return false;
+
+  // Safe: length checked above
+  const firstPath = pathSegs[0] as string;
+  const restPath = pathSegs.slice(1);
+  return matchSingleSegment(first, firstPath) && matchSegments(restPattern, restPath);
+}
+
+export function matchGlob(pattern: string, filePath: string): boolean {
+  return matchSegments(pattern.split('/'), filePath.split('/'));
+}
+
+// ---------------------------------------------------------------------------
+// testHookConditions
+// ---------------------------------------------------------------------------
+
+export function testHookConditions(hook: HookDefinition, context: HookContext): boolean {
+  const { conditions } = hook;
+  if (!conditions) return true;
+
+  if (conditions.file_pattern !== undefined) {
+    if (!context.file) return false;
+    const file = context.file;
+    const patterns = conditions.file_pattern.split(',').map((p) => p.trim());
+    if (!patterns.some((p) => matchGlob(p, file))) return false;
+  }
+
+  if (conditions.exclude_pattern !== undefined && context.file) {
+    const file = context.file;
+    const patterns = conditions.exclude_pattern.split(',').map((p) => p.trim());
+    if (patterns.some((p) => matchGlob(p, file))) return false;
+  }
+
+  if (conditions.task_types !== undefined) {
+    if (!context.task_type || !conditions.task_types.includes(context.task_type)) return false;
+  }
+
+  if (conditions.min_prompt_number !== undefined) {
+    if (context.prompt_number < conditions.min_prompt_number) return false;
+  }
+
+  if (conditions.phases !== undefined) {
+    if (!context.phase || !conditions.phases.includes(context.phase)) return false;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// resolveHookTemplates
+// ---------------------------------------------------------------------------
+
+export function resolveHookTemplates(action: string, context: HookContext): string {
+  const values: Record<string, string> = {
+    file: context.file ?? '',
+    files: context.files?.join(' ') ?? '',
+    project_path: context.project_path ?? '',
+    prompt_number: String(context.prompt_number),
+    build_id: context.build_id ?? '',
+    last_commit: context.last_commit ?? '',
+    task_type: context.task_type ?? '',
+    phase: context.phase ?? '',
+  };
+
+  return action.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => values[key] ?? '');
+}
+
+// ---------------------------------------------------------------------------
+// generateDefaultHooksConfig — exactly 24 hooks
+// ---------------------------------------------------------------------------
+
+export function generateDefaultHooksConfig(_projectName: string): HookDefinition[] {
+  return [
+    // SessionStart (3)
+    {
+      name: 'sync-pull',
+      event: 'SessionStart',
+      action: 'typescript',
+      script: 'syncPull',
+      blocking: false,
+      timeout_seconds: 60,
+      enabled: true,
+      priority: 1,
+      description: 'Pull learning data from master drive',
+    },
+    {
+      name: 'load-knowledge',
+      event: 'SessionStart',
+      action: 'typescript',
+      script: 'loadKnowledge',
+      blocking: false,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 2,
+      description: 'Load governance rules, skills, fix patterns',
+    },
+    {
+      name: 'present-evolutions',
+      event: 'SessionStart',
+      action: 'typescript',
+      script: 'presentEvolutions',
+      blocking: false,
+      timeout_seconds: 15,
+      enabled: true,
+      priority: 3,
+      description: 'Show pending self-modification proposals',
+    },
+
+    // PreToolUse (2)
+    {
+      name: 'governance-check',
+      event: 'PreToolUse',
+      action: 'typescript',
+      script: 'checkGovernance',
+      blocking: true,
+      timeout_seconds: 10,
+      enabled: true,
+      priority: 10,
+      description: 'Inject matching governance rules into context',
+    },
+    {
+      name: 'fix-pattern-check',
+      event: 'PreToolUse',
+      action: 'typescript',
+      script: 'checkFixPatterns',
+      blocking: false,
+      timeout_seconds: 10,
+      enabled: true,
+      priority: 20,
+      description: 'Inject known fixes as notes',
+    },
+
+    // PostToolUse (4)
+    {
+      name: 'tsc-check',
+      event: 'PostToolUse',
+      action: 'npx tsc --noEmit',
+      script: null,
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 10,
+      description: 'TypeScript compilation check',
+      conditions: { file_pattern: '*.ts,*.tsx' },
+    },
+    {
+      name: 'eslint-check',
+      event: 'PostToolUse',
+      action: 'npx eslint {{file}}',
+      script: null,
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 20,
+      description: 'ESLint check',
+      conditions: { file_pattern: '*.ts,*.tsx', exclude_pattern: '*.config.*,*.d.ts' },
+    },
+    {
+      name: 'schema-drift-inline',
+      event: 'PostToolUse',
+      action: 'typescript',
+      script: 'checkSchemaDrift',
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 30,
+      description: 'Schema drift check',
+      conditions: { task_types: ['CRUD', 'INTEGRATION'] },
+    },
+    {
+      name: 'score-prompt',
+      event: 'PostToolUse',
+      action: 'typescript',
+      script: 'scorePrompt',
+      blocking: false,
+      timeout_seconds: 10,
+      enabled: true,
+      priority: 99,
+      description: 'Record prompt execution score',
+    },
+
+    // PreCommit (3)
+    {
+      name: 'gitleaks-scan',
+      event: 'PreCommit',
+      action: 'gitleaks detect --source={{project_path}} --report-format json',
+      script: null,
+      blocking: true,
+      timeout_seconds: 60,
+      enabled: true,
+      priority: 1,
+      description: 'Scan for leaked secrets',
+    },
+    {
+      name: 'schema-drift-commit',
+      event: 'PreCommit',
+      action: 'typescript',
+      script: 'fullSchemaDriftCheck',
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 10,
+      description: 'Full schema drift verification',
+    },
+    {
+      name: 'governance-updated',
+      event: 'PreCommit',
+      action: 'typescript',
+      script: 'verifyGovernanceUpdated',
+      blocking: true,
+      timeout_seconds: 15,
+      enabled: true,
+      priority: 20,
+      description: 'Verify governance docs updated',
+    },
+
+    // PreCompact (1)
+    {
+      name: 'precompact-save',
+      event: 'PreCompact',
+      action: 'typescript',
+      script: 'precompactSave',
+      blocking: false,
+      timeout_seconds: 10,
+      enabled: true,
+      priority: 1,
+      description: 'Save critical context before compaction',
+    },
+
+    // PreDeploy (3)
+    {
+      name: 'sentinel-ring3',
+      event: 'PreDeploy',
+      action: 'typescript',
+      script: 'sentinelRing3',
+      blocking: true,
+      timeout_seconds: 600,
+      enabled: true,
+      priority: 1,
+      description: 'Full Ring 3 Sentinel pipeline',
+    },
+    {
+      name: 'six-laws-check',
+      event: 'PreDeploy',
+      action: 'typescript',
+      script: 'checkSixLaws',
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 10,
+      description: 'Verify all Six Laws compliance',
+    },
+    {
+      name: 'env-parity',
+      event: 'PreDeploy',
+      action: 'typescript',
+      script: 'envParityCheck',
+      blocking: true,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 20,
+      description: 'Compare local vs production env vars',
+    },
+
+    // PostDeploy (3)
+    {
+      name: 'health-check',
+      event: 'PostDeploy',
+      action: 'typescript',
+      script: 'healthCheck',
+      blocking: false,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 1,
+      description: 'HTTP 200 check on production URL',
+    },
+    {
+      name: 'readme-update',
+      event: 'PostDeploy',
+      action: 'typescript',
+      script: 'updateReadme',
+      blocking: false,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 10,
+      description: 'Regenerate README from governance',
+    },
+    {
+      name: 'deploy-summary',
+      event: 'PostDeploy',
+      action: 'typescript',
+      script: 'deploySummary',
+      blocking: false,
+      timeout_seconds: 15,
+      enabled: true,
+      priority: 20,
+      description: 'Log deploy summary to build_outcomes',
+    },
+
+    // SessionEnd (5)
+    {
+      name: 'sync-push',
+      event: 'SessionEnd',
+      action: 'typescript',
+      script: 'syncPush',
+      blocking: false,
+      timeout_seconds: 60,
+      enabled: true,
+      priority: 1,
+      description: 'Push learning data to master',
+    },
+    {
+      name: 'update-weights',
+      event: 'SessionEnd',
+      action: 'typescript',
+      script: 'updateWeights',
+      blocking: false,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 10,
+      description: 'Compute downstream decision error rates',
+    },
+    {
+      name: 'analyze-evolutions',
+      event: 'SessionEnd',
+      action: 'typescript',
+      script: 'analyzeEvolutions',
+      blocking: false,
+      timeout_seconds: 30,
+      enabled: true,
+      priority: 20,
+      description: 'Generate self-modification proposals',
+    },
+    {
+      name: 'generate-handoff',
+      event: 'SessionEnd',
+      action: 'typescript',
+      script: 'generateHandoff',
+      blocking: false,
+      timeout_seconds: 60,
+      enabled: true,
+      priority: 30,
+      description: 'Produce SESSION_HANDOFF.md',
+    },
+    {
+      name: 'git-push-end',
+      event: 'SessionEnd',
+      action: 'git add -A && git commit -m "FORGE-SESSION-END" && git push',
+      script: null,
+      blocking: false,
+      timeout_seconds: 60,
+      enabled: true,
+      priority: 40,
+      description: 'Final git commit and push',
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// writeDefaultHooksConfig
+// ---------------------------------------------------------------------------
+
+export function writeDefaultHooksConfig(projectPath: string, projectName: string): void {
+  const forgeDir = join(projectPath, '.forge');
+  mkdirSync(forgeDir, { recursive: true });
+  const hooks = generateDefaultHooksConfig(projectName);
+  writeFileSync(join(forgeDir, 'hooks.json'), JSON.stringify(hooks, null, 2), 'utf8');
+}

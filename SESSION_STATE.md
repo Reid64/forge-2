@@ -1,5 +1,17 @@
 # FORGE 2.0 — SESSION STATE
 
+## Current Session: r1-007 — `src/learning/hooks-enhanced.ts` complete implementation (session #62)
+## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
+## Started: 2026-06-23
+
+## Last Completed Prompt: r1-007 — Replaced stub `src/learning/hooks-enhanced.ts` with the full Enhanced Hook System implementation. `matchGlob`: segment-by-segment glob matching supporting `*` (single segment via `[^/]*` regex) and `**` (zero-or-more segments via loop). `testHookConditions`: AND-evaluates all 5 condition types (file_pattern, exclude_pattern, task_types, min_prompt_number, phases) against HookContext; missing conditions → always fires. `resolveHookTemplates`: regex replace of all 8 `{{var}}` template variables; undefined → empty string; no `{{` left in output. `generateDefaultHooksConfig`: returns exactly 24 HookDefinitions across SessionStart(3), PreToolUse(2), PostToolUse(4), PreCommit(3), PreCompact(1), PreDeploy(3), PostDeploy(3), SessionEnd(5). `writeDefaultHooksConfig`: creates `.forge/` dir + writes hooks.json. Exported types: `EnhancedHookEvent`, `HookConditions`, `HookDefinition`, `HookContext`. `noUncheckedIndexedAccess` handled via `as string` cast after length guards. Compile/runtime gates UNVERIFIED — exec blocker persists. Verified by inspection: all exports present, 24-hook count confirmed, type safety reviewed against tsconfig strict flags.
+
+## Next Prompt: Next in queue after r1-007. Operator UNBLOCK: (1) `npx tsc --noEmit` → zero errors. (2) Run r1-007 verification tests (glob, templates, conditions, 24 hooks) → `R1-007 ALL TESTS PASS`.
+
+---
+
+# PRIOR SESSION (#61)
+
 ## Current Session: r1-006 — `src/learning/sync.ts` complete implementation (session #61)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Started: 2026-06-23

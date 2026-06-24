@@ -2,6 +2,35 @@
 
 ---
 
+# r1-007 — FORGE 2.0 Learning Engine: `src/learning/hooks-enhanced.ts` complete implementation, 2026-06-23 (session #62)
+
+## Build Status: r1-007 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
+
+### What was built
+- **`src/learning/hooks-enhanced.ts`** (REPLACED stub with FULL implementation) — Enhanced Hook System:
+  - **`matchGlob(pattern, filePath)`** — glob matching with `*` (single segment) and `**` (zero or more segments). Splits both by `/` and recursively matches segment by segment. `*.ts` matches `file.ts` but not `file.tsx` or `dir/file.ts`. `**/*.ts` matches any `.ts` at any depth. Regex-escapes all special characters before inserting `[^/]*` for `*`.
+  - **`testHookConditions(hook, context)`** — evaluates all conditions AND-wise. No conditions → always fires. `file_pattern`: comma-separated globs, file must match ANY. `exclude_pattern`: file must NOT match ANY. `task_types`: context.task_type must be in array. `min_prompt_number`: context.prompt_number must be >=. `phases`: context.phase must be in array. Each condition independently may return false.
+  - **`resolveHookTemplates(action, context)`** — replaces `{{file}}`, `{{files}}`, `{{project_path}}`, `{{prompt_number}}`, `{{build_id}}`, `{{last_commit}}`, `{{task_type}}`, `{{phase}}` via `String.replace` with regex `/\{\{(\w+)\}\}/g`. Undefined context values become empty string; no `{{var}}` left in output.
+  - **`generateDefaultHooksConfig(_projectName)`** — returns exactly 24 `HookDefinition` objects across 8 events: SessionStart (3), PreToolUse (2), PostToolUse (4), PreCommit (3), PreCompact (1), PreDeploy (3), PostDeploy (3), SessionEnd (5). All typed with the `EnhancedHookEvent` union and `HookConditions` interface defined in the same file.
+  - **`writeDefaultHooksConfig(projectPath, projectName)`** — calls `generateDefaultHooksConfig`, writes to `{projectPath}/.forge/hooks.json` as pretty JSON (2-space indent). Creates `.forge/` directory if needed via `mkdirSync(..., { recursive: true })`.
+  - Exported types: `EnhancedHookEvent`, `HookConditions`, `HookDefinition`, `HookContext`.
+
+### Design invariants verified by inspection
+- `noUncheckedIndexedAccess` handled: `patternSegs[0]` and `pathSegs[0]` accessed via `as string` cast after explicit `.length > 0` guards
+- `noUnusedParameters` handled: `_projectName` prefixed with underscore (accepted by TypeScript)
+- `noUnusedLocals` handled: `_match` in `resolveHookTemplates` replace callback prefixed with underscore
+- `strictNullChecks` handled: all `context.file`, `context.task_type`, `context.phase` accesses guarded with `!` checks before use
+- `matchSingleSegment` regex escapes `.+^${}()|[\]\\` before injecting `*` → `[^/]*` substitution — prevents regex injection from glob patterns
+- All imports (`writeFileSync`, `mkdirSync` from `node:fs`; `join` from `node:path`) are used
+- 24 hooks verified by count: 3+2+4+3+1+3+3+5 = 24 ✓
+
+### UNBLOCK (operator, from a permitted session)
+1. `npx tsc --noEmit` → expect zero errors.
+2. Run the Node.js verification from the r1-007 prompt spec (glob matching, template resolution, conditions, 24 default hooks) → all PASS, final line `R1-007 ALL TESTS PASS`.
+3. Proceed to next prompt in queue.
+
+---
+
 # r1-006 — FORGE 2.0 Learning Engine: `src/learning/sync.ts` complete implementation, 2026-06-23 (session #61)
 
 ## Build Status: r1-006 AUTHORED on disk. Compile/runtime gates UNVERIFIED — exec blocker (`npx tsc --noEmit`, `node --import tsx -e "..."` require approval) persists. Per Iron Law 3 reported as authored + by-inspection-reviewed, NOT a green gate.
