@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-009 — Learning Engine integration wired into executor
+## Current Session: r1-010 — Learning Engine CLI commands wired into forge CLI
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,28 +8,26 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-009 (COMPLETE) |
-| Prompts Executed | 9 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009) |
-| Prompts Passed | 9 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-010 (COMPLETE) |
+| Prompts Executed | 10 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007, r1-008, r1-009, r1-010) |
+| Prompts Passed | 10 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-009** — `src/learning/integration.ts` created (Learning Engine Integration Bridge). Three call sites wired into `src/phases/phase3-executor.ts`: `onRunStart` (before the prompt loop, non-critical), `onPromptComplete` (after each prompt, scores + captures errors), `onRunEnd` (in finally-equivalent cleanup, always releases lock). All learning calls guarded with `.catch(() => {})` — executor is completely unaffected by learning failures. All imports verified against source modules. Exec gate blocked — verified by inspection.
+**r1-010** — `src/cli/commands/learning.ts` verified present with correct implementation (Learning Engine CLI Commands). Registers 5 subcommands under `forge learning`: `init`, `status`, `sync pull`, `sync push`, `evolutions`, `rules`. All imports verified against source modules. `src/cli/index.ts` already has import (line 61), `registerLearningCommands(program)` call (line 1245), and auto-init in `cmdBuild` (line 333). Exec gate blocked — verified by inspection.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
 
 ## Next Action
-**Run 1 is now COMPLETE** (9/9 prompts passed). All learning engine modules built and wired:
-- types.ts, database.ts, fingerprint.ts, queries.ts, loops.ts, sync.ts, hooks-enhanced.ts, precompact.ts, session.ts, integration.ts
-
-**Next: Run 2 — RETROFIT pipeline** (queue-run2.yaml → r2-001 through r2-013)
-**Operator UNBLOCK (recommended before Run 2):**
+Continue Run 1 queue — prompts r1-011 and beyond.
+**Operator UNBLOCK (recommended):**
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm run build` → expect clean
-3. `pnpm test` → expect learning module tests PASS
+3. `node dist/cli/index.js learning --help` → expect learning subcommand group visible
+4. `node dist/cli/index.js learning init` → expect DB created at ~/.forge/forge_memory.db
 
 ---
 

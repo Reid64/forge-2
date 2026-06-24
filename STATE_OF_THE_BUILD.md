@@ -2,6 +2,34 @@
 
 ---
 
+# r1-010 — 2026-06-24
+
+## Build Status: r1-010 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/cli/commands/learning.ts` — Learning Engine CLI Commands, confirmed present and correct.
+`src/cli/index.ts` — `registerLearningCommands(program)` wired at line 1245; import at line 61; auto-init in `cmdBuild` at line 333.
+
+### learning.ts
+- **`registerLearningCommands(program)`** → registers `learning` sub-command group with 5 subcommands ✓
+- **`forge learning init`** → calls `initializeForgeMemory(dbPath)`, opens connection, queries `sqlite_master` for table list, prints path/size/tables/machine-id ✓
+- **`forge learning status`** → guards on `existsSync(dbPath)`, iterates `VALID_TABLES`, runs `SELECT COUNT(*)` per table, prints with green/gray coloring ✓
+- **`forge learning sync pull`** → loads sync config, calls `syncForgeMemory('pull', ...)`, reports count ✓
+- **`forge learning sync push`** → loads sync config, calls `syncForgeMemory('push', ...)`, reports count ✓
+- **`forge learning evolutions`** → calls `getPendingEvolutions(dbPath)`, renders confidence color-coded proposals ✓
+- **`forge learning rules`** → calls `getGovernanceRules([], undefined, dbPath)`, renders source-color-coded rules ✓
+- Import paths use `../../learning/` (correct depth for `src/cli/commands/`) ✓
+- `closeConnection` NOT imported (it's not used — avoids `noUnusedLocals` lint error) ✓
+- All imported symbols verified present in their source modules: `initializeForgeMemory`, `getConnection`, `getForgeDbPath`, `getMachineId` (database.ts); `getGovernanceRules`, `getPendingEvolutions` (queries.ts); `syncForgeMemory`, `loadSyncConfig`, `getLastSyncTimestamp` (sync.ts); `VALID_TABLES` (types.ts) ✓
+
+### index.ts wiring
+- Line 61: `import { registerLearningCommands } from './commands/learning.js';` ✓
+- Line 333 (cmdBuild): `try { (await import('../learning/database.js')).initializeForgeMemory(); } catch { /* learning is non-critical */ }` ✓
+- Line 1245: `registerLearningCommands(program);` ✓
+
+Exec gate blocked — `pnpm tsc --noEmit` requires operator approval. Verified by inspection: all imports resolve, all exported symbols confirmed present via grep, TypeScript strict mode compliance reviewed manually.
+
+---
+
 # r1-009 — 2026-06-24
 
 ## Build Status: r1-009 VERIFIED BY INSPECTION (exec gate blocked)
