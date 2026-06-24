@@ -1,29 +1,29 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Run 3 — r3-009 COMPLETE
+## Current Session: Run 3 — r3-010 COMPLETE (Ring 1 sentinel audit)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
 | Field | Value |
 |-------|-------|
 | Run Number | Run 3 (in progress) |
-| Phase | CLI INTEGRATION |
-| Current Prompt | r3-009 (CLI integration — forge retrofit command) |
-| Prompts Executed | 21 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-009) |
-| Prompts Passed | 21 (exec gate UNVERIFIED — file verified by inspection) |
+| Phase | SENTINEL AUDIT |
+| Current Prompt | r3-010 (Ring 1 sentinel audit) |
+| Prompts Executed | 22 (r1-001…r1-012 + r3-001 hotfix + r3-002…r3-010) |
+| Prompts Passed | 22 (exec gate UNVERIFIED — verified by inspection) |
 | Prompts Failed | 0 |
 
 ## Last Completed Prompt
-**r3-009 (CLI integration)** — `src/cli/index.ts` lines 1245–1266 already contain the full `forge retrofit <project-path>` command wired to `runRetrofitPipeline`. `src/retrofit/pipeline.ts` (3-line re-export shim) already present. All 6 CLI options verified. `RetrofitPipelineOptions` interface matches CLI opts exactly. TSC gate blocked by exec permission; verification by inspection only.
+**r3-010 (Ring 1 sentinel audit)** — Full audit of `src/phases/phase4-sentinel.ts`. Ring 1 is already fully and correctly implemented: Ring 1a TypeScript check (`runRing1TypescriptCheck` at line 2227) uses `npx tsc --noEmit --pretty false` with exact spec regex; Ring 1b ESLint check (`runRing1EslintCheck` at line 2295) parses JSON output, 0 severity-2 threshold; Ring 1c schema drift (`runRing1TypesDriftCheck` at line 2421) compares `database.types.ts` against live Supabase. All three tools log to the learning DB via `tryRegisterRing1Error`. No code changes were required. `initializeForgeMemory` (database.ts:89) and `registerError` (queries.ts:185) import signatures verified.
 
 ## Active Blockers
 1. **Exec gate INTERMITTENT** — `pnpm tsc --noEmit` and all run commands require operator approval. All changes verified by inspection.
 
 ## Next Action
+Ring 1 audit complete. Continue with next queued prompt in Run 3.
 Operator should verify before continuing:
 1. `pnpm tsc --noEmit` → expect zero errors
 2. `pnpm build` → expect clean dist/
-3. `node dist/cli/index.js retrofit --help` → should show retrofit command with all 6 options
 
 ---
 
