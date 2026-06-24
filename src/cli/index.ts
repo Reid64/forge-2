@@ -1244,25 +1244,36 @@ async function main(): Promise<void> {
 
   program
     .command('retrofit')
-    .description('FORGE RETROFIT: scan, diagnose, reconcile, and queue an existing codebase for autonomous continuation')
+    .description('Scan an existing codebase, diagnose issues, reconcile governance, and generate a continuation queue')
     .argument('<project-path>', 'Absolute path to the project to retrofit')
-    .option('--scope <scope>', 'Analysis scope: A (codebase), B (+database), C (+Vercel)', 'C')
-    .option('--skip-dynamic', 'Skip dynamic route testing (no dev server)', false)
-    .option('--resume', 'Resume from prior SCAN checkpoint', false)
-    .option('--non-interactive', 'Auto-approve all RECONCILE decisions (CI/overnight mode)', false)
-    .option('--queue-output <path>', 'Override queue output directory')
+    .option('--scope <scope>', 'Analysis scope: A (codebase only), B (+ database), C (+ Vercel)', 'C')
+    .option('--skip-dynamic', 'Skip dynamic route testing', false)
+    .option('--resume', 'Resume from a prior SCAN checkpoint', false)
+    .option('--non-interactive', 'Auto-approve all RECONCILE decisions', false)
+    .option('--queue-output <path>', 'Override the QUEUE output directory')
     .option('--api-key <key>', 'Anthropic API key for adversarial review')
-    .action(async (projectPath: string, opts: Record<string, unknown>) => {
-      const { runRetrofitPipeline } = await import('../retrofit/pipeline.js');
-      await runRetrofitPipeline({
-        projectPath,
-        scope: (opts['scope'] as 'A' | 'B' | 'C') ?? 'C',
-        skipDynamic: Boolean(opts['skipDynamic']),
-        resume: Boolean(opts['resume']),
-        nonInteractive: Boolean(opts['nonInteractive']),
-        queueOutputPath: opts['queueOutput'] as string | undefined,
-        apiKey: opts['apiKey'] as string | undefined,
-      });
+    .action(async (
+      projectPath: string,
+      opts: { scope?: string; skipDynamic?: boolean; resume?: boolean; nonInteractive?: boolean; queueOutput?: string; apiKey?: string }
+    ) => {
+      const spinner = ora('Starting FORGE RETROFIT...').start();
+      try {
+        const { runRetrofitPipeline } = await import('../retrofit/index.js');
+        spinner.stop();
+        await runRetrofitPipeline({
+          projectPath: resolve(projectPath),
+          scope: (opts.scope as 'A' | 'B' | 'C') ?? 'C',
+          skipDynamic: opts.skipDynamic ?? false,
+          resume: opts.resume ?? false,
+          nonInteractive: opts.nonInteractive ?? false,
+          queueOutputPath: opts.queueOutput,
+          apiKey: opts.apiKey,
+        });
+      } catch (err: unknown) {
+        spinner.fail('RETROFIT failed');
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exitCode = 1;
+      }
     });
 
   program
