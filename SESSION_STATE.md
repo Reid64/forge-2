@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-004 — fingerprint.ts complete (error fingerprinting algorithm)
+## Current Session: r1-005 — loops.ts complete (five learning loops)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-23
 
@@ -8,15 +8,15 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-004 |
-| Prompts Executed | 4 (r1-001, r1-002, r1-003, r1-004) |
-| Prompts Passed | 4 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-005 |
+| Prompts Executed | 5 (r1-001b, r1-002, r1-003, r1-004, r1-005) |
+| Prompts Passed | 5 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-004** — `src/learning/fingerprint.ts` fully implemented. `generalizeFilePath`: normalizes backslashes, wildcards entity-specific directory segments while preserving FRAMEWORK_DIRS, `[dynamic]` route segments, short dirs, and the filename. `generalizeErrorMessage`: wildcards quoted strings (single/double/backtick), non-structural PascalCase identifiers, and relative file paths; collapses consecutive `*`. `getErrorFingerprint`: SHA-256 of `errorCode|generalizedPath|generalizedMessage|sortedTechStack`, returns first 32 hex chars. Determinism guaranteed by all-lowercase errorCode + sorted techStack. Gate verification: exec blocker active — code verified by manual review against spec.
+**r1-005** — `src/learning/loops.ts` fully implemented (327 lines). Five learning loops: Loop 1 `scorePromptExecution` → delegates to savePromptScore; Loop 2 `captureError` + `checkAutoElevation` → error registration + auto-elevate to governance rule at 3+ occurrences; Loop 3 `updateDecisionWeights` → downstream error/retry rate computation via prompt_scores; Loop 4 `loadCrossProjectKnowledge` → loads rules/skills/fix_patterns/build_outcomes/evolutions; Loop 5 `analyzeForEvolutions` → 3 analysis passes (weak templates, ungoverned errors, retry-heavy task types) → PENDING evolution proposals. Plus `presentEvolutions` and `applyEvolution`. All imports verified against dependencies. ESLint-safe (`_machineId` prefix for unused var). Exec gate blocked — code verified by manual review against spec.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
@@ -26,9 +26,9 @@
 1. `npx tsc --noEmit` → expect zero errors
 2. `pnpm run build` → expect clean
 3. `pnpm lint` → expect clean
-4. `npm test` → expect learning-database, learning-fingerprint, learning-queries, learning-sync to pass
+4. node test → expect Loop 1-5 ALL PASS, R1-005 ALL TESTS PASS
 
-**Then continue queue: next prompt r1-005 (loops.ts)**
+**Then continue queue: next prompt r1-006 (hooks-enhanced.ts or sync.ts per queue)**
 
 ---
 

@@ -2,6 +2,25 @@
 
 ---
 
+# r1-005 RE-EXECUTION — 2026-06-23
+
+## Build Status: r1-005 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/loops.ts` — Five Learning Loops fully implemented, 327 lines.
+
+- **Loop 1 `scorePromptExecution()`** → delegates to `savePromptScore`, serializes all 10 execution metrics, returns saved ID ✓
+- **Loop 2 `captureError()`** → calls `registerErrorQuery`, returns `{ fingerprint, isKnown, knownFix? }`, falls back to raw fingerprint on error ✓
+- **Loop 2 `checkAutoElevation()`** → checks `occurrence_count >= 3`, `fix_description` exists, `success_rate > 0.5`, no existing rule → creates governance rule, links back to fix_pattern ✓
+- **Loop 3 `updateDecisionWeights()`** → queries `decision_weights` by build_id, computes downstream error/retry rates from `prompt_scores`, UPDATEs each weight record ✓
+- **Loop 4 `loadCrossProjectKnowledge()`** → loads rules, skills, evolutions via query layer + `getForgeMemory` for fix_patterns (2+ occurrences) and build_outcomes (last 10) ✓
+- **Loop 5 `analyzeForEvolutions()`** → 3 analyses: weak templates (<50% pass, 3+ samples), ungoverned errors (3+ occurrences, no rule), retry-heavy task types (>2 avg retries, 2+ samples) → creates PENDING evolutions ✓
+- **`presentEvolutions()`** → returns all PENDING evolutions ordered by confidence ✓
+- **`applyEvolution()`** → calls `updateEvolutionStatus` with APPROVED/REJECTED ✓
+
+All imports verified against database.ts, queries.ts, fingerprint.ts, types.ts. Unused `getMachineId` call in Loop 5 prefixed `_machineId` for ESLint compliance. Exec gate blocked — `npx tsc --noEmit` and node verification script require operator approval.
+
+---
+
 # r1-004 RE-EXECUTION — 2026-06-23
 
 ## Build Status: r1-004 VERIFIED BY INSPECTION (exec gate blocked)
