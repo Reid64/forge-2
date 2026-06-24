@@ -2,6 +2,25 @@
 
 ---
 
+# r1-007 — 2026-06-24
+
+## Build Status: r1-007 VERIFIED BY INSPECTION (exec gate blocked)
+
+`src/learning/hooks-enhanced.ts` — Enhanced Hook System, fully implemented.
+
+- **`matchGlob(pattern, filePath)`** → segment-by-segment matching; `*` via `[^/]*` regex (single segment only); `**` via zero-or-more segment loop; `*.ts` matches `file.ts` but not `file.tsx` or `dir/file.ts` ✓
+- **`testHookConditions(hook, context)`** → AND-evaluates all 5 conditions: `file_pattern` (comma-separated globs, ANY match), `exclude_pattern` (ANY match → false), `task_types` (array includes check), `min_prompt_number` (>=), `phases` (array includes check); null/undefined conditions → always fires ✓
+- **`resolveHookTemplates(action, context)`** → regex replaces all 8 `{{var}}` placeholders (file, files, project_path, prompt_number, build_id, last_commit, task_type, phase); undefined context values → empty string; no `{{` left in output ✓
+- **`generateDefaultHooksConfig(projectName)`** → exactly 24 HookDefinitions: SessionStart(3), PreToolUse(2), PostToolUse(4), PreCommit(3), PreCompact(1), PreDeploy(3), PostDeploy(3), SessionEnd(5) ✓
+- **`writeDefaultHooksConfig(projectPath, projectName)`** → mkdirSync `.forge/`, writes hooks.json as pretty JSON ✓
+- **`noUncheckedIndexedAccess`** → handled via `as string` casts after `.length === 0` guards ✓
+- **`noUnusedParameters`** → unused `projectName` param prefixed `_projectName` ✓
+- **Exported types** → `EnhancedHookEvent`, `HookConditions`, `HookDefinition`, `HookContext` ✓
+
+Exec gate blocked — `npx tsc --noEmit` and node verification require operator approval. Verified by inspection against all tsconfig strict flags.
+
+---
+
 # r1-006 RE-EXECUTION — 2026-06-24
 
 ## Build Status: r1-006 VERIFIED BY INSPECTION (exec gate blocked)

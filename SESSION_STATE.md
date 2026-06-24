@@ -1,6 +1,6 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: r1-006 — sync.ts replacement complete
+## Current Session: r1-007 — hooks-enhanced.ts complete implementation
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
 ## Last Updated: 2026-06-24
 
@@ -8,15 +8,15 @@
 |-------|-------|
 | Run Number | 1 (Re-execution after snapshot) |
 | Phase | EXECUTE |
-| Current Prompt | r1-006 |
-| Prompts Executed | 6 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006) |
-| Prompts Passed | 6 (gates UNVERIFIED — exec blocker) |
+| Current Prompt | r1-007 |
+| Prompts Executed | 7 (r1-001b, r1-002, r1-003, r1-004, r1-005, r1-006, r1-007) |
+| Prompts Passed | 7 (gates UNVERIFIED — exec blocker) |
 | Prompts Failed | 0 |
 | First Pass Rate | N/A (gate unverifiable) |
 | Start Time | 2026-06-23 |
 
 ## Last Completed Prompt
-**r1-006** — `src/learning/sync.ts` replaced with complete Cross-Machine Sync Protocol implementation. Lock acquire/release (stale detection, finally-block safety), loadSyncConfig, getLastSyncTimestamp, setLastSyncTimestamp, syncForgeMemory (graceful degradation), syncPull (readonly master, INSERT OR IGNORE), syncPush (lock-guarded, append-only, lock released in finally). forge_meta excluded from SYNCABLE_TABLES. Per-table error isolation. Fixed unused `getMachineId` import (was failing `noUnusedLocals`). Exec gate blocked — code verified by manual review against spec.
+**r1-007** — `src/learning/hooks-enhanced.ts` complete Enhanced Hook System. `matchGlob`: segment-by-segment `*`/`**` glob matching. `testHookConditions`: AND-evaluates 5 condition types (file_pattern, exclude_pattern, task_types, min_prompt_number, phases). `resolveHookTemplates`: replaces all 8 `{{var}}` tokens, undefined → empty string. `generateDefaultHooksConfig`: exactly 24 HookDefinitions across 8 lifecycle events. `writeDefaultHooksConfig`: creates `.forge/` + writes hooks.json. `noUncheckedIndexedAccess` handled via `as string` after length guards; `_projectName` prefix for unused param. Exec gate blocked — verified by inspection against tsconfig strict flags.
 
 ## Active Blockers
 1. **Exec gate blocked** — `pnpm tsc --noEmit`, `pnpm run build`, `pnpm lint`, and test runner require approval in this session. Deps installed per r1-002. Type stub at `src/types/better-sqlite3.d.ts` covers compile-time. Runtime tests need exec unblock.
@@ -26,9 +26,9 @@
 1. `npx tsc --noEmit` → expect zero errors
 2. `pnpm run build` → expect clean
 3. `pnpm lint` → expect clean
-4. node test → expect R1-006 ALL TESTS PASS
+4. node test → expect R1-007 ALL TESTS PASS (glob, templates, conditions, 24 hooks)
 
-**Then continue queue: next prompt r1-007**
+**Then continue queue: next prompt r1-008**
 
 ---
 
