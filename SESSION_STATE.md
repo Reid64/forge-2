@@ -23,7 +23,7 @@
 
 ## Last Completed Prompt
 
-**r4-008** — Verified Learning CLI COMPLETE by full file inspection of `src/cli/commands/learning.ts`. All 4 required subcommands (`learn status`, `learn patterns`, `learn sync`, `learn evolutions`) confirmed fully implemented with real DB/sync logic (lines 44–205). No stubs present. No code changes required. Governance updated: STATE_OF_THE_BUILD.md + SESSION_STATE.md.
+**r4-009** — CLI retrofit command verified COMPLETE by inspection. `src/cli/index.ts` lines 1246–1277 contain the full retrofit command with all 6 options, spinner/error pattern, and dynamic import of `runRetrofitPipeline`. AGENTS.md confirmed complete with all 14 SCAN ops, 3 DIAGNOSE reports, RECONCILE Model C, QUEUE tier-ordering. No code changes required. Governance updated: STATE_OF_THE_BUILD.md + SESSION_STATE.md.
 
 ---
 
