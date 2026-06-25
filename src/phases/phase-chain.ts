@@ -119,7 +119,7 @@ export async function runForgeBuild(opts: BuildOptions): Promise<BuildResult> {
     '## Launch Command',
     '',
     '```powershell',
-    'cd C:\\Users\\manag\\Documents\\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"; $env:ANTHROPIC_API_KEY=$null; $env:DANGEROUSLY_SKIP_PERMISSIONS=1; powershell -ExecutionPolicy Bypass -File .\\forge.ps1 -project ' + projectPath.split(/[/\\]/).pop() + ' -startFrom 0',
+    'cd C:\\Users\\manag\\Documents\\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"; $env:ANTHROPIC_API_KEY=$null; $env:DANGEROUSLY_SKIP_PERMISSIONS=1; powershell -ExecutionPolicy Bypass -File .\\forge.ps1 -project ' + (projectPath.split(/[/\\]/).pop() ?? 'project') + ' -startFrom 0',
     '```',
   ].join('\n');
   writeFileSync(join(projectPath, '.forge', 'BUILD_READY.md'), launchInstructions, 'utf8');

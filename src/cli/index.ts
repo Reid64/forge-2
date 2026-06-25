@@ -1363,6 +1363,48 @@ async function main(): Promise<void> {
       } catch (err: unknown) { spinner.fail('SEQUENCE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
     });
 
+  program
+    .command('deploy')
+    .description('Deploy a FORGE-built project and inject post-deploy monitoring snippet')
+    .argument('<project-path>', 'Absolute path to the built project')
+    .option('--endpoint <url>', 'Telemetry receiver URL for monitoring snippet injection')
+    .option('--project-name <name>', 'Project name for telemetry (defaults to directory name)')
+    .option('--slow-load-ms <ms>', 'Slow-load warning threshold in milliseconds', '3000')
+    .action(async (projectPath: string, opts: { endpoint?: string; projectName?: string; slowLoadMs?: string }) => {
+      const spinner = ora('Preparing deploy...').start();
+      try {
+        const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
+        const resolved = resolve(projectPath);
+        spinner.stop();
+        const buildReadyPath = join(resolved, '.forge', 'BUILD_READY.md');
+        if (existsSync(buildReadyPath)) {
+          console.log(chalk.cyan('\nBuild manifest:'));
+          console.log(readFileSync(buildReadyPath, 'utf8').split('\n').slice(0, 8).join('\n'));
+        }
+        if (opts.endpoint) {
+          const { generateMonitoringSnippet } = await import('../monitoring/deploy-agent.js');
+          const pName = opts.projectName ?? basename(resolved);
+          const snippet = generateMonitoringSnippet({
+            endpoint: opts.endpoint,
+            projectName: pName,
+            slowPageLoadMs: parseInt(opts.slowLoadMs ?? '3000', 10),
+          });
+          const snippetPath = join(resolved, '.forge', 'monitoring-snippet.js');
+          writeFileSync(snippetPath, snippet, 'utf8');
+          console.log(chalk.green('\nMonitoring snippet: ' + snippetPath));
+          console.log(chalk.yellow('Inject into your app\'s HTML <head> before going live.'));
+        } else {
+          console.log(chalk.yellow('\nNo --endpoint given — skipping monitoring snippet.'));
+          console.log('Re-run with --endpoint <url> to generate a monitoring snippet.');
+        }
+        console.log(chalk.green('\nDeploy step complete. See .forge/BUILD_READY.md for launch instructions.'));
+      } catch (err: unknown) {
+        spinner.fail('DEPLOY failed');
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exitCode = 1;
+      }
+    });
+
   registerLearningCommands(program);
 
   await program.parseAsync(process.argv);
