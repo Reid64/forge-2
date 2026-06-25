@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-009 — Recovery/Verification COMPLETE)
+## Current Session: RUN-9 (r9-010 — Learning smoke test + perf benchmarks COMPLETE)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r9-009 COMPLETE)
+## Last Updated: 2026-06-25 (r9-010: tests/learning-smoke.ts + tests/learning-perf.ts written)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-009 (COMPLETE) |
-| Prompts Executed (Run 9) | 7 |
-| Prompts Passed (Run 9) | 7 |
+| Current Prompt | r9-010 (COMPLETE) |
+| Prompts Executed (Run 9) | 8 |
+| Prompts Passed (Run 9) | 8 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,30 +22,23 @@
 
 ## Last Completed Prompt
 
-r9-009 — Recovery/Verification agent: fix TypeScript errors, add missing `forge deploy` command, update state files.
+r9-010 — Learning smoke test + perf benchmarks: wrote tests/learning-smoke.ts and tests/learning-perf.ts.
 
-**Changes made (r9-009):**
-1. Added `forge deploy` command to `src/cli/index.ts` (was missing from 6-command acceptance criteria):
-   - Takes `<project-path>`, `--endpoint`, `--project-name`, `--slow-load-ms` options
-   - Reads `.forge/BUILD_READY.md` if present
-   - Calls `generateMonitoringSnippet` when `--endpoint` is provided
-   - Writes monitoring snippet to `.forge/monitoring-snippet.js`
-2. Fixed `src/phases/phase-chain.ts` line 122: `projectPath.split(...).pop()` → `?? 'project'` fallback
-3. Updated `STATE_OF_THE_BUILD.md` — r9-009 row added, test results table added
-4. Updated `SESSION_STATE.md` (this file)
+**Changes made (r9-010):**
+1. Read `src/learning/integration.ts` — confirmed `onRunStart`, `onPromptComplete`, `onRunEnd` signatures
+2. Written `tests/learning-smoke.ts` — 4 tests: DB init (14+ tables), onRunStart no-throw, onPromptComplete 2 scores, onRunEnd no-throw; uses isolated tmpdir DB, cleans up in after()
+3. Written `tests/learning-perf.ts` — 3 tests: DB init, governance_rules query < 1ms avg/1000 runs, fix_patterns query < 1ms avg/1000 runs; uses ~/.forge/forge_memory.db
 
-**Static verification (r9-009):**
-- All composer/*.ts files reviewed — 0 TypeScript errors found
-- phase-chain.ts .pop() undefined fixed ✓
-- CLI now has all 6 required commands: build, compose, sequence, deploy, retrofit, learn ✓
-- No test files modified ✓
-- Exec gate blocked: pnpm tsc --noEmit, pnpm build, pnpm test unverified (persistent per memory)
+**Static verification (r9-010):**
+- Signatures match: onRunStart(path, buildId, tags, name, dbPath?), onPromptComplete(result, dbPath?), onRunEnd(buildId, path, stats, dbPath?) ✓
+- Imports verified: getConnection, closeConnection, initializeForgeMemory all exported from database.ts ✓
+- Exec gate blocked: pnpm tsc --noEmit, pnpm build, node --test unverified (persistent per memory)
 
 ---
 
 ## Current Prompt (in progress)
 
-r9-009 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-010 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -67,7 +60,7 @@ r9-009 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ## Next Action
 
-r9-009 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js --help`) when exec gate lifts. All 6 acceptance-criteria commands (build, compose, sequence, deploy, retrofit, learn) are now present in the CLI source.
+r9-010 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node --test tests/learning-smoke.ts`) when exec gate lifts.
 
 ---
 
