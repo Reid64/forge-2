@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-002 — Composer Engine)
+## Current Session: RUN-9 (r9-003 — forge compose + forge sequence commands)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r9-002 COMPLETE)
+## Last Updated: 2026-06-24 (r9-003 COMPLETE)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-002 (COMPLETE) |
-| Prompts Executed (Run 9) | 2 |
-| Prompts Passed (Run 9) | 2 |
+| Current Prompt | r9-003 (COMPLETE) |
+| Prompts Executed (Run 9) | 3 |
+| Prompts Passed (Run 9) | 3 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,25 +22,24 @@
 
 ## Last Completed Prompt
 
-r9-002 — Create src/composer/ directory with 7 files (Composer Engine).
+r9-003 — Insert `forge compose` and `forge sequence` commands into `src/cli/index.ts`.
 
-**Changes made (r9-002):**
-1. Created `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted extraction
-2. Created `src/composer/gap-detector.ts` — Schema gap detection, RLS audit, contract gap finder
-3. Created `src/composer/prompt-assembler.ts` — 7-section prompt assembler, splitTask, loadLearningContext
-4. Created `src/composer/queue-writer.ts` — YAML queue writer, run file splitting (45 prompts/run), generateRunSummary
-5. Created `src/composer/document-sequencer.ts` — Enterprise 40+ doc sequencer, category ordering
-6. Created `src/composer/adversary-tracker.ts` — Adversary accuracy evaluator, finding recorder/resolver
-7. Created `src/composer/index.ts` — Main orchestrator (runComposer)
-8. Modified `src/engine/queue-generator.ts` — Added DAGNode interface, ForgeDAG class (addNode, inferDependencies, detectCycles, topologicalSort), AdversarialQueueReviewResult, runAdversarialQueueReview
-9. Updated `STATE_OF_THE_BUILD.md` — Composer Engine COMPLETE row added
-10. Updated `SESSION_STATE.md` (this file)
+**Changes made (r9-003):**
+1. Modified `src/cli/index.ts` — Inserted `compose` command (5 options: --mode, --api-key, --non-interactive, --prompts-per-run, --output) and `sequence` command (3 options: --api-key, --non-interactive, --dry-run) before `registerLearningCommands(program)` at line 1302
+2. Updated `STATE_OF_THE_BUILD.md` — CLI command count updated to 19, r9-003 row added
+3. Updated `SESSION_STATE.md` (this file)
+
+**Static type verification (r9-003):**
+- `runComposer` from `src/composer/index.ts`: `ComposeResult` has all accessed fields (success, totalPrompts, totalRuns, estimatedCostUSD, summaryPath, blockers) ✓
+- `loadSpecDocuments`, `createSequencePlan`, `writeSequencePlanSummary` confirmed exported from `src/composer/document-sequencer.ts` ✓
+- No ESLint configured — `basename` re-import shadowing is not an error ✓
+- Exec gate blocked: pnpm tsc, pnpm build, node dist/ unverified (INTERMITTENT per memory)
 
 ---
 
 ## Current Prompt (in progress)
 
-r9-002 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-003 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -62,7 +61,7 @@ r9-002 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ## Next Action
 
-r9-002 complete. Next: r9-003 or next prompt in Run 9 queue. Priority: continue building Composer Engine integration or run live exec verification when gate lifts.
+r9-003 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js compose --help`) when exec gate lifts.
 
 ---
 
@@ -84,16 +83,17 @@ r9-002 complete. Next: r9-003 or next prompt in Run 9 queue. Priority: continue 
 
 ---
 
-## Files Modified This Session (Run 9 — r9-002)
+## Files Modified This Session (Run 9 — r9-002 + r9-003)
 
-- `src/composer/task-extractor.ts` (new)
-- `src/composer/gap-detector.ts` (new)
-- `src/composer/prompt-assembler.ts` (new)
-- `src/composer/queue-writer.ts` (new)
-- `src/composer/document-sequencer.ts` (new)
-- `src/composer/adversary-tracker.ts` (new)
-- `src/composer/index.ts` (new)
-- `src/engine/queue-generator.ts` (modified — added DAGNode, ForgeDAG, runAdversarialQueueReview)
+- `src/composer/task-extractor.ts` (new — r9-002)
+- `src/composer/gap-detector.ts` (new — r9-002)
+- `src/composer/prompt-assembler.ts` (new — r9-002)
+- `src/composer/queue-writer.ts` (new — r9-002)
+- `src/composer/document-sequencer.ts` (new — r9-002)
+- `src/composer/adversary-tracker.ts` (new — r9-002)
+- `src/composer/index.ts` (new — r9-002)
+- `src/engine/queue-generator.ts` (modified — r9-002: added DAGNode, ForgeDAG, runAdversarialQueueReview)
+- `src/cli/index.ts` (modified — r9-003: added forge compose + forge sequence commands)
 - `STATE_OF_THE_BUILD.md` (updated)
 - `SESSION_STATE.md` (this file)
 

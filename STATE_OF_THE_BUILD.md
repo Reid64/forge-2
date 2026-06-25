@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r9-002 — Composer Engine complete)
+**Last Updated:** 2026-06-24 (r9-003 — forge compose + forge sequence commands complete)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-002 COMPLETE)
-**Total Prompts Executed:** 69 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002)
+**Current Run:** RUN-9 (r9-003 COMPLETE)
+**Total Prompts Executed:** 70 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -43,7 +43,7 @@
 | Build Memory (`src/memory/`) | COMPLETE | 16 files in dist/ |
 | Tools (`src/tools/`) | COMPLETE | 24 files in dist/ |
 | Monitoring (`src/monitoring/`) | COMPLETE | deploy-agent.ts, telemetry-receiver.ts |
-| CLI (`src/cli/`) | COMPLETE | 17 commands: build, scout, design, resume, replay, status, history, patterns, agents, resurrect, estimate, repair, schedule, config, retrofit, sentinel, learn |
+| CLI (`src/cli/`) | COMPLETE | 19 commands: build, scout, design, resume, replay, status, history, patterns, agents, resurrect, estimate, repair, schedule, config, retrofit, sentinel, learn, compose, sequence |
 | Learning CLI (`forge learn`) | COMPLETE | 6 subcommands: init, status, patterns, sync, evolutions, rules |
 | `forge_config.json` | COMPLETE | Exists at project root |
 | `README.md` | COMPLETE | 307+ lines |
@@ -114,6 +114,7 @@ Run 6 key changes:
 |--------|------|--------|
 | r9-001 | (previous) | PASSED |
 | r9-002 | Composer Engine — 7 files in src/composer/ | COMPLETE |
+| r9-003 | forge compose + forge sequence CLI commands | COMPLETE |
 
 Run 9 key changes:
 - `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted task extraction
@@ -124,6 +125,7 @@ Run 9 key changes:
 - `src/composer/adversary-tracker.ts` — Adversary accuracy evaluator, finding recorder/resolver
 - `src/composer/index.ts` — Main orchestrator: gap check → extract → DAG → sort → assemble → write
 - `src/engine/queue-generator.ts` — Added DAGNode interface, ForgeDAG class, runAdversarialQueueReview
+- `src/cli/index.ts` — Added `forge compose` (5 options) and `forge sequence` (3 options) commands before registerLearningCommands (r9-003)
 
 ---
 
@@ -149,8 +151,8 @@ Run 9 key changes:
 - **Run 5:** 10/10 COMPLETE ✓
 - **Run 6:** 7/8 COMPLETE (r6-008 not executed) ✓
 - **Run 7:** 1/1 COMPLETE ✓
-- **Run 9:** 2/? IN PROGRESS (r9-002 this session)
-- **Overall:** ~69/~80 queued prompts complete (~86%)
+- **Run 9:** 3/? IN PROGRESS (r9-003 this session)
+- **Overall:** ~70/~80 queued prompts complete (~88%)
 
 ---
 
@@ -166,4 +168,4 @@ Run 9 key changes:
 
 ## Next Action
 
-Continue Run 7. When exec gate lifts, run `pnpm tsc --noEmit && pnpm build && pnpm test` and commit results.
+Continue Run 9. When exec gate lifts, run `pnpm tsc --noEmit && pnpm build` and verify `node dist/cli/index.js compose --help` (5 options) and `node dist/cli/index.js sequence --help` (3 options).

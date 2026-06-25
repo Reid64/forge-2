@@ -1299,6 +1299,70 @@ async function main(): Promise<void> {
       }
     });
 
+  program
+    .command('compose')
+    .description('Compose a FORGE execution queue from governance documents (BLUEPRINT.md, SCHEMA_REGISTRY.md, AGENTS.md)')
+    .argument('<project-path>', 'Absolute path to the project with governance docs')
+    .option('--mode <mode>', 'GREENFIELD or RETROFIT', 'GREENFIELD')
+    .option('--api-key <key>', 'Anthropic API key for Claude-assisted extraction and gap detection')
+    .option('--non-interactive', 'Auto-proceed despite blockers', false)
+    .option('--prompts-per-run <n>', 'Max prompts per queue file', '45')
+    .option('--output <path>', 'Output directory for queue files')
+    .action(async (projectPath: string, opts: { mode?: string; apiKey?: string; nonInteractive?: boolean; promptsPerRun?: string; output?: string }) => {
+      const spinner = ora('Composing FORGE queue...').start();
+      try {
+        const { runComposer } = await import('../composer/index.js');
+        spinner.stop();
+        const result = await runComposer({ projectPath: resolve(projectPath), mode: (opts.mode as 'GREENFIELD' | 'RETROFIT') ?? 'GREENFIELD', apiKey: opts.apiKey ?? process.env['ANTHROPIC_API_KEY'], nonInteractive: opts.nonInteractive ?? false, promptsPerRun: parseInt(opts.promptsPerRun ?? '45', 10), outputPath: opts.output });
+        if (result.success) {
+          console.log(chalk.green('\nComposition complete!'));
+          console.log('  Prompts: ' + result.totalPrompts + ' across ' + result.totalRuns + ' runs');
+          console.log('  Estimated cost: $' + result.estimatedCostUSD.toFixed(2));
+          console.log('  Summary: ' + result.summaryPath);
+        } else {
+          console.error(chalk.red('\nComposition failed.'));
+          for (const b of result.blockers) console.error(chalk.red('  BLOCKER: ' + b));
+          process.exitCode = 1;
+        }
+      } catch (err: unknown) { spinner.fail('COMPOSE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
+    });
+
+  program
+    .command('sequence')
+    .description('Process multiple spec documents in dependency order for enterprise builds (40+ documents)')
+    .argument('<specs-dir>', 'Directory containing specification documents')
+    .argument('<project-path>', 'Absolute path to the project being built')
+    .option('--api-key <key>', 'Anthropic API key')
+    .option('--non-interactive', 'Auto-proceed despite warnings', false)
+    .option('--dry-run', 'Show sequence plan without generating queues', false)
+    .action(async (specsDir: string, projectPath: string, opts: { apiKey?: string; nonInteractive?: boolean; dryRun?: boolean }) => {
+      const spinner = ora('Loading specification documents...').start();
+      try {
+        const { loadSpecDocuments, createSequencePlan, writeSequencePlanSummary } = await import('../composer/document-sequencer.js');
+        const { runComposer } = await import('../composer/index.js');
+        const { writeFileSync } = await import('node:fs');
+        const { join: pathJoin } = await import('node:path');
+        const { basename } = await import('node:path');
+        spinner.stop();
+        const docs = loadSpecDocuments(resolve(specsDir));
+        const plan = createSequencePlan(docs);
+        console.log(chalk.bold('\nFORGE Document Sequencer'));
+        console.log('Documents: ' + docs.length + ' | Prompts: ~' + plan.totalEstimatedPrompts + ' | Runs: ~' + plan.totalEstimatedRuns + ' | Cost: ~$' + ((plan.totalEstimatedPrompts * 25000 / 1_000_000) * 3).toFixed(2));
+        for (const w of plan.warnings) console.warn(chalk.yellow('WARNING: ' + w));
+        const summaryPath = writeSequencePlanSummary(plan, pathJoin(resolve(projectPath), '.forge'));
+        console.log('Sequence plan: ' + chalk.cyan(summaryPath));
+        if (opts.dryRun) { console.log(chalk.yellow('\nDry run -- no queues generated.')); return; }
+        for (let i = 0; i < plan.documents.length; i++) {
+          const doc = plan.documents[i]!;
+          console.log('[' + (i + 1) + '/' + plan.documents.length + '] ' + doc.filename);
+          writeFileSync(pathJoin(resolve(projectPath), 'PRD.md'), doc.content, 'utf8');
+          const result = await runComposer({ projectPath: resolve(projectPath), projectName: basename(resolve(projectPath)), mode: 'GREENFIELD', apiKey: opts.apiKey ?? process.env['ANTHROPIC_API_KEY'], nonInteractive: opts.nonInteractive ?? false });
+          if (!result.success && !opts.nonInteractive) { console.error(chalk.red('Failed on ' + doc.filename)); process.exitCode = 1; return; }
+        }
+        console.log(chalk.green('\nSequencing complete!'));
+      } catch (err: unknown) { spinner.fail('SEQUENCE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
+    });
+
   registerLearningCommands(program);
 
   await program.parseAsync(process.argv);
