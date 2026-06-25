@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r9-005 — Phase Chain end-to-end build pipeline COMPLETE)
+**Last Updated:** 2026-06-24 (r9-007 — Queue Recomposer COMPLETE)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-005 COMPLETE)
-**Total Prompts Executed:** 72 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005)
+**Current Run:** RUN-9 (r9-007 COMPLETE)
+**Total Prompts Executed:** 73 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005, r9-007)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -38,6 +38,7 @@
 | PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE (r6-004) | 3488 bytes; queries fix_patterns + governance_rules from DB at save time; getMachineId wired; all 3 functions re-exported from integration.ts line 238 |
 | Hook Configuration (`.forge/hooks.json`) | COMPLETE | schema_version 1.0, project_name forge-2 |
 | Composer Engine (`src/composer/`) | COMPLETE (r9-002) | 7 files: task-extractor.ts, gap-detector.ts, prompt-assembler.ts, queue-writer.ts, document-sequencer.ts, adversary-tracker.ts, index.ts. DAGNode + ForgeDAG + runAdversarialQueueReview added to engine/queue-generator.ts. |
+| Queue Recomposer (`src/composer/recomposer.ts`) | COMPLETE (r9-007) | loadRunResults, identifyFailedPrompts, findKnownFixes (SQLite fix_patterns lookup), recomposeQueue (writes -recomposed.yaml), generateRecompositionReport. |
 | Phase Chain (`src/phases/phase-chain.ts`) | COMPLETE (r9-005) | End-to-end build pipeline: SCOUT → PRD → ARCHITECT → COMPOSE. Exports `runForgeBuild(opts: BuildOptions): Promise<BuildResult>`. Chains Phase0Scout, Phase1aPrd, Phase1bArchitect, and Composer in sequence. Writes .forge/BUILD_READY.md with launch instructions. |
 | Engine modules (`src/engine/`) | COMPLETE | 12 files in dist/: prompt-assembler, prompt-decomposer, prompt-rewriter, claude-runner, failure-predictor, free-tier-manager, git-manager, governance-gate, hook-manager, model-router, parallel-scheduler, provider-router, queue-generator |
 | Analysis modules (`src/analysis/`) | COMPLETE | 8 files: adversarial-review, agent-creator, cost-estimator, instinct-extractor, pass-at-k, pattern-extractor, six-laws-verifier, template-evolver |
