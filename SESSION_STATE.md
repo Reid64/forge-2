@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-010 — Learning smoke test + perf benchmarks COMPLETE)
+## Current Session: RUN-9 (r9-011 — README.md written from filesystem audit COMPLETE)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-25 (r9-010: tests/learning-smoke.ts + tests/learning-perf.ts written)
+## Last Updated: 2026-06-25 (r9-011: README.md written, 349 lines, from actual CLI source + file listings)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-010 (COMPLETE) |
-| Prompts Executed (Run 9) | 8 |
-| Prompts Passed (Run 9) | 8 |
+| Current Prompt | r9-011 (COMPLETE) |
+| Prompts Executed (Run 9) | 9 |
+| Prompts Passed (Run 9) | 9 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,7 +22,7 @@
 
 ## Last Completed Prompt
 
-r9-010 — Learning smoke test + perf benchmarks: wrote tests/learning-smoke.ts and tests/learning-perf.ts.
+r9-011 — README.md written from filesystem audit: 349 lines, all content derived from actual source files (src/cli/index.ts, src/cli/commands/learning.ts, forge_config.json, and directory listings of src/phases/, src/learning/, src/composer/, src/retrofit/).
 
 **Changes made (r9-010):**
 1. Read `src/learning/integration.ts` — confirmed `onRunStart`, `onPromptComplete`, `onRunEnd` signatures
@@ -38,7 +38,7 @@ r9-010 — Learning smoke test + perf benchmarks: wrote tests/learning-smoke.ts 
 
 ## Current Prompt (in progress)
 
-r9-010 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-011 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -82,7 +82,7 @@ r9-010 complete. Next: next prompt in Run 9 queue. Priority: run live exec verif
 
 ---
 
-## Files Modified This Session (Run 9 — r9-002 + r9-003 + r9-007 + r9-009)
+## Files Modified This Session (Run 9 — r9-002 + r9-003 + r9-007 + r9-009 + r9-011)
 
 - `src/composer/task-extractor.ts` (new — r9-002)
 - `src/composer/gap-detector.ts` (new — r9-002)
@@ -97,6 +97,9 @@ r9-010 complete. Next: next prompt in Run 9 queue. Priority: run live exec verif
 - `SESSION_STATE.md` (this file — r9-003, r9-004, r9-005, r9-009)
 - `src/phases/phase-chain.ts` (new — r9-005; r9-009: fixed .pop() undefined)
 - `src/composer/recomposer.ts` (new — r9-007)
+- `README.md` (written — r9-011: 349 lines from filesystem audit)
+- `STATE_OF_THE_BUILD.md` (updated — r9-011)
+- `SESSION_STATE.md` (this file — r9-011)
 
 ---
 

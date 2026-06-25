@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-25 (r9-010 — Learning smoke test + perf benchmark files written)
+**Last Updated:** 2026-06-25 (r9-011 — README.md written from filesystem audit, 349 lines)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-010 COMPLETE)
-**Total Prompts Executed:** 75 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005, r9-007, r9-009, r9-010)
+**Current Run:** RUN-9 (r9-011 COMPLETE)
+**Total Prompts Executed:** 76 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005, r9-007, r9-009, r9-010, r9-011)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
