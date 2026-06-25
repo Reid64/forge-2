@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r9-003 — forge compose + forge sequence commands complete)
+**Last Updated:** 2026-06-24 (r9-004 — ForgeDAG verification complete)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-003 COMPLETE)
-**Total Prompts Executed:** 70 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003)
+**Current Run:** RUN-9 (r9-004 COMPLETE)
+**Total Prompts Executed:** 71 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -115,6 +115,7 @@ Run 6 key changes:
 | r9-001 | (previous) | PASSED |
 | r9-002 | Composer Engine — 7 files in src/composer/ | COMPLETE |
 | r9-003 | forge compose + forge sequence CLI commands | COMPLETE |
+| r9-004 | ForgeDAG verification — class confirmed present at line 1110 | COMPLETE |
 
 Run 9 key changes:
 - `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted task extraction
@@ -151,7 +152,7 @@ Run 9 key changes:
 - **Run 5:** 10/10 COMPLETE ✓
 - **Run 6:** 7/8 COMPLETE (r6-008 not executed) ✓
 - **Run 7:** 1/1 COMPLETE ✓
-- **Run 9:** 3/? IN PROGRESS (r9-003 this session)
+- **Run 9:** 4/? IN PROGRESS (r9-004 this session)
 - **Overall:** ~70/~80 queued prompts complete (~88%)
 
 ---
@@ -168,4 +169,4 @@ Run 9 key changes:
 
 ## Next Action
 
-Continue Run 9. When exec gate lifts, run `pnpm tsc --noEmit && pnpm build` and verify `node dist/cli/index.js compose --help` (5 options) and `node dist/cli/index.js sequence --help` (3 options).
+Continue Run 9. r9-004 verified ForgeDAG present at line 1110 of src/engine/queue-generator.ts via grep; exec gate blocked tsc/build live verification. When exec gate lifts, run `pnpm tsc --noEmit && pnpm build` and verify `node dist/cli/index.js compose --help`.

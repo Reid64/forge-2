@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-003 — forge compose + forge sequence commands)
+## Current Session: RUN-9 (r9-004 — ForgeDAG verification)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r9-003 COMPLETE)
+## Last Updated: 2026-06-24 (r9-004 COMPLETE)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-003 (COMPLETE) |
-| Prompts Executed (Run 9) | 3 |
-| Prompts Passed (Run 9) | 3 |
+| Current Prompt | r9-004 (COMPLETE) |
+| Prompts Executed (Run 9) | 4 |
+| Prompts Passed (Run 9) | 4 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,24 +22,27 @@
 
 ## Last Completed Prompt
 
-r9-003 — Insert `forge compose` and `forge sequence` commands into `src/cli/index.ts`.
+r9-004 — Verify `class ForgeDAG` present in `src/engine/queue-generator.ts`.
 
-**Changes made (r9-003):**
-1. Modified `src/cli/index.ts` — Inserted `compose` command (5 options: --mode, --api-key, --non-interactive, --prompts-per-run, --output) and `sequence` command (3 options: --api-key, --non-interactive, --dry-run) before `registerLearningCommands(program)` at line 1302
-2. Updated `STATE_OF_THE_BUILD.md` — CLI command count updated to 19, r9-003 row added
-3. Updated `SESSION_STATE.md` (this file)
+**Changes made (r9-004):**
+1. Read `src/engine/queue-generator.ts` in full (1244 lines)
+2. Confirmed `export class ForgeDAG` at line 1110 — already added in r9-002
+3. Confirmed `export interface DAGNode` at line 1091
+4. Confirmed `export async function runAdversarialQueueReview` at line 1217
+5. Grep verified: `class ForgeDAG` found at line 1110 ✓
+6. No code changes required — class was present
+7. Updated `STATE_OF_THE_BUILD.md` — r9-004 row added, prompt count to 71
+8. Updated `SESSION_STATE.md` (this file)
 
-**Static type verification (r9-003):**
-- `runComposer` from `src/composer/index.ts`: `ComposeResult` has all accessed fields (success, totalPrompts, totalRuns, estimatedCostUSD, summaryPath, blockers) ✓
-- `loadSpecDocuments`, `createSequencePlan`, `writeSequencePlanSummary` confirmed exported from `src/composer/document-sequencer.ts` ✓
-- No ESLint configured — `basename` re-import shadowing is not an error ✓
-- Exec gate blocked: pnpm tsc, pnpm build, node dist/ unverified (INTERMITTENT per memory)
+**Static verification (r9-004):**
+- `grep -n 'class ForgeDAG' src/engine/queue-generator.ts` → line 1110 ✓
+- Exec gate blocked: pnpm tsc --noEmit, pnpm build unverified (INTERMITTENT per memory)
 
 ---
 
 ## Current Prompt (in progress)
 
-r9-003 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-004 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -61,7 +64,7 @@ r9-003 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ## Next Action
 
-r9-003 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js compose --help`) when exec gate lifts.
+r9-004 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js compose --help`) when exec gate lifts.
 
 ---
 
@@ -94,8 +97,8 @@ r9-003 complete. Next: next prompt in Run 9 queue. Priority: run live exec verif
 - `src/composer/index.ts` (new — r9-002)
 - `src/engine/queue-generator.ts` (modified — r9-002: added DAGNode, ForgeDAG, runAdversarialQueueReview)
 - `src/cli/index.ts` (modified — r9-003: added forge compose + forge sequence commands)
-- `STATE_OF_THE_BUILD.md` (updated)
-- `SESSION_STATE.md` (this file)
+- `STATE_OF_THE_BUILD.md` (updated — r9-003 and r9-004)
+- `SESSION_STATE.md` (this file — r9-003 and r9-004)
 
 ---
 
