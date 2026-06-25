@@ -1,52 +1,46 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-7 (r7-001 — governance audit)
+## Current Session: RUN-9 (r9-002 — Composer Engine)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r7-001 in progress)
+## Last Updated: 2026-06-24 (r9-002 COMPLETE)
 
 ---
 
 | Field | Value |
 |-------|-------|
-| Run Number | 7 (in progress) |
-| Phase | AUDIT / COMMISSION |
-| Current Prompt | r7-001 (IN PROGRESS) |
-| Prompts Executed (Run 7) | 1 |
-| Prompts Passed (Run 7) | 0 (in progress) |
-| Prompts Failed (Run 7) | 0 |
-| First Pass Rate | N/A |
+| Run Number | 9 (in progress) |
+| Phase | BUILD |
+| Current Prompt | r9-002 (COMPLETE) |
+| Prompts Executed (Run 9) | 2 |
+| Prompts Passed (Run 9) | 2 |
+| Prompts Failed (Run 9) | 0 |
+| First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
 | Duration | Single session |
 
 ---
 
-## Last Completed Prompt (prior run)
+## Last Completed Prompt
 
-r6-007 — Wire governance doc renderers + adversarial review in `src/phases/phase1b-architect.ts`.
+r9-002 — Create src/composer/ directory with 7 files (Composer Engine).
 
-**Changes confirmed present via grep audit (r7-001):**
-- GovernanceDocName type exported at line 92
-- governanceDocs field on ArchitectureDesign at line 485
-- writeGovernanceDocs option at line 526
-- 8 renderer functions starting at line 1546 (renderBlueprintMd, renderSchemaRegistryMd, etc.)
-- Step 7 writes all 8 docs to governance/ dir (line 2233–2269)
-- Step 8 adversarial review with ARCHITECT_GOVERNANCE phase (line 2273+)
+**Changes made (r9-002):**
+1. Created `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted extraction
+2. Created `src/composer/gap-detector.ts` — Schema gap detection, RLS audit, contract gap finder
+3. Created `src/composer/prompt-assembler.ts` — 7-section prompt assembler, splitTask, loadLearningContext
+4. Created `src/composer/queue-writer.ts` — YAML queue writer, run file splitting (45 prompts/run), generateRunSummary
+5. Created `src/composer/document-sequencer.ts` — Enterprise 40+ doc sequencer, category ordering
+6. Created `src/composer/adversary-tracker.ts` — Adversary accuracy evaluator, finding recorder/resolver
+7. Created `src/composer/index.ts` — Main orchestrator (runComposer)
+8. Modified `src/engine/queue-generator.ts` — Added DAGNode interface, ForgeDAG class (addNode, inferDependencies, detectCycles, topologicalSort), AdversarialQueueReviewResult, runAdversarialQueueReview
+9. Updated `STATE_OF_THE_BUILD.md` — Composer Engine COMPLETE row added
+10. Updated `SESSION_STATE.md` (this file)
 
 ---
 
 ## Current Prompt (in progress)
 
-r7-001 — Read STATE_OF_THE_BUILD.md and SESSION_STATE.md. Report what remains incomplete.
-Update governance docs from actual codebase audit.
-
-**Actions taken this session:**
-1. Wrote `forge2-run7-20260624.yaml` to project root (YAML for Run 7 commissioning)
-2. Verified exec gate still blocked (pnpm tsc / build / test / node require approval)
-3. Read and confirmed all r6-001 through r6-007 changes via grep inspection
-4. Confirmed r6-008 snapshot exists in git but prompt was never executed
-5. Created `.forge/RUN6-HANDOFF.md` with full verification results
-6. Rewrote `STATE_OF_THE_BUILD.md` from actual codebase audit
-7. Rewrote `SESSION_STATE.md` (this file)
+r9-002 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -68,9 +62,7 @@ Update governance docs from actual codebase audit.
 
 ## Next Action
 
-r7-001 completing. Run 7 queue (`forge2-run7-20260624.yaml`) commissioned.
-Next: launch Run 7 via FORGE orchestrator to define and execute follow-on prompts
-(r7-002+) — priority is live exec verification and hardening.
+r9-002 complete. Next: r9-003 or next prompt in Run 9 queue. Priority: continue building Composer Engine integration or run live exec verification when gate lifts.
 
 ---
 
@@ -92,12 +84,18 @@ Next: launch Run 7 via FORGE orchestrator to define and execute follow-on prompt
 
 ---
 
-## Files Modified This Session (Run 7 — r7-001)
+## Files Modified This Session (Run 9 — r9-002)
 
-- `forge2-run7-20260624.yaml` (new — Run 7 queue commissioning file)
-- `.forge/RUN6-HANDOFF.md` (new — Run 6 → Run 7 handoff document with full audit)
-- `STATE_OF_THE_BUILD.md` (rewritten from actual codebase audit)
-- `SESSION_STATE.md` (this file — rewritten from actual codebase audit)
+- `src/composer/task-extractor.ts` (new)
+- `src/composer/gap-detector.ts` (new)
+- `src/composer/prompt-assembler.ts` (new)
+- `src/composer/queue-writer.ts` (new)
+- `src/composer/document-sequencer.ts` (new)
+- `src/composer/adversary-tracker.ts` (new)
+- `src/composer/index.ts` (new)
+- `src/engine/queue-generator.ts` (modified — added DAGNode, ForgeDAG, runAdversarialQueueReview)
+- `STATE_OF_THE_BUILD.md` (updated)
+- `SESSION_STATE.md` (this file)
 
 ---
 

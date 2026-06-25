@@ -1082,3 +1082,162 @@ export async function generateQueue(
 }
 
 export default generateQueue;
+
+// ---------------------------------------------------------------------------
+// Composer Engine types -- DAGNode, ForgeDAG, runAdversarialQueueReview
+// ---------------------------------------------------------------------------
+
+/** A single atomic build task in the Composer DAG. */
+export interface DAGNode {
+  id: string;
+  name: string;
+  /** SCAFFOLD | CRUD | INTEGRATION | AI_PIPELINE | CONFIG | TEST | FIX */
+  taskType: string;
+  /** LOW | MEDIUM | HIGH | CRITICAL */
+  complexity: string;
+  estimatedTokens: number;
+  dependsOn: string[];
+  filesCreate: string[];
+  filesModify: string[];
+  dbTables: string[];
+  acceptanceCriteria: string[];
+  verificationCommands: string[];
+  /** CRITICAL | WARN | BUILD | INJECT */
+  tier: string;
+}
+
+/** Directed-acyclic-graph of DAGNodes with dependency inference and topological sort. */
+export class ForgeDAG {
+  private nodes: Map<string, DAGNode> = new Map();
+
+  addNode(node: DAGNode): void {
+    this.nodes.set(node.id, node);
+  }
+
+  /** Infer implicit dependencies: nodes that write a table another node reads. */
+  inferDependencies(): void {
+    const tableWriters = new Map<string, string[]>();
+    for (const node of this.nodes.values()) {
+      for (const table of node.dbTables) {
+        const writers = tableWriters.get(table) ?? [];
+        writers.push(node.id);
+        tableWriters.set(table, writers);
+      }
+    }
+    for (const node of this.nodes.values()) {
+      const impliedDeps = new Set<string>(node.dependsOn);
+      for (const table of node.dbTables) {
+        const writers = tableWriters.get(table) ?? [];
+        for (const writerId of writers) {
+          if (writerId !== node.id) impliedDeps.add(writerId);
+        }
+      }
+      node.dependsOn = [...impliedDeps];
+    }
+  }
+
+  /** Returns arrays of node ids forming cycles, or empty array if acyclic. */
+  detectCycles(): string[][] {
+    const cycles: string[][] = [];
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    const path: string[] = [];
+
+    const dfs = (id: string): void => {
+      if (stack.has(id)) {
+        const cycleStart = path.indexOf(id);
+        if (cycleStart >= 0) cycles.push([...path.slice(cycleStart), id]);
+        return;
+      }
+      if (visited.has(id)) return;
+      visited.add(id);
+      stack.add(id);
+      path.push(id);
+      const node = this.nodes.get(id);
+      if (node) {
+        for (const dep of node.dependsOn) dfs(dep);
+      }
+      path.pop();
+      stack.delete(id);
+    };
+
+    for (const id of this.nodes.keys()) dfs(id);
+    return cycles;
+  }
+
+  /** Returns nodes in dependency-first topological order (Kahn's algorithm). */
+  topologicalSort(): DAGNode[] {
+    const inDegree = new Map<string, number>();
+    const adjReverse = new Map<string, string[]>();
+    for (const [id] of this.nodes) {
+      inDegree.set(id, 0);
+      adjReverse.set(id, []);
+    }
+    for (const node of this.nodes.values()) {
+      for (const dep of node.dependsOn) {
+        if (this.nodes.has(dep)) {
+          inDegree.set(node.id, (inDegree.get(node.id) ?? 0) + 1);
+          const rev = adjReverse.get(dep) ?? [];
+          rev.push(node.id);
+          adjReverse.set(dep, rev);
+        }
+      }
+    }
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree) { if (deg === 0) queue.push(id); }
+    const result: DAGNode[] = [];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      const node = this.nodes.get(id);
+      if (node) result.push(node);
+      for (const neighbor of adjReverse.get(id) ?? []) {
+        const newDeg = (inDegree.get(neighbor) ?? 1) - 1;
+        inDegree.set(neighbor, newDeg);
+        if (newDeg === 0) queue.push(neighbor);
+      }
+    }
+    // Append any remaining nodes (in case of cycles that weren't caught).
+    for (const node of this.nodes.values()) {
+      if (!result.find((r) => r.id === node.id)) result.push(node);
+    }
+    return result;
+  }
+}
+
+export interface AdversarialQueueReviewResult {
+  canProceed: boolean;
+  blockers: string[];
+  warnings: string[];
+}
+
+/**
+ * Adversarially review a queue of DAGNodes using the Claude API.
+ * Falls back to a permissive result if the API call fails.
+ */
+export async function runAdversarialQueueReview(
+  nodes: DAGNode[],
+  apiKey: string
+): Promise<AdversarialQueueReviewResult> {
+  const fallback: AdversarialQueueReviewResult = { canProceed: true, blockers: [], warnings: [] };
+  if (nodes.length === 0) return fallback;
+  try {
+    const summary = nodes.slice(0, 30).map((n) => `- ${n.id}: ${n.name} [${n.tier}] deps=[${n.dependsOn.join(',')}]`).join('\n');
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: 'Review this build queue for ordering problems, missing deps, or risky tasks. Respond ONLY with JSON: { "blockers": string[], "warnings": string[], "canProceed": boolean }',
+        messages: [{ role: 'user', content: 'Review this queue:\n' + summary }],
+      }),
+    });
+    if (!res.ok) return fallback;
+    const data = await res.json() as { content: Array<{ type: string; text?: string }> };
+    const text = data.content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim()) as AdversarialQueueReviewResult;
+    return { canProceed: parsed.canProceed ?? true, blockers: parsed.blockers ?? [], warnings: parsed.warnings ?? [] };
+  } catch {
+    return fallback;
+  }
+}

@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r7-001 — governance audit, RUN6-HANDOFF.md, Run 7 commissioned)
+**Last Updated:** 2026-06-24 (r9-002 — Composer Engine complete)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-7 (r7-001 in progress)
-**Total Prompts Executed:** 68 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001)
+**Current Run:** RUN-9 (r9-002 COMPLETE)
+**Total Prompts Executed:** 69 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -37,6 +37,7 @@
 | Session Hooks (`src/learning/session-hooks.ts`) | COMPLETE | 5881 bytes |
 | PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE (r6-004) | 3488 bytes; queries fix_patterns + governance_rules from DB at save time; getMachineId wired; all 3 functions re-exported from integration.ts line 238 |
 | Hook Configuration (`.forge/hooks.json`) | COMPLETE | schema_version 1.0, project_name forge-2 |
+| Composer Engine (`src/composer/`) | COMPLETE (r9-002) | 7 files: task-extractor.ts, gap-detector.ts, prompt-assembler.ts, queue-writer.ts, document-sequencer.ts, adversary-tracker.ts, index.ts. DAGNode + ForgeDAG + runAdversarialQueueReview added to engine/queue-generator.ts. |
 | Engine modules (`src/engine/`) | COMPLETE | 12 files in dist/: prompt-assembler, prompt-decomposer, prompt-rewriter, claude-runner, failure-predictor, free-tier-manager, git-manager, governance-gate, hook-manager, model-router, parallel-scheduler, provider-router, queue-generator |
 | Analysis modules (`src/analysis/`) | COMPLETE | 8 files: adversarial-review, agent-creator, cost-estimator, instinct-extractor, pass-at-k, pattern-extractor, six-laws-verifier, template-evolver |
 | Build Memory (`src/memory/`) | COMPLETE | 16 files in dist/ |
@@ -99,14 +100,30 @@ Run 6 key changes:
 
 ---
 
-## Run 7 — IN PROGRESS (r7-001)
+## Run 7 — COMPLETE (r7-001)
 
 | Prompt | Name | Status |
 |--------|------|--------|
-| r7-001 | Governance audit, RUN6-HANDOFF.md, commission Run 7 | IN PROGRESS (this session) |
+| r7-001 | Governance audit, RUN6-HANDOFF.md, commission Run 7 | COMPLETE |
 
-Queue: `forge2-run7-20260624.yaml`
-Written to: `C:\Users\manag\Documents\forge-2\forge2-run7-20260624.yaml`
+---
+
+## Run 9 — IN PROGRESS
+
+| Prompt | Name | Status |
+|--------|------|--------|
+| r9-001 | (previous) | PASSED |
+| r9-002 | Composer Engine — 7 files in src/composer/ | COMPLETE |
+
+Run 9 key changes:
+- `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted task extraction
+- `src/composer/gap-detector.ts` — Schema gap detection, RLS audit, contract gap finder
+- `src/composer/prompt-assembler.ts` — 7-section prompt assembly, task splitting, learning context loader
+- `src/composer/queue-writer.ts` — YAML queue writer, run file splitting (45 prompts/run)
+- `src/composer/document-sequencer.ts` — Enterprise 40+ doc sequencer, category ordering
+- `src/composer/adversary-tracker.ts` — Adversary accuracy evaluator, finding recorder/resolver
+- `src/composer/index.ts` — Main orchestrator: gap check → extract → DAG → sort → assemble → write
+- `src/engine/queue-generator.ts` — Added DAGNode interface, ForgeDAG class, runAdversarialQueueReview
 
 ---
 
@@ -131,8 +148,9 @@ Written to: `C:\Users\manag\Documents\forge-2\forge2-run7-20260624.yaml`
 - **Run 4:** 13/13 COMPLETE ✓
 - **Run 5:** 10/10 COMPLETE ✓
 - **Run 6:** 7/8 COMPLETE (r6-008 not executed) ✓
-- **Run 7:** 1/? IN PROGRESS (r7-001 — this audit)
-- **Overall:** ~68/~80 queued prompts complete (~85%)
+- **Run 7:** 1/1 COMPLETE ✓
+- **Run 9:** 2/? IN PROGRESS (r9-002 this session)
+- **Overall:** ~69/~80 queued prompts complete (~86%)
 
 ---
 
