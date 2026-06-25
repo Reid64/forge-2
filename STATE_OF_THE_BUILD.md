@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-25 (r9-011 — README.md written from filesystem audit, 349 lines)
+**Last Updated:** 2026-06-25 (r9-012 — AGENTS.md and SCHEMA_REGISTRY.md completed)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-011 COMPLETE)
-**Total Prompts Executed:** 76 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005, r9-007, r9-009, r9-010, r9-011)
+**Current Run:** RUN-9 (r9-012 COMPLETE)
+**Total Prompts Executed:** 77 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005, r9-007, r9-009, r9-010, r9-011, r9-012)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -121,6 +121,9 @@ Run 6 key changes:
 | r9-005 | Phase Chain — end-to-end build pipeline (phase-chain.ts) | COMPLETE |
 | r9-007 | Queue Recomposer — src/composer/recomposer.ts | COMPLETE |
 | r9-009 | Recovery/Verification — deploy command added, .pop() undefined fix | COMPLETE |
+| r9-010 | Smoke + perf tests written (tests/learning-smoke.ts, tests/learning-perf.ts) | COMPLETE |
+| r9-011 | README.md written from filesystem audit (349 lines) | COMPLETE |
+| r9-012 | AGENTS.md + SCHEMA_REGISTRY.md completed (5 new agents, 3 missing tables) | COMPLETE |
 
 Run 9 key changes:
 - `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted task extraction
@@ -134,6 +137,10 @@ Run 9 key changes:
 - `src/cli/index.ts` — Added `forge compose` (5 options) and `forge sequence` (3 options) commands before registerLearningCommands (r9-003); added `forge deploy` (monitoring snippet injection) (r9-009)
 - `src/phases/phase-chain.ts` — End-to-end pipeline: runForgeBuild chains Scout→PRD→Architect→Compose; writes .forge/BUILD_READY.md (r9-005); fixed .pop() undefined (r9-009)
 - `src/composer/recomposer.ts` — loadRunResults, identifyFailedPrompts, findKnownFixes, recomposeQueue, generateRecompositionReport (r9-007)
+
+r9-012 changes:
+- `AGENTS.md` — added 5 new agent entries: ForgeComposerEngine, ForgeDocumentSequencer, ForgePhaseBuildChain, ForgeQueueRecomposer, ForgeABTester (each with entry point, exports, CLI, dependencies, database tables)
+- `SCHEMA_REGISTRY.md` — added 3 missing SQLite tables: hook_execution_log (10 columns, 3 indexes), compact_snapshots (6 columns, 1 index), decision_weights (14 columns, 2 indexes)
 
 r9-009 fixes applied (exec gate blocked live verification; static analysis):
 - Added `forge deploy` command to CLI (was missing from acceptance criteria 6 commands)
@@ -164,8 +171,8 @@ r9-009 fixes applied (exec gate blocked live verification; static analysis):
 - **Run 5:** 10/10 COMPLETE ✓
 - **Run 6:** 7/8 COMPLETE (r6-008 not executed) ✓
 - **Run 7:** 1/1 COMPLETE ✓
-- **Run 9:** 7/? IN PROGRESS (r9-009 COMPLETE)
-- **Overall:** ~74/~80 queued prompts complete (~93%)
+- **Run 9:** 10/? IN PROGRESS (r9-012 COMPLETE)
+- **Overall:** ~77/~80 queued prompts complete (~96%)
 
 ---
 

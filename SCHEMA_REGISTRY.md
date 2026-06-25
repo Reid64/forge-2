@@ -336,3 +336,68 @@ Tracks project state hashes for integrity verification between runs.
 #### Indexes:
 - `idx_fingerprints_build` ON (build_id)
 - `idx_fingerprints_project` ON (project_name)
+
+---
+
+### Table: hook_execution_log
+Logs every hook execution for performance analysis and evolution proposals.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | UUID record identifier |
+| hook_name | TEXT | NOT NULL | Name of the hook (e.g. PreToolUse, SessionStart) |
+| event | TEXT | NOT NULL | Lifecycle event that triggered the hook |
+| status | TEXT | NOT NULL, CHECK IN ('PASS','FAIL','TIMEOUT','SKIP') | Execution outcome |
+| duration_ms | INTEGER | NOT NULL | Execution time in milliseconds |
+| output | TEXT | | Captured hook output (nullable) |
+| build_id | TEXT | NOT NULL | Build run this execution belongs to |
+| prompt_number | INTEGER | | Prompt index within the build (nullable) |
+| machine_id | TEXT | NOT NULL | Machine that executed the hook |
+| created_at | TEXT | NOT NULL DEFAULT (datetime('now')) | Record creation timestamp |
+
+#### Indexes:
+- `idx_hook_log_build` ON (build_id)
+- `idx_hook_log_name` ON (hook_name, status)
+- `idx_hook_log_duration` ON (duration_ms DESC)
+
+---
+
+### Table: compact_snapshots
+PreCompact hook saves critical context here before Claude's context compaction so it can be re-injected on resume.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | UUID record identifier |
+| build_id | TEXT | NOT NULL | Build run this snapshot belongs to |
+| prompt_index | INTEGER | NOT NULL | Prompt position at the time of compaction |
+| state_json | TEXT | NOT NULL | Full serialized session state as JSON |
+| machine_id | TEXT | NOT NULL | Machine that created the snapshot |
+| created_at | TEXT | NOT NULL DEFAULT (datetime('now')) | Record creation timestamp |
+
+#### Indexes:
+- `idx_compact_build` ON (build_id, prompt_index DESC)
+
+---
+
+### Table: decision_weights
+Tracks architectural decision outcomes for Loop 3 (Architecture Decision Weighting). The Architect queries this before recommending tech stack choices.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | TEXT | PRIMARY KEY | UUID record identifier |
+| decision_type | TEXT | NOT NULL | Category of decision (e.g. orm, auth, state-management) |
+| option_chosen | TEXT | NOT NULL | The specific option selected (e.g. prisma, supabase-auth, zustand) |
+| downstream_error_rate | REAL | NOT NULL DEFAULT 0.0 | Fraction of downstream prompts that errored |
+| downstream_retry_rate | REAL | NOT NULL DEFAULT 0.0 | Fraction of downstream prompts that required retry |
+| downstream_prompts | INTEGER | NOT NULL DEFAULT 0 | Total downstream prompts attributed to this decision |
+| downstream_errors | INTEGER | NOT NULL DEFAULT 0 | Absolute error count after this decision |
+| downstream_retries | INTEGER | NOT NULL DEFAULT 0 | Absolute retry count after this decision |
+| sample_size | INTEGER | NOT NULL DEFAULT 1 | Number of builds where this decision was made |
+| project_name | TEXT | NOT NULL | Project that made the decision |
+| build_id | TEXT | NOT NULL | Build run where the decision was recorded |
+| machine_id | TEXT | NOT NULL | Machine that recorded the decision |
+| created_at | TEXT | NOT NULL DEFAULT (datetime('now')) | Record creation timestamp |
+
+#### Indexes:
+- `idx_decision_weights_type` ON (decision_type, option_chosen)
+- `idx_decision_weights_error_rate` ON (downstream_error_rate ASC)

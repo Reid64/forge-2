@@ -107,6 +107,75 @@ Generated `queue.yaml` is ordered by dependency tier:
 
 ---
 
+## Agent: ForgeComposerEngine (src/composer/index.ts)
+
+- **Purpose:** Main Composer orchestrator. Reads governance docs, detects schema/contract gaps, extracts DAGNodes from task descriptions, builds a dependency graph, topologically sorts the graph, assembles 7-section prompts with learning context (fix_patterns + governance_rules injected), and writes FORGE-compatible queue.yaml files with gates on every prompt. Supports GREENFIELD and RETROFIT modes.
+- **Status:** COMPLETE (r9-002)
+- **CLI:** `forge compose <project-path> [--mode GREENFIELD|RETROFIT] [--specs-dir <dir>] [--output <path>] [--api-key <key>]`
+- **Entry Point:** `src/composer/index.ts`
+- **Exports:** `runComposer`, `ComposeOptions`, `ComposeResult`
+- **Dependencies:** ForgeLearning (fix_patterns + governance_rules via SQLite), ForgeDAG (src/engine/queue-generator.ts)
+- **Database tables:** `fix_patterns` (read), `governance_rules` (read), `skill_library` (read)
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `src/composer/index.ts` | Main orchestrator: gap check → extract → DAG → sort → assemble → write |
+| `src/composer/task-extractor.ts` | Loads governance suite, extracts tables/agents, calls Claude for task decomposition |
+| `src/composer/gap-detector.ts` | Schema gap detection, RLS audit, behavioral contract gap finder |
+| `src/composer/prompt-assembler.ts` | 7-section prompt assembly, task splitting, injects learning context |
+| `src/composer/queue-writer.ts` | YAML queue writer, run file splitting (45 prompts/run max) |
+| `src/composer/adversary-tracker.ts` | Adversary accuracy evaluator, finding recorder/resolver |
+
+---
+
+## Agent: ForgeDocumentSequencer (src/composer/document-sequencer.ts)
+
+- **Purpose:** Processes 40+ spec documents in dependency order for enterprise builds. Categorizes specs by FOUNDATION / SCHEMA / AUTH / API / UI / INTEGRATION / TESTING / DEPLOY. Generates a sequence plan with estimated prompt count, run count, and cost. Writes sequence plan summary to `.forge/sequence_plan.md`.
+- **Status:** COMPLETE (r9-002)
+- **CLI:** `forge sequence <specs-dir> <project-path> [--output <path>] [--api-key <key>]`
+- **Entry Point:** `src/composer/document-sequencer.ts`
+- **Exports:** `loadSpecDocuments`, `createSequencePlan`, `writeSequencePlanSummary`
+- **Dependencies:** ForgeLearning (read), ForgeComposerEngine (for per-spec queue generation)
+- **Database tables:** `prompt_scores` (read — for cost estimation per category)
+
+---
+
+## Agent: ForgePhaseBuildChain (src/phases/phase-chain.ts)
+
+- **Purpose:** End-to-end build pipeline. Chains Scout → PRD → Architect → Compose → Execute in a single invocation. Supports three modes: GREENFIELD (idea → production), RETROFIT (abandoned build resurrection), PRD_IMPORT (existing specs → production). Writes `.forge/BUILD_READY.md` with the launch command for the generated queue.
+- **Status:** COMPLETE (r9-005)
+- **CLI:** `forge build <path> [--idea <text>|--prd <file>|--specs <dir>] [--mode GREENFIELD|RETROFIT|PRD_IMPORT] [--api-key <key>]`
+- **Entry Point:** `src/phases/phase-chain.ts`
+- **Exports:** `runForgeBuild`, `BuildOptions`, `BuildResult`
+- **Dependencies:** ForgeArchitect (phase0-scout, phase1a-prd, phase1b-architect), ForgeComposerEngine
+- **Database tables:** `build_outcomes` (write), `decision_weights` (write)
+
+---
+
+## Agent: ForgeQueueRecomposer (src/composer/recomposer.ts)
+
+- **Purpose:** After each run, identifies failed prompts from gate output, queries `fix_patterns` for known fixes, re-queues failed prompts with fix context injected into the prompt body, and removes prompts made unnecessary by prior output (deduplication). Writes a `-recomposed.yaml` alongside the original queue file and generates a recomposition report.
+- **Status:** COMPLETE (r9-007)
+- **Entry Point:** `src/composer/recomposer.ts`
+- **Exports:** `loadRunResults`, `recomposeQueue`, `generateRecompositionReport`
+- **Dependencies:** ForgeLearning (fix_patterns read via SQLite)
+- **Database tables:** `fix_patterns` (read), `prompt_scores` (read)
+
+---
+
+## Agent: ForgeABTester (src/composer/ab-tester.ts)
+
+- **Purpose:** For prompts with less than 50% historical first-pass rate (queried from `prompt_scores`), generates two template variations — standard vs. step-by-step — and runs both against the gate sequence. Compares pass rates, stores the winning template in `skill_library` for automatic injection into all future prompts of the same task_type. Prevents repeated first-pass failures by learning optimal prompt structure per task class.
+- **Status:** NOT_STARTED
+- **Entry Point:** `src/composer/ab-tester.ts`
+- **Exports:** `shouldRunABTest`, `generateVariantB`, `storeWinningTemplate`, `runABTestDecision`
+- **Dependencies:** ForgeLearning (prompt_scores read, skill_library write)
+- **Database tables:** `prompt_scores` (read), `skill_library` (write)
+
+---
+
 ## Agent: ForgeDeploy (src/phases/)
 
 - **Purpose:** Deploy pipeline — canary, env parity, migration sequencing, rollback.

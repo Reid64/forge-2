@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-011 — README.md written from filesystem audit COMPLETE)
+## Current Session: RUN-9 (r9-012 — AGENTS.md + SCHEMA_REGISTRY.md COMPLETE)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-25 (r9-011: README.md written, 349 lines, from actual CLI source + file listings)
+## Last Updated: 2026-06-25 (r9-012: AGENTS.md 5 new agents added; SCHEMA_REGISTRY.md 3 missing tables added)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-011 (COMPLETE) |
-| Prompts Executed (Run 9) | 9 |
-| Prompts Passed (Run 9) | 9 |
+| Current Prompt | r9-012 (COMPLETE) |
+| Prompts Executed (Run 9) | 10 |
+| Prompts Passed (Run 9) | 10 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,7 +22,16 @@
 
 ## Last Completed Prompt
 
-r9-011 — README.md written from filesystem audit: 349 lines, all content derived from actual source files (src/cli/index.ts, src/cli/commands/learning.ts, forge_config.json, and directory listings of src/phases/, src/learning/, src/composer/, src/retrofit/).
+r9-012 — AGENTS.md and SCHEMA_REGISTRY.md completed.
+
+**Changes made (r9-012):**
+1. `AGENTS.md` — appended 5 new agent entries: ForgeComposerEngine (src/composer/index.ts), ForgeDocumentSequencer (src/composer/document-sequencer.ts), ForgePhaseBuildChain (src/phases/phase-chain.ts), ForgeQueueRecomposer (src/composer/recomposer.ts), ForgeABTester (src/composer/ab-tester.ts). Each entry includes entry point, exports, CLI invocation, dependencies, database tables.
+2. `SCHEMA_REGISTRY.md` — added 3 missing SQLite tables under the "SQLite Learning Database Tables" section: hook_execution_log (10 columns, 3 indexes), compact_snapshots (6 columns, 1 index), decision_weights (14 columns, 2 indexes). adversary_findings and build_fingerprints were already present.
+
+**Verification:**
+- `grep -c 'ForgeComposerEngine' AGENTS.md` → 1 ✓
+- `grep -c 'ForgePhaseBuildChain' AGENTS.md` → 1 ✓
+- `pnpm tsc --noEmit` → exec gate blocked; 0 errors by static inspection (no TypeScript files modified this prompt)
 
 **Changes made (r9-010):**
 1. Read `src/learning/integration.ts` — confirmed `onRunStart`, `onPromptComplete`, `onRunEnd` signatures
@@ -38,7 +47,7 @@ r9-011 — README.md written from filesystem audit: 349 lines, all content deriv
 
 ## Current Prompt (in progress)
 
-r9-011 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-012 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -98,8 +107,10 @@ r9-010 complete. Next: next prompt in Run 9 queue. Priority: run live exec verif
 - `src/phases/phase-chain.ts` (new — r9-005; r9-009: fixed .pop() undefined)
 - `src/composer/recomposer.ts` (new — r9-007)
 - `README.md` (written — r9-011: 349 lines from filesystem audit)
-- `STATE_OF_THE_BUILD.md` (updated — r9-011)
-- `SESSION_STATE.md` (this file — r9-011)
+- `AGENTS.md` (updated — r9-012: 5 new agent entries)
+- `SCHEMA_REGISTRY.md` (updated — r9-012: 3 missing SQLite tables)
+- `STATE_OF_THE_BUILD.md` (updated — r9-011, r9-012)
+- `SESSION_STATE.md` (this file — r9-011, r9-012)
 
 ---
 
