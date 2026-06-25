@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 (r9-004 — ForgeDAG verification)
+## Current Session: RUN-9 (r9-005 — Phase Chain end-to-end pipeline)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-24 (r9-004 COMPLETE)
+## Last Updated: 2026-06-24 (r9-005 COMPLETE)
 
 ---
 
@@ -10,9 +10,9 @@
 |-------|-------|
 | Run Number | 9 (in progress) |
 | Phase | BUILD |
-| Current Prompt | r9-004 (COMPLETE) |
-| Prompts Executed (Run 9) | 4 |
-| Prompts Passed (Run 9) | 4 |
+| Current Prompt | r9-005 (COMPLETE) |
+| Prompts Executed (Run 9) | 5 |
+| Prompts Passed (Run 9) | 5 |
 | Prompts Failed (Run 9) | 0 |
 | First Pass Rate | 100% |
 | Start Time | 2026-06-24 |
@@ -22,27 +22,33 @@
 
 ## Last Completed Prompt
 
-r9-004 — Verify `class ForgeDAG` present in `src/engine/queue-generator.ts`.
+r9-005 — Create `src/phases/phase-chain.ts` — end-to-end forge build pipeline.
 
-**Changes made (r9-004):**
-1. Read `src/engine/queue-generator.ts` in full (1244 lines)
-2. Confirmed `export class ForgeDAG` at line 1110 — already added in r9-002
-3. Confirmed `export interface DAGNode` at line 1091
-4. Confirmed `export async function runAdversarialQueueReview` at line 1217
-5. Grep verified: `class ForgeDAG` found at line 1110 ✓
-6. No code changes required — class was present
-7. Updated `STATE_OF_THE_BUILD.md` — r9-004 row added, prompt count to 71
-8. Updated `SESSION_STATE.md` (this file)
+**Changes made (r9-005):**
+1. Read all existing phase files and `src/composer/index.ts` to verify actual function signatures
+2. Confirmed `runPhase0Scout(projectPath, options?)`, `runPhase1aPrd(projectPath, idea, options?)`, `runPhase1bArchitect(projectPath, prd, options?)` signatures
+3. Created `src/phases/phase-chain.ts` with corrected function calls vs the template:
+   - Removed unused `existsSync` import
+   - Removed `skipDeploy`/`skipSentinel` from destructuring (unused)
+   - Fixed Phase0 call: `runPhase0Scout(projectPath)` (not object arg)
+   - Added `let prdText = ''` to thread PRD from 1A → 1B
+   - Fixed Phase1A: `runPhase1aPrd(projectPath, opts.idea ?? '', { apiKey })`
+   - Fixed Phase1B: `runPhase1bArchitect(projectPath, prdText, { apiKey })`
+   - Prefixed unused `_scoutResult` and `_archResult` with `_`
+   - Explicit `composeResult === null` check for TypeScript narrowing
+4. Grep verified: `runForgeBuild` found at line 49 ✓
+5. Updated `STATE_OF_THE_BUILD.md` — r9-005 row added, prompt count to 72
+6. Updated `SESSION_STATE.md` (this file)
 
-**Static verification (r9-004):**
-- `grep -n 'class ForgeDAG' src/engine/queue-generator.ts` → line 1110 ✓
+**Static verification (r9-005):**
+- `grep -n 'runForgeBuild' src/phases/phase-chain.ts` → line 49 ✓
 - Exec gate blocked: pnpm tsc --noEmit, pnpm build unverified (INTERMITTENT per memory)
 
 ---
 
 ## Current Prompt (in progress)
 
-r9-004 COMPLETE. Awaiting next prompt in Run 9 queue.
+r9-005 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ---
 
@@ -64,7 +70,7 @@ r9-004 COMPLETE. Awaiting next prompt in Run 9 queue.
 
 ## Next Action
 
-r9-004 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js compose --help`) when exec gate lifts.
+r9-005 complete. Next: next prompt in Run 9 queue. Priority: run live exec verification (`pnpm tsc --noEmit && pnpm build && node dist/cli/index.js compose --help`) when exec gate lifts.
 
 ---
 
@@ -97,8 +103,9 @@ r9-004 complete. Next: next prompt in Run 9 queue. Priority: run live exec verif
 - `src/composer/index.ts` (new — r9-002)
 - `src/engine/queue-generator.ts` (modified — r9-002: added DAGNode, ForgeDAG, runAdversarialQueueReview)
 - `src/cli/index.ts` (modified — r9-003: added forge compose + forge sequence commands)
-- `STATE_OF_THE_BUILD.md` (updated — r9-003 and r9-004)
-- `SESSION_STATE.md` (this file — r9-003 and r9-004)
+- `STATE_OF_THE_BUILD.md` (updated — r9-003, r9-004, and r9-005)
+- `SESSION_STATE.md` (this file — r9-003, r9-004, and r9-005)
+- `src/phases/phase-chain.ts` (new — r9-005)
 
 ---
 

@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-24 (r9-004 — ForgeDAG verification complete)
+**Last Updated:** 2026-06-24 (r9-005 — Phase Chain end-to-end build pipeline COMPLETE)
 **Build Status:** IN_PROGRESS
-**Current Run:** RUN-9 (r9-004 COMPLETE)
-**Total Prompts Executed:** 71 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004)
+**Current Run:** RUN-9 (r9-005 COMPLETE)
+**Total Prompts Executed:** 72 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001, r9-002, r9-003, r9-004, r9-005)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 ---
@@ -38,6 +38,7 @@
 | PreCompact Hook (`src/learning/precompact.ts`) | COMPLETE (r6-004) | 3488 bytes; queries fix_patterns + governance_rules from DB at save time; getMachineId wired; all 3 functions re-exported from integration.ts line 238 |
 | Hook Configuration (`.forge/hooks.json`) | COMPLETE | schema_version 1.0, project_name forge-2 |
 | Composer Engine (`src/composer/`) | COMPLETE (r9-002) | 7 files: task-extractor.ts, gap-detector.ts, prompt-assembler.ts, queue-writer.ts, document-sequencer.ts, adversary-tracker.ts, index.ts. DAGNode + ForgeDAG + runAdversarialQueueReview added to engine/queue-generator.ts. |
+| Phase Chain (`src/phases/phase-chain.ts`) | COMPLETE (r9-005) | End-to-end build pipeline: SCOUT → PRD → ARCHITECT → COMPOSE. Exports `runForgeBuild(opts: BuildOptions): Promise<BuildResult>`. Chains Phase0Scout, Phase1aPrd, Phase1bArchitect, and Composer in sequence. Writes .forge/BUILD_READY.md with launch instructions. |
 | Engine modules (`src/engine/`) | COMPLETE | 12 files in dist/: prompt-assembler, prompt-decomposer, prompt-rewriter, claude-runner, failure-predictor, free-tier-manager, git-manager, governance-gate, hook-manager, model-router, parallel-scheduler, provider-router, queue-generator |
 | Analysis modules (`src/analysis/`) | COMPLETE | 8 files: adversarial-review, agent-creator, cost-estimator, instinct-extractor, pass-at-k, pattern-extractor, six-laws-verifier, template-evolver |
 | Build Memory (`src/memory/`) | COMPLETE | 16 files in dist/ |
@@ -116,6 +117,7 @@ Run 6 key changes:
 | r9-002 | Composer Engine — 7 files in src/composer/ | COMPLETE |
 | r9-003 | forge compose + forge sequence CLI commands | COMPLETE |
 | r9-004 | ForgeDAG verification — class confirmed present at line 1110 | COMPLETE |
+| r9-005 | Phase Chain — end-to-end build pipeline (phase-chain.ts) | COMPLETE |
 
 Run 9 key changes:
 - `src/composer/task-extractor.ts` — GovernanceSuite loader, table/agent extractor, Claude-assisted task extraction
@@ -127,6 +129,7 @@ Run 9 key changes:
 - `src/composer/index.ts` — Main orchestrator: gap check → extract → DAG → sort → assemble → write
 - `src/engine/queue-generator.ts` — Added DAGNode interface, ForgeDAG class, runAdversarialQueueReview
 - `src/cli/index.ts` — Added `forge compose` (5 options) and `forge sequence` (3 options) commands before registerLearningCommands (r9-003)
+- `src/phases/phase-chain.ts` — End-to-end pipeline: runForgeBuild chains Scout→PRD→Architect→Compose; writes .forge/BUILD_READY.md (r9-005)
 
 ---
 
@@ -152,8 +155,8 @@ Run 9 key changes:
 - **Run 5:** 10/10 COMPLETE ✓
 - **Run 6:** 7/8 COMPLETE (r6-008 not executed) ✓
 - **Run 7:** 1/1 COMPLETE ✓
-- **Run 9:** 4/? IN PROGRESS (r9-004 this session)
-- **Overall:** ~70/~80 queued prompts complete (~88%)
+- **Run 9:** 5/? IN PROGRESS (r9-005 this session)
+- **Overall:** ~72/~80 queued prompts complete (~90%)
 
 ---
 
