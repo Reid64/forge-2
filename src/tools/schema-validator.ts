@@ -123,6 +123,35 @@ export function validateMemoryWrite(
 }
 
 // ---------------------------------------------------------------------------
+// Domain schemas
+// ---------------------------------------------------------------------------
+
+/** Full-row schema for the `build_runs` table (migration 001). */
+export const BuildRunSchema = z.object({
+  id: z.string(),
+  project_name: z.string(),
+  project_path: z.string(),
+  stack_fingerprint: z.record(z.unknown()),
+  status: z.enum(['queued', 'running', 'completed', 'failed', 'halted']),
+  started_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+  total_prompts: z.number(),
+  completed_prompts: z.number(),
+  failed_prompts: z.number(),
+  total_errors: z.number(),
+  total_tokens: z.number(),
+  total_cost_usd: z.number(),
+  machine_id: z.string(),
+  toolchain_manifest: z.record(z.unknown()),
+  governance_hash: z.string().nullable(),
+  sentinel_interventions: z.number(),
+  autonomous_recovery_mode: z.boolean(),
+  parallel_prompts_used: z.boolean(),
+  dry_run: z.boolean(),
+  created_at: z.string(),
+});
+
+// ---------------------------------------------------------------------------
 // External wire contracts — deliberately lenient (all fields optional) so a sparse-but-valid body
 // is accepted. They assert SHAPE, not completeness; the tolerant reads downstream handle absence.
 // ---------------------------------------------------------------------------
