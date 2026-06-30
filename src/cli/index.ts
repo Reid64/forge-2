@@ -277,8 +277,10 @@ async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string; s
  */
 const AUTO_GOVERNANCE_FILES: readonly string[] = [
   'BLUEPRINT.md',
+  'governance/BLUEPRINT.md',
   'DIALSTARS_BLUEPRINT.md',
   'SCHEMA.md',
+  'governance/SCHEMA_REGISTRY.md',
   'API_REGISTRY.md',
   'STATE_OF_THE_BUILD.md',
 ];
@@ -325,17 +327,297 @@ async function gatherGovernanceContext(
   return { text: sections.join('\n\n'), sources };
 }
 
+/**
+ * Heuristic markdown parser for FORGE governance docs.
+ *
+ * When --skip-design is used on a project that has already completed Phase 1B,
+ * the Queue Generator needs real structured data (tables, routes, pages, etc.)
+ * to produce a full build queue.  This function reads ARCHITECTURE.md (the
+ * richest source, written by Phase 1B) and extracts that data without making
+ * any model calls — pure regex parsing of FORGE's own deterministic output
+ * format.  Falls back to empty arrays on any read/parse failure so the
+ * --skip-design path never crashes when the file is absent or in an unexpected
+ * format.
+ */
+async function parseGovernanceDocs(projectPath: string): Promise<{
+  tables: Array<{ name: string; schema: string; purpose: string; columns: []; primaryKey: string[]; foreignKeys: []; rlsEnabled: boolean; tenantScoped: boolean; immutable: boolean }>;
+  indexes: Array<{ name: string; table: string; columns: string[]; unique: boolean; method: string | null; where: null }>;
+  rlsPolicies: Array<{ name: string; table: string; command: string; roles: string[]; using: null; check: null }>;
+  seeds: Array<{ table: string; description: string; rowCount: number | null }>;
+  migrations: Array<{ filename: string; description: string }>;
+  routes: Array<{ path: string; method: string; purpose: string; authRequired: boolean; roles: string[]; requestSchema: string; responseSchema: string; dbReads: string[]; dbWrites: []; errors: []; immutable: boolean }>;
+  conventions: string[];
+  pages: Array<{ name: string; path: string; purpose: string; components: string[]; apiCalls: string[]; authRequired: boolean; roles: []; immutable: boolean }>;
+  components: Array<{ name: string; type: string; description: string }>;
+  layouts: Array<{ name: string; description: string; appliesTo: string[] }>;
+  authRoles: Array<{ name: string; description: string; permissions: [] }>;
+  authFlows: [];
+}> {
+  const empty = {
+    tables: [] as [], indexes: [] as [], rlsPolicies: [] as [], seeds: [] as [],
+    migrations: [] as [], routes: [] as [], conventions: [] as string[],
+    pages: [] as [], components: [] as [], layouts: [] as [],
+    authRoles: [] as [], authFlows: [] as [],
+  };
+  try {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const archPath = join(projectPath, 'ARCHITECTURE.md');
+    if (!existsSync(archPath)) return empty as never;
+    const text = readFileSync(archPath, 'utf8');
+
+    // Return the text of the first h1 section whose title matches `keyword`.
+    function h1Section(keyword: string): string {
+      const re = new RegExp(`^#[^#][^\\n]*${keyword}[^\\n]*$`, 'im');
+      const start = text.search(re);
+      if (start === -1) return '';
+      const next = text.indexOf('\n# ', start + 2);
+      return text.slice(start, next === -1 ? text.length : next + 1);
+    }
+
+    // Return the slice of `section` that starts at the h2 containing `keyword`.
+    function h2Slice(section: string, keyword: string): string {
+      const lower = section.toLowerCase();
+      const kIdx = lower.indexOf(keyword.toLowerCase());
+      if (kIdx === -1) return '';
+      const h2Start = section.lastIndexOf('\n##', kIdx);
+      const from = h2Start === -1 ? kIdx : h2Start + 1;
+      const next = section.indexOf('\n## ', from + 3);
+      return section.slice(from, next === -1 ? section.length : next);
+    }
+
+    // ---- Database -----------------------------------------------------------
+    const dbSec = h1Section('Database');
+
+    const tables: Array<{ name: string; schema: string; purpose: string; columns: []; primaryKey: string[]; foreignKeys: []; rlsEnabled: boolean; tenantScoped: boolean; immutable: boolean }> = [];
+    {
+      const re = /^###\s+`public\.(\w+)`/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(dbSec)) !== null) {
+        const name = m[1]!;
+        const sStart = m.index;
+        const nxt = dbSec.indexOf('\n###', sStart + 1);
+        const sec = dbSec.slice(sStart, nxt === -1 ? dbSec.length : nxt);
+        tables.push({
+          name, schema: 'public', purpose: '', columns: [], primaryKey: ['id'], foreignKeys: [],
+          rlsEnabled: /RLS Enabled[^\n]*Yes/i.test(sec),
+          tenantScoped: /Tenant Scoped[^\n]*Yes/i.test(sec),
+          immutable: false,
+        });
+      }
+    }
+
+    const indexes: Array<{ name: string; table: string; columns: string[]; unique: boolean; method: string | null; where: null }> = [];
+    {
+      const sec = h2Slice(dbSec, 'indexes');
+      const re = /^\|\s+`([^`]+)`\s+\|\s+`([^`]+)`\s+\|\s+`([^`]+)`\s+\|\s+(Yes|No)\s+\|\s+(\w+)/gmi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) {
+        indexes.push({ name: m[1]!, table: m[2]!, columns: [m[3]!], unique: m[4]!.toLowerCase() === 'yes', method: m[5]!.toLowerCase(), where: null });
+      }
+    }
+
+    const rlsPolicies: Array<{ name: string; table: string; command: string; roles: string[]; using: null; check: null }> = [];
+    {
+      const sec = h2Slice(dbSec, 'row-level security');
+      const re = /^\|\s+`([^`]+)`\s+\|\s+(SELECT|INSERT|UPDATE|DELETE|ALL)\s+\|/gmi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) {
+        rlsPolicies.push({ name: m[1]!, table: '', command: m[2]!.toLowerCase(), roles: ['authenticated'], using: null, check: null });
+      }
+    }
+
+    const seeds: Array<{ table: string; description: string; rowCount: number | null }> = [];
+    {
+      const sec = h2Slice(dbSec, 'seed');
+      const re = /^\|\s+`([^`]+)`\s+\|[^|]+\|\s+(\d+)/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) {
+        seeds.push({ table: m[1]!, description: '', rowCount: parseInt(m[2]!, 10) });
+      }
+    }
+
+    const migrations: Array<{ filename: string; description: string }> = [];
+    {
+      const sec = h2Slice(dbSec, 'migration');
+      const re = /^\|\s+`([^`|]+\.sql)`\s+\|\s+([^|\n]+)/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) {
+        migrations.push({ filename: m[1]!.trim(), description: m[2]!.trim() });
+      }
+    }
+
+    // ---- API ----------------------------------------------------------------
+    const apiSec = h1Section('API');
+
+    const routes: Array<{ path: string; method: string; purpose: string; authRequired: boolean; roles: string[]; requestSchema: string; responseSchema: string; dbReads: string[]; dbWrites: []; errors: []; immutable: boolean }> = [];
+    {
+      const re = /^###\s+`(GET|POST|PUT|PATCH|DELETE|HEAD)\s+([^`]+)`/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(apiSec)) !== null) {
+        const method = m[1]!;
+        const path = m[2]!.trim();
+        const sStart = m.index;
+        const nxt = apiSec.indexOf('\n###', sStart + 1);
+        const sec = apiSec.slice(sStart, nxt === -1 ? apiSec.length : nxt);
+        const authRequired = /Auth Required[^\n|]*Yes/i.test(sec);
+        const dbReadsM = sec.match(/DB Reads\s*\|\s*([^\n|]+)/i);
+        const dbReads = dbReadsM
+          ? dbReadsM[1]!.replace(/`/g, '').split(/[,\s]+/).map((s: string) => s.trim()).filter((t: string) => t && !/^(None|—|-)$/.test(t))
+          : [];
+        routes.push({ path, method, purpose: '', authRequired, roles: authRequired ? ['authenticated'] : [], requestSchema: '', responseSchema: '', dbReads, dbWrites: [], errors: [], immutable: false });
+      }
+    }
+
+    const conventions: string[] = [];
+    {
+      const sec = h2Slice(apiSec, 'convention');
+      const re = /^\d+\.\s+\*\*[^*]+\*\*[^\n]*/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) conventions.push(m[0]!.replace(/^\d+\.\s+/, '').trim());
+    }
+
+    // ---- Frontend -----------------------------------------------------------
+    const feSec = h1Section('Frontend');
+
+    const pages: Array<{ name: string; path: string; purpose: string; components: string[]; apiCalls: string[]; authRequired: boolean; roles: []; immutable: boolean }> = [];
+    {
+      const pagesSec = h2Slice(feSec, 'pages');
+      const re = /^###\s+`(\w+)`\s*(?:\(`([^`]*)`\))?/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(pagesSec)) !== null) {
+        const name = m[1]!;
+        const path = m[2] ?? `/${name.toLowerCase()}`;
+        const sStart = m.index;
+        const nxt = pagesSec.indexOf('\n###', sStart + 1);
+        const sec = pagesSec.slice(sStart, nxt === -1 ? pagesSec.length : nxt);
+        // Component names: `ComponentName`: …
+        const compNames: string[] = [];
+        const compRe = /`(\w+)`:/g;
+        const compBlock = sec.match(/Components[^\n]*\n([\s\S]*?)(?=\n\s*\*\s+\*\*|\n##|$)/i)?.[0] ?? '';
+        let cm: RegExpExecArray | null;
+        while ((cm = compRe.exec(compBlock)) !== null) compNames.push(cm[1]!);
+        // API call paths
+        const apiCalls: string[] = [];
+        const apiLine = sec.match(/API Calls[^\n]*:\s*([^\n]+)/i);
+        if (apiLine && !/none|—|–|-\s*$/i.test(apiLine[1]!)) {
+          const hits = apiLine[1]!.match(/`([^`]+)`/g) ?? [];
+          apiCalls.push(...hits.map((h: string) => h.replace(/`/g, '')));
+        }
+        const authRequired = /Authentication Required[^\n]*true/i.test(sec);
+        pages.push({ name, path, purpose: '', components: compNames, apiCalls, authRequired, roles: [], immutable: false });
+      }
+    }
+
+    const components: Array<{ name: string; type: string; description: string }> = [];
+    {
+      const sec = h2Slice(feSec, '2. components');
+      const re = /^###\s+`(\w+)`/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) components.push({ name: m[1]!, type: 'component', description: '' });
+    }
+
+    const layouts: Array<{ name: string; description: string; appliesTo: string[] }> = [];
+    {
+      const sec = h2Slice(feSec, 'layout');
+      const re = /^###\s+`(\w+)`/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sec)) !== null) layouts.push({ name: m[1]!, description: '', appliesTo: ['*'] });
+    }
+
+    // ---- Auth roles (derived from role CHECK constraints in the DB section) -
+    const authRoles: Array<{ name: string; description: string; permissions: [] }> = [];
+    {
+      const roleValRe = /'(owner|admin|member|user|staff|viewer|superadmin|guest|moderator)'/g;
+      const found = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = roleValRe.exec(dbSec)) !== null) found.add(m[1]!);
+      for (const name of found) authRoles.push({ name, description: '', permissions: [] });
+    }
+
+    return { tables, indexes, rlsPolicies, seeds, migrations, routes, conventions, pages, components, layouts, authRoles, authFlows: [] };
+  } catch {
+    return empty as never;
+  }
+}
+
 /** `forge build <path>` — the full autonomous pipeline (Phase 0 → 5). */
 async function cmdBuild(
   pathArg: string,
-  opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean }
+  opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean; useExistingQueue?: boolean; startAt?: string }
 ): Promise<void> {
   try { (await import('../learning/database.js')).initializeForgeMemory(); } catch { /* learning is non-critical */ }
+
+  // --start-at: parse and validate early so bad input exits before Phase 0.
+  let startAt: number | undefined;
+  if (opts.startAt !== undefined) {
+    startAt = Number.parseInt(opts.startAt, 10);
+    if (!Number.isInteger(startAt) || startAt < 1) {
+      fail('--start-at must be a positive integer >= 1 (the 1-based prompt index to start from).');
+      return;
+    }
+    console.log(chalk.cyan(`  --start-at ${startAt}: prompts 1–${startAt - 1} will be skipped.`));
+  }
 
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
   console.log(chalk.bold(`\nBuilding ${projectName} at ${projectPath}`));
   if (opts.dryRun) console.log(chalk.cyan('  DRY RUN — no claude/git/Sentinel execution; plan + cost only.'));
+
+  // --use-existing-queue: skip Phase 1 (design) and Phase 2 (governance + queue generation)
+  // entirely, and run Phase 3 directly against the queue.yaml already present in the target
+  // project. Checked before any design/governance work so a missing queue fails fast.
+  if (opts.useExistingQueue) {
+    const queuePath = join(projectPath, 'queue.yaml');
+    const { existsSync } = await import('node:fs');
+    if (!existsSync(queuePath)) {
+      fail(
+        `--use-existing-queue requires an existing queue.yaml at ${queuePath} — ` +
+          'run a normal build first (without --use-existing-queue) to generate one.'
+      );
+      return;
+    }
+    console.log(
+      chalk.yellow('  --use-existing-queue: skipping Phase 1 (design) and Phase 2 (governance + queue generation).')
+    );
+    console.log(chalk.dim(`  queue: ${queuePath}`));
+
+    const scout = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
+    const exec = await withSpinner('Phase 3 — Build Executor', (log) =>
+      runPhase3Executor({
+        projectPath,
+        projectName,
+        queuePath,
+        stackFingerprint: scout.stackFingerprint,
+        toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
+        autonomousRecoveryMode: opts.autonomousRecovery ?? false,
+        dryRun: opts.dryRun ?? false,
+        startAt,
+        log,
+      })
+    );
+    reportExecution(exec);
+
+    if (opts.dryRun) {
+      console.log(chalk.cyan('\nDry run complete — nothing was executed.'));
+      return;
+    }
+
+    if (exec.status === 'halted' || exec.status === 'failed') {
+      fail(`Build ${exec.status}${exec.haltReason ? ` — ${exec.haltReason}` : ''}.`);
+      return;
+    }
+
+    if (exec.buildRunId) {
+      const learn = await withSpinner('Phase 5 — Recursive Learner', (log) =>
+        runPhase5Learner(exec.buildRunId as string, { log })
+      );
+      printWarnings(learn.warnings);
+      console.log(chalk.green('\n✔ Build pipeline complete.'));
+    } else {
+      console.log(chalk.yellow('\nBuild finished, but Build Memory was unavailable — Phase 5 learning skipped (stateless mode).'));
+    }
+    return;
+  }
 
   // Auto-governance: when building from a raw --idea, prepend any spec/governance docs
   // found in the target project (BLUEPRINT/SCHEMA/API_REGISTRY/state + reports/*.md) so
@@ -353,18 +635,34 @@ async function cmdBuild(
 
   if (opts.skipDesign) {
     const { existsSync, readFileSync } = await import('node:fs');
-    const bp = join(projectPath, 'DIALSTARS_BLUEPRINT.md');
+    const bp = join(projectPath, 'governance', 'BLUEPRINT.md');
+    const bpLegacy = join(projectPath, 'DIALSTARS_BLUEPRINT.md');
+    const schemaReg = join(projectPath, 'governance', 'SCHEMA_REGISTRY.md');
     const sp = join(projectPath, 'SCHEMA.md');
-    const doc = existsSync(bp) ? bp : existsSync(sp) ? sp : null;
-    if (!doc) { fail('--skip-design requires DIALSTARS_BLUEPRINT.md or SCHEMA.md'); return; }
+    const doc = existsSync(bp) ? bp : existsSync(schemaReg) ? schemaReg : existsSync(bpLegacy) ? bpLegacy : existsSync(sp) ? sp : null;
+    if (!doc) { fail('--skip-design requires governance/BLUEPRINT.md, governance/SCHEMA_REGISTRY.md, DIALSTARS_BLUEPRINT.md, or SCHEMA.md'); return; }
     const prd = readFileSync(doc, 'utf8');
+    const parsed = await parseGovernanceDocs(projectPath);
     const sr = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
-    const fd = { projectName, database: { tables: [], indexes: [], rlsPolicies: [], seeds: [], migrations: [], markdown: prd }, api: { routes: [], markdown: '' }, frontend: { pages: [], components: [], layouts: [], designTokens: [], responsiveStrategy: '', markdown: '' }, interactionMaps: { maps: [], markdown: '' }, auth: { flows: [], roles: [], permissions: [], middleware: [], markdown: '' }, agents: { agents: [], markdown: '' }, infra: { environments: [], markdown: '' }, testing: { specs: [], markdown: '' }, crossValidation: [], constrained: false, designSystemGenerated: false, designSystemPath: null, architecturePath: null, model: 'existing-docs', tokensInput: 0, tokensOutput: 0, usedFallback: false, fallbackArtifacts: [], warnings: [], gate: { name: 'Gate 2', status: 'awaiting_human_approval' as const, detail: 'existing docs' }, generatedAt: new Date().toISOString() };
+    const fd = {
+      projectName,
+      database: { tables: parsed.tables, indexes: parsed.indexes, rlsPolicies: parsed.rlsPolicies, seeds: parsed.seeds, migrations: parsed.migrations, markdown: prd },
+      api: { routes: parsed.routes, conventions: parsed.conventions, markdown: '' },
+      frontend: { pages: parsed.pages, components: parsed.components, layouts: parsed.layouts, designTokens: { colors: {}, typography: {}, spacing: {}, radii: {}, shadows: {} }, responsiveStrategy: '', markdown: '' },
+      interactionMaps: { maps: [], markdown: '' },
+      auth: { flows: parsed.authFlows, roles: parsed.authRoles, middleware: '', multiTenancy: '', permissionsModel: '', markdown: '' },
+      agents: { agents: [], orchestration: '', markdown: '' },
+      infra: { environments: [], deployConfig: '', monitoring: '', performanceBudgets: [], markdown: '' },
+      testing: { playwrightSpecs: [], apiTests: [], sixLawsPlan: [], markdown: '' },
+      crossValidation: [], constrained: false, designSystemGenerated: false, designSystemPath: null, architecturePath: null, model: 'existing-docs', tokensInput: 0, tokensOutput: 0, usedFallback: false, fallbackArtifacts: [], warnings: [],
+      gate: { name: 'Gate 2', status: 'awaiting_human_approval' as const, detail: 'existing docs' },
+      generatedAt: new Date().toISOString(),
+    };
     const gov = await withSpinner('Phase 2 - Governance', (log) => runPhase2Governance(projectPath, fd as unknown as ArchitectureDesign, { stackFingerprint: sr.stackFingerprint, log }));
     printWarnings(gov.warnings);
     const q = await withSpinner('Phase 2 - Queue', (log) => generateQueue(projectPath, fd as unknown as ArchitectureDesign, { projectName, log }));
     printWarnings(q.warnings);
-    const exec = await withSpinner('Phase 3 - Build Executor', (log) => runPhase3Executor({ projectPath, projectName, stackFingerprint: sr.stackFingerprint, toolchainManifest: sr.toolchainManifest as unknown as JsonObject, autonomousRecoveryMode: opts.autonomousRecovery ?? false, dryRun: opts.dryRun ?? false, log }));
+    const exec = await withSpinner('Phase 3 - Build Executor', (log) => runPhase3Executor({ projectPath, projectName, stackFingerprint: sr.stackFingerprint, toolchainManifest: sr.toolchainManifest as unknown as JsonObject, autonomousRecoveryMode: opts.autonomousRecovery ?? false, dryRun: opts.dryRun ?? false, startAt, log }));
     reportExecution(exec);
     return;
   }
@@ -397,6 +695,7 @@ async function cmdBuild(
       toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
       autonomousRecoveryMode: opts.autonomousRecovery ?? false,
       dryRun: opts.dryRun ?? false,
+      startAt,
       log,
     })
   );
@@ -1109,7 +1408,9 @@ async function main(): Promise<void> {
     .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14)', false)
     .option('--dry-run', 'simulate the build (plan + cost, no execution)', false)
     .option('--skip-design', 'skip Phase 1A+1B and use existing governance docs', false)
-    .action((pathArg: string, opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipDesign?: boolean; skipSecurityGate?: boolean }) =>
+    .option('--use-existing-queue', 'skip Phase 1 (design) and Phase 2 (governance + queue generation); run Phase 3 directly against the existing queue.yaml', false)
+    .option('--start-at <number>', 'skip all prompts before this 1-based index and resume from it')
+    .action((pathArg: string, opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipDesign?: boolean; useExistingQueue?: boolean; skipSecurityGate?: boolean; startAt?: string }) =>
       cmdBuild(pathArg, opts)
     );
 

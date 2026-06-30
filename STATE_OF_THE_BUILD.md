@@ -1,8 +1,8 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-25 (Final — all runs complete)
+**Last Updated:** 2026-06-30 (Post-final — `--use-existing-queue` flag added)
 **Build Status:** COMPLETE
-**Current Run:** RUN-9 COMPLETE (final)
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
@@ -30,11 +30,11 @@
 | Phase 1B — Architect Engine | COMPLETE | `src/phases/phase1b-architect.ts` (93783B); 8 governance doc renderers; adversarial review wired |
 | Phase 1C — Ingest | COMPLETE | `src/phases/phase1c-ingest.ts` (40376B) |
 | Phase 2 — Governance Generator | COMPLETE | `src/phases/phase2-governance.ts` (49830B) |
-| Phase 3 — Build Executor | COMPLETE | `src/phases/phase3-executor.ts` (83771B); 6 lifecycle hooks wired |
+| Phase 3 — Build Executor | COMPLETE | `src/phases/phase3-executor.ts`; 6 lifecycle hooks wired; skill injection added |
 | Phase 4 — Sentinel Quality Pipeline | COMPLETE | `src/phases/phase4-sentinel.ts` (163820B) |
 | Phase 5 — Recursive Learner | COMPLETE | `src/phases/phase5-learner.ts` (32404B) |
 | Deploy Pipeline (`src/monitoring/deploy-agent.ts`) | PARTIAL | 13196B; monitoring snippet injection and telemetry wired; canary deployment / production rollback NOT implemented |
-| Engine modules (`src/engine/`) | COMPLETE | 12 files: claude-runner.ts, failure-predictor.ts, free-tier-manager.ts, git-manager.ts, governance-gate.ts, hook-manager.ts, model-router.ts, parallel-scheduler.ts, prompt-assembler.ts, prompt-decomposer.ts, prompt-rewriter.ts, provider-router.ts, queue-generator.ts |
+| Engine modules (`src/engine/`) | COMPLETE | 12 files: claude-runner.ts, failure-predictor.ts, free-tier-manager.ts, git-manager.ts, governance-gate.ts, hook-manager.ts, model-router.ts, parallel-scheduler.ts, prompt-assembler.ts, prompt-decomposer.ts, prompt-rewriter.ts, provider-router.ts, queue-generator.ts (`QueueEntry.skills` field added) |
 | Analysis modules (`src/analysis/`) | COMPLETE | 8 files: adversarial-review, agent-creator, cost-estimator, instinct-extractor, pass-at-k, pattern-extractor, six-laws-verifier, template-evolver |
 | Build Memory (`src/memory/`) | COMPLETE | 16 files in src/ and dist/ |
 | Tools (`src/tools/`) | COMPLETE | 24 files in dist/ |
@@ -102,6 +102,33 @@ Governance audit, RUN6-HANDOFF.md, commissioned Run 9.
 | r9-012 | AGENTS.md + SCHEMA_REGISTRY.md completed | COMPLETE |
 | r9-013 | Final handoff — FORGE 2.0 COMPLETE | COMPLETE |
 
+### Post-Build Additions — 2026-06-30
+
+**Skills system:** Added `skills/` directory (6 skill files installed) and queue.yaml skill injection.
+
+- `skills/deploy-sequence/SKILL.md` — 5-step deploy procedure, halt-on-failure, Playwright 10/10 gate
+- `skills/middleware-role-routing/SKILL.md` — full-replacement rule, Reid approval gate, /login fallback
+- `skills/no-cache-dashboard-serving/SKILL.md` — API-route serving pattern, dual-dashboard sync rule
+- `skills/playwright-gate/SKILL.md` — 10/10 gate, rollback-not-patch-forward rule
+- `skills/rls-company-scoping/SKILL.md` — company_id column, RLS policies, server-side derivation
+- `skills/six-laws-gate/SKILL.md` — 6-law feature completion checklist (schema→api→ui→data→wiring→verification)
+
+**Code changes:**
+- `src/engine/queue-generator.ts`: added `skills?: string[]` to `QueueEntry` interface
+- `src/phases/phase3-executor.ts`: `parseQueueYaml` parses `skills` field; `runPhase3Executor` resolves `skillsDir` and prepends SKILL.md content to entry description before assembly; `loadSkillContent` helper added; `Phase3Options.skillsDir` is injectable for tests
+
+**Usage:** In any `queue.yaml` entry, add `skills: [six-laws-gate, rls-company-scoping]` (or any combination of the installed skill folder names). The executor reads the corresponding SKILL.md files and prepends them—separated by `---`—before the description text that the prompt assembler receives. Missing skill files emit a warning and are skipped non-fatally.
+
+**Skill injection — live verification (2026-06-30, PASS):** Tested end-to-end against `C:\Users\manag\Documents\forge-test` using the new `--use-existing-queue` flag (`node dist/cli/index.js build <path> --use-existing-queue --dry-run`).
+
+- Added `skills: [rls-company-scoping]` to the `schema-migrations` entry in that project's `queue.yaml`.
+- A/B test on the assembler's "assembled" log line for `schema-migrations` (same entry, same governance docs, only the `skills:` field toggled):
+  - **Without** `skills:` — 1774 chars assembled.
+  - **With** `skills: [rls-company-scoping]` — 3089 chars assembled.
+  - Delta: 1315 chars, vs. `skills/rls-company-scoping/SKILL.md` trimmed size of 1309 bytes (+ the `\n\n---\n\n` separator ≈ 5 chars) — matches almost exactly.
+- **Result: CONFIRMED — skill injection works.** (Note: an earlier-cited baseline figure of "2688 chars" for this entry did not match what this environment actually produces without the skill — 1774 chars was the real measured baseline — so the live A/B re-test above is the basis for this PASS, not that number.)
+- Also confirmed `--use-existing-queue` does not regenerate governance docs: all files under `forge-test/governance/` retained their pre-run mtimes (12:57–12:59) after the dry-run executed at 13:32, proving Phase 1/2 were genuinely skipped, not just not-logged.
+
 ---
 
 ## Hook Wiring Summary (src/phases/phase3-executor.ts)
@@ -128,6 +155,46 @@ Governance audit, RUN6-HANDOFF.md, commissioned Run 9.
 - **Run 7:** 1/1 COMPLETE ✓
 - **Run 9:** 13/13 COMPLETE ✓
 - **Overall:** ~78/~80 queued prompts complete (98%) — FORGE 2.0 production-ready
+
+---
+
+## CLI Flags Reference
+
+### `forge build <path> --use-existing-queue`
+
+Skips Phase 1 (design: PRD + Architecture) and Phase 2 (governance + queue generation) entirely, and runs Phase 3 directly against the `queue.yaml` already present at `<path>/queue.yaml`.
+
+```
+# Re-run execution against an already-generated queue.yaml, no design/governance work:
+forge build ./my-project --use-existing-queue
+
+# Combine with --dry-run to see the plan/cost without executing:
+forge build ./my-project --use-existing-queue --dry-run
+```
+
+**Behaviour:**
+- If `<path>/queue.yaml` does not exist, the command fails immediately with a clear error telling the user to run a normal build first to generate one — Phase 0 (scout) is not even invoked in that case.
+- When the queue is present, Phase 0 (scout) still runs to gather the stack fingerprint/toolchain manifest Phase 3 needs, then Phase 3 (Build Executor) runs directly — `--idea`/`--prd` and any auto-governance context gathering are not used.
+- Composable with `--dry-run`, `--start-at`, and `--autonomous-recovery`.
+- On success, Phase 5 (Recursive Learner) still runs, same as a normal build.
+
+### `forge build <path> --start-at <number>`
+
+Skips all prompts before the given 1-based index and resumes execution from that prompt.
+
+```
+# Skip the first 4 prompts and start from prompt 5:
+forge build ./my-project --start-at 5
+
+# Combine with --dry-run to see the skip/resume plan without executing:
+forge build ./my-project --start-at 5 --dry-run
+```
+
+**Behaviour:**
+- Prompts before `startAt` are recorded as `skipped` (satisfied dependencies) — no claude/git/Sentinel is invoked for them.
+- `queue.yaml` and governance files are **not** modified during the skip phase.
+- If `--start-at` exceeds the total number of prompts, the executor exits with an error before running anything.
+- Console output shows `[--start-at] skipping prompt N/M 'id'` for each skipped prompt, then `[--start-at] resuming execution at prompt N/M 'id'` when execution begins.
 
 ---
 

@@ -70,7 +70,8 @@
  */
 
 import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { load as parseYaml } from 'js-yaml';
 
@@ -318,6 +319,14 @@ export interface Phase3Options {
    */
   replay?: ReplayOptions;
   /**
+   * 1-based prompt index to start execution from (the `--start-at` CLI flag). When supplied,
+   * all prompts whose 1-based position is less than `startAt` are marked as satisfied
+   * dependencies and skipped — no claude/git/Sentinel is invoked for them, and queue.yaml
+   * and governance files are NOT modified. If `startAt` exceeds the total number of prompts,
+   * the executor returns a failed result before executing anything.
+   */
+  startAt?: number;
+  /**
    * The Phase 1 feature list, used by the dry-run cost estimate (F11). When omitted in a dry run
    * the executor derives an approximate scope from the queue (and warns). Ignored when not a dry run.
    */
@@ -326,6 +335,13 @@ export interface Phase3Options {
   mainBranch?: string;
   /** Per-prompt claude timeout (ms). Default: claude-runner's 15 minutes. */
   claudeTimeoutMs?: number;
+  /**
+   * Directory containing skill sub-folders (each with a SKILL.md file). When a queue entry
+   * declares `skills: [name1, name2]`, the executor reads `<skillsDir>/<name>/SKILL.md` and
+   * prepends the combined content before the entry's description text. Missing skill files are
+   * skipped with a warning (non-fatal). Default: the `skills/` directory beside the FORGE root.
+   */
+  skillsDir?: string;
 
   // -- injectable collaborators (tests) -------------------------------------
   /** Override the claude execution. Default: {@link runClaude}. */
@@ -513,6 +529,8 @@ export function parseQueueYaml(yamlText: string): { entries: QueueEntry[]; warni
     };
     const group = asString(o.parallel_group).trim();
     if (group !== '') entry.parallel_group = group;
+    const skills = asStringArray(o.skills);
+    if (skills.length > 0) entry.skills = skills;
     entries.push(entry);
   });
 
@@ -586,6 +604,15 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const mainBranch = options.mainBranch ?? 'main';
   const generatedAt = nowIso();
   const warnings: string[] = [];
+  const skillsDir =
+    options.skillsDir ??
+    (() => {
+      try {
+        return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills');
+      } catch {
+        return join(process.cwd(), 'skills');
+      }
+    })();
 
   // Collaborators (defaults wired to the real engine pieces; all injectable for tests). Each
   // const is explicitly annotated so the default arrow is contextually typed (params inferred)
@@ -653,11 +680,27 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const schedule = analyzeSchedule(entries, { log: (m) => log(`scheduler: ${m}`) });
   warnings.push(...schedule.warnings);
 
+  // --start-at validation: run before the log header so the error is the first thing the user sees.
+  const startAt = options.startAt;
+  if (startAt !== undefined) {
+    if (!Number.isInteger(startAt) || startAt < 1) {
+      const msg = `--start-at must be a positive integer >= 1 (got ${startAt})`;
+      log(`ERROR: ${msg}`);
+      return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
+    }
+    if (startAt > schedule.order.length) {
+      const msg = `--start-at ${startAt} exceeds the total number of prompts in the queue (${schedule.order.length}). Nothing will be executed.`;
+      log(`ERROR: ${msg}`);
+      return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
+    }
+  }
+
   log(
-    `Phase 3 ${dryRun ? '(DRY RUN) ' : ''}${replay ? '(REPLAY) ' : ''}on "${projectName}": ` +
+    `Phase 3 ${dryRun ? '(DRY RUN) ' : ''}${replay ? '(REPLAY) ' : ''}${startAt !== undefined ? `(--start-at ${startAt}) ` : ''}on "${projectName}": ` +
       `${schedule.order.length} prompt(s), ${schedule.longestChain} wave(s), ` +
       `max parallelism ${schedule.maxParallelism}. Sequential execution.` +
-      (replay ? ` Resuming build ${replay.originalBuildRunId} from prompt ${replay.fromPromptIndex} (${replay.fromCheckpointTag}).` : '')
+      (replay ? ` Resuming build ${replay.originalBuildRunId} from prompt ${replay.fromPromptIndex} (${replay.fromCheckpointTag}).` : '') +
+      (startAt !== undefined ? ` Skipping prompts 1–${startAt - 1}; execution begins at prompt ${startAt}.` : '')
   );
 
   // 2. Create the build_run (status running). Guarded — degrades to stateless (Contract 4). For a
@@ -816,6 +859,22 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       continue;
     }
 
+    // a1. --start-at skip: user explicitly requested execution to begin at `startAt`; all
+    //     preceding prompts are marked as satisfied dependencies without touching claude,
+    //     git, Sentinel, or any governance / queue files (contrast with replay carry which
+    //     implies a checkpoint exists on disk).
+    if (startAt !== undefined && index < startAt) {
+      const note = `Skipped — --start-at ${startAt}: prompt ${index} is before the requested start index.`;
+      outcomes.push(skippedOutcome(entry, index, note));
+      completedIds.add(entry.id);
+      if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
+      log(`[--start-at] skipping prompt ${index}/${schedule.order.length} '${entry.id}'`);
+      continue;
+    }
+    if (startAt !== undefined && index === startAt) {
+      log(`[--start-at] resuming execution at prompt ${index}/${schedule.order.length} '${entry.id}' (prompts 1–${startAt - 1} were skipped)`);
+    }
+
     // a. Dependency gate — the order is topological, so an unmet dependency means it failed/skipped.
     const unmet = entry.dependencies.filter((d) => !completedIds.has(d) && entries.some((e) => e.id === d));
     if (unmet.length > 0) {
@@ -825,10 +884,21 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       continue;
     }
 
+    // Skill injection: when the entry declares skills, read each <skillsDir>/<name>/SKILL.md and
+    // prepend the combined content before the description so the assembled prompt carries them.
+    let entryForExec = entry;
+    if (entry.skills && entry.skills.length > 0) {
+      const skillContent = await loadSkillContent(entry.skills, skillsDir, log);
+      if (skillContent) {
+        entryForExec = { ...entry, description: `${skillContent}\n\n---\n\n${entry.description}` };
+        log(`prompt ${index} '${entry.id}': prepended ${entry.skills.length} skill(s) (${entry.skills.join(', ')})`);
+      }
+    }
+
     // Dry run: assemble + predict for cost/plan visibility, but execute nothing.
     if (dryRun) {
       const outcome = await runWithBuildContext({ promptId: entry.id }, () =>
-        dryRunPrompt(ctx, entry, index, previousSentinel)
+        dryRunPrompt(ctx, entryForExec, index, previousSentinel)
       );
       outcomes.push(outcome);
       completedIds.add(entry.id); // a dry run does not block downstream planning
@@ -836,7 +906,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     }
 
     const outcome = await runWithBuildContext({ promptId: entry.id }, () =>
-      executePrompt(ctx, entry, index, previousSentinel, schemaPromptsHaveRun)
+      executePrompt(ctx, entryForExec, index, previousSentinel, schemaPromptsHaveRun)
     );
     outcomes.push(outcome);
     onPromptComplete({
@@ -1864,6 +1934,24 @@ async function defaultWriteHaltReport(projectPath: string, report: string): Prom
   } catch {
     /* non-fatal */
   }
+}
+
+/**
+ * Read and concatenate the SKILL.md files for the given skill names.
+ * Missing skill files are skipped with a warning (non-fatal — Contract 4 posture).
+ */
+async function loadSkillContent(skills: string[], skillsDir: string, log: (m: string) => void): Promise<string> {
+  const parts: string[] = [];
+  for (const skill of skills) {
+    const skillPath = join(skillsDir, skill, 'SKILL.md');
+    try {
+      const content = await readFile(skillPath, 'utf8');
+      parts.push(content.trim());
+    } catch (error) {
+      log(`WARNING: skill '${skill}' not found at ${skillPath} (${describe(error)}) — skipped`);
+    }
+  }
+  return parts.join('\n\n');
 }
 
 /** Basename of a filesystem path (last non-empty segment), or `'project'`. */

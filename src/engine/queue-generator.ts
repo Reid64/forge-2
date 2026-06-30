@@ -108,6 +108,8 @@ export interface QueueEntry {
   estimated_tokens: number;
   /** Finer-grained injection markers (Contract 7). */
   context_injection: ContextInjection;
+  /** Skill folder names whose SKILL.md content is prepended to the description before assembly. */
+  skills?: string[];
   /** The detailed, buildable task text. */
   description: string;
 }

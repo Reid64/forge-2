@@ -1,8 +1,8 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: RUN-9 COMPLETE — FORGE 2.0 FINAL
+## Current Session: POST-FINAL — --use-existing-queue flag added
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-06-25 (r9-013: FORGE 2.0 build complete, final handoff written)
+## Last Updated: 2026-06-30 (cmdBuild: --use-existing-queue option, queue.yaml existence check, Phase 1/2 skip)
 
 ---
 
@@ -48,18 +48,57 @@ node dist/cli/index.js --help   # expect: 6 commands listed
 
 ---
 
-## Next Action
+## Skills System (added 2026-06-30)
 
-Run `forge build --idea "your project idea"` on a real project to validate end-to-end.
+queue.yaml entries now support an optional `skills:` list:
+
+```yaml
+- id: build-schema
+  prompt_type: schema
+  skills:
+    - rls-company-scoping
+    - six-laws-gate
+  description: |
+    Create the users and companies tables...
+```
+
+The executor reads `skills/<name>/SKILL.md` for each entry in the list and prepends all content (separated by `---`) before the description text that the prompt assembler receives. Missing skill files emit a warning and are skipped. The `skillsDir` option in `Phase3Options` is injectable for tests; it defaults to the `skills/` directory beside the FORGE package root.
+
+Installed skills: `deploy-sequence`, `middleware-role-routing`, `no-cache-dashboard-serving`, `playwright-gate`, `rls-company-scoping`, `six-laws-gate`.
+
+**Live verification — PASS (2026-06-30):** Ran `node dist/cli/index.js build C:\Users\manag\Documents\forge-test --use-existing-queue --dry-run` with `skills: [rls-company-scoping]` added to the `schema-migrations` entry. A/B comparison of the assembler's char count for that entry: 1774 chars without the skill vs. 3089 chars with it — a 1315-char delta matching the 1309-byte SKILL.md content almost exactly. `forge-test/governance/*` mtimes were unchanged after the run, confirming Phase 1/2 were actually skipped (not just unlogged). See `STATE_OF_THE_BUILD.md` for full detail.
+
+---
+
+## New Flag: --use-existing-queue
+
+Added `--use-existing-queue` to `forge build`. Skips Phase 1 (design) and Phase 2 (governance + queue generation) entirely and runs Phase 3 directly against `<path>/queue.yaml`.
 
 ```
-node dist/cli/index.js build --help
-node dist/cli/index.js compose --help
-node dist/cli/index.js sequence --help
-node dist/cli/index.js deploy --help
-node dist/cli/index.js retrofit --help
-node dist/cli/index.js learn --help
+node dist/cli/index.js build ./proj --use-existing-queue              # run Phase 3 against the existing queue.yaml
+node dist/cli/index.js build ./proj --use-existing-queue --dry-run    # plan/cost only, no execution
 ```
+
+If `<path>/queue.yaml` is missing, the command fails immediately with an error telling the user to run a normal build first to generate one.
+
+Changed files:
+- `src/cli/index.ts` — `cmdBuild` opts, `--use-existing-queue` option, queue.yaml existence check + early-exit branch (scout → `runPhase3Executor({ queuePath, ... })` → Phase 5 learner)
+
+---
+
+## New Flag: --start-at
+
+Added `--start-at <number>` to `forge build`. Skips all prompts before the given 1-based index.
+
+```
+node dist/cli/index.js build --help        # shows --start-at in the option list
+node dist/cli/index.js build ./proj --start-at 5 --dry-run   # skip/resume plan
+node dist/cli/index.js build ./proj --start-at 5              # real execution from prompt 5
+```
+
+Changed files:
+- `src/phases/phase3-executor.ts` — `Phase3Options.startAt`, validation block, loop skip+resume
+- `src/cli/index.ts` — `cmdBuild` opts, `--start-at` option, passed to both executor call sites
 
 ---
 
