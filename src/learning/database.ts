@@ -9,6 +9,13 @@ import { homedir } from 'node:os';
 const DEFAULT_DB_DIR = join(homedir(), '.forge');
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
 
+/**
+ * The schema version `initializeForgeMemory` migrates every database to. Single source of
+ * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
+ * else, including tests, should hardcode a version literal.
+ */
+export const CURRENT_SCHEMA_VERSION = '2.1.0';
+
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
 
@@ -604,7 +611,7 @@ export function initializeForgeMemory(dbPath?: string): void {
     .prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'")
     .get() as { value: string } | undefined;
   const currentVersion = versionRow?.value ?? '1.0.0';
-  const targetVersion = '2.1.0';
+  const targetVersion = CURRENT_SCHEMA_VERSION;
 
   // 1.0.0 -> 2.0.0 (Session 1 — Memory Consolidation): the src/memory/ CRUD layer's tables.
   db.exec(BUILD_MEMORY_SCHEMA_SQL);

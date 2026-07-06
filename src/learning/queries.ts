@@ -223,18 +223,48 @@ export function registerError(
   return { id, fingerprint, isKnown: false };
 }
 
+/**
+ * Record the outcome of ONE fix attempt against a fix_patterns row (create-then-recovery-outcome
+ * writeback, Session 4 — Intelligence & Observability): always increments `times_fix_applied`,
+ * increments `times_fix_succeeded` only when `succeeded`, stores the fix description/diff/files
+ * (so a future occurrence can show what worked), and recomputes `success_rate` from the two
+ * counters. Never throws — a missing row (registerError should have created it first) is a no-op.
+ *
+ * Superseded the old `registerFix`, which incremented `times_fix_applied` but never
+ * `times_fix_succeeded` — `success_rate` could therefore never rise above 0, and
+ * `checkAutoElevation`'s `success_rate` gate could never pass. Not called anywhere previously
+ * (dead code); this replacement is the version actually wired into the write loop.
+ */
 export function registerFix(
   fingerprint: string,
-  fix: { fixDiff?: string; fixDescription: string; filesModified: string[] },
+  fix: { succeeded: boolean; fixDiff?: string; fixDescription: string; filesModified: string[] },
   dbPath?: string,
 ): void {
   const db = getConnection(dbPath);
+  const existing = db
+    .prepare('SELECT times_fix_applied, times_fix_succeeded FROM fix_patterns WHERE error_fingerprint = ?')
+    .get(fingerprint) as { times_fix_applied: number; times_fix_succeeded: number } | undefined;
+  if (!existing) return;
+
+  const timesApplied = existing.times_fix_applied + 1;
+  const timesSucceeded = existing.times_fix_succeeded + (fix.succeeded ? 1 : 0);
+  const successRate = timesApplied > 0 ? timesSucceeded / timesApplied : 0;
+
   db.prepare(
-    `UPDATE fix_patterns SET fix_diff = ?, fix_description = ?, fix_files_modified = ?, times_fix_applied = times_fix_applied + 1 WHERE error_fingerprint = ?`,
-  ).run(fix.fixDiff ?? null, fix.fixDescription, JSON.stringify(fix.filesModified), fingerprint);
-  db.prepare(
-    `UPDATE fix_patterns SET success_rate = CAST(times_fix_succeeded AS REAL) / CAST(times_fix_applied AS REAL) WHERE error_fingerprint = ?`,
-  ).run(fingerprint);
+    `UPDATE fix_patterns
+     SET fix_diff = ?, fix_description = ?, fix_files_modified = ?,
+         times_fix_applied = ?, times_fix_succeeded = ?, success_rate = ?,
+         last_seen = datetime('now')
+     WHERE error_fingerprint = ?`,
+  ).run(
+    fix.fixDiff ?? null,
+    fix.fixDescription,
+    JSON.stringify(fix.filesModified),
+    timesApplied,
+    timesSucceeded,
+    successRate,
+    fingerprint,
+  );
 }
 
 export function getGovernanceRules(

@@ -59,6 +59,7 @@ import { checkpointTagFor } from '../engine/git-manager.js';
 import { cmdHealth } from './health-command.js';
 import { cmdCompile } from './compile-command.js';
 import { cmdGeneratePrompts } from './generate-prompts-command.js';
+import { tryRenderLiveStatus } from './status-command.js';
 import { diffQueueEntries, getQueueVersion, loadQueueEntriesFromFile } from '../tools/queue-versioning.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
@@ -903,7 +904,19 @@ async function runReplay(
 }
 
 /** `forge status [build-id]` — build status from Build Memory. */
-async function cmdStatus(buildId: string | undefined, config: EnvConfig): Promise<void> {
+async function cmdStatus(
+  buildId: string | undefined,
+  config: EnvConfig,
+  opts: { project?: string; watch?: boolean } = {}
+): Promise<void> {
+  // Live observability (Session 4 — Task 3): when --watch is requested, or no explicit build-id
+  // was given and a live-status.json exists, show the REAL-TIME dashboard instead of (or before
+  // falling back to) the historical Build Memory query below.
+  if (opts.watch || !buildId) {
+    const rendered = await tryRenderLiveStatus({ project: opts.project, watch: opts.watch });
+    if (rendered) return;
+  }
+
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no build history is available.'));
     console.log(chalk.dim('Run `forge health` to diagnose why ~/.forge/forge_memory.db is unreachable.'));
@@ -1699,9 +1712,11 @@ async function main(): Promise<void> {
 
   program
     .command('status')
-    .description('Show build status from Build Memory')
-    .argument('[build-id]', 'a specific build_runs id (defaults to the most recent build)')
-    .action((buildId: string | undefined) => cmdStatus(buildId, config));
+    .description('Show live build status (from .forge/live-status.json, while a build runs) or build history from Build Memory')
+    .argument('[build-id]', 'a specific build_runs id (defaults to the most recent build, or the live build if one is running)')
+    .option('--project <path>', 'project directory to look for .forge/live-status.json in (default cwd)')
+    .option('--watch', 'poll every 2s and re-render (works while a build runs in another window)', false)
+    .action((buildId: string | undefined, opts: { project?: string; watch?: boolean }) => cmdStatus(buildId, config, opts));
 
   program
     .command('history')

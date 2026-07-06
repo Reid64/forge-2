@@ -1,6 +1,6 @@
 # FORGE 2.0 — Health Report
 
-Generated: 2026-07-06T01:23:43.398Z
+Generated: 2026-07-06T02:22:38.607Z
 
 ## Build Memory
 
@@ -59,6 +59,16 @@ Generated: 2026-07-06T01:23:43.398Z
 - Snapshots (`queue_versions` rows): 0
 - Latest: (none yet — run `forge compile`)
 
+## Learning (Session 4 — Intelligence & Observability)
+
+| Table | Rows | Last write |
+|---|---|---|
+| error_patterns | 0 | — |
+| fix_patterns | 0 | — |
+| governance_rules | 0 | — |
+| cross_project_insights | 0 | — |
+| prompt_scores | 0 | — |
+
 ## Environment
 
 - ANTHROPIC_API_KEY: present
@@ -77,3 +87,7 @@ Generated: 2026-07-06T01:23:43.398Z
 | forge compile | WIRED | src/cli/index.ts registers the `compile` command (src/cli/compile-command.ts). |
 | auto-resume | WIRED | src/cli/index.ts declares --auto-resume on `forge build`, wired to src/engine/auto-resume.ts. |
 | re-anchor injection | WIRED | src/cli/compile-command.ts injects a re-anchor entry every REANCHOR_INTERVAL (15) real prompts. |
+| error-pattern writes | WIRED | src/phases/phase3-executor.ts calls recordFailureObserved/recordRecoveryOutcome (src/engine/learning-writeback.ts) on every Sentinel failure/recovery. |
+| auto-elevation | WIRED | src/engine/learning-writeback.ts calls checkAutoElevation (src/learning/loops.ts) after every recovery outcome. |
+| build brain | WIRED | src/phases/phase3-executor.ts calls analyzeSentinelFailure (src/engine/build-brain.ts) on every Sentinel failure. |
+| live status | WIRED | src/phases/phase3-executor.ts writes .forge/live-status.json (src/tools/live-status.ts) at every prompt lifecycle point. |

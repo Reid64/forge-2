@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unlinkSync, existsSync } from 'node:fs';
-import { initializeForgeMemory, getConnection, getMachineId, closeConnection } from '../src/learning/database.js';
+import { initializeForgeMemory, getConnection, getMachineId, closeConnection, CURRENT_SCHEMA_VERSION } from '../src/learning/database.js';
 
 describe('Learning Engine — Database', () => {
   const testDb = join(tmpdir(), `forge_db_test_${Date.now()}.db`);
@@ -42,10 +42,13 @@ describe('Learning Engine — Database', () => {
       assert.ok(indexes.length >= 20, `Expected 20+ indexes, got ${indexes.length}`);
     });
 
-    it('should set schema_version in forge_meta', () => {
+    it('should set schema_version in forge_meta to the current migrated version', () => {
       const db = getConnection(testDb);
       const row = db.prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'").get() as any;
-      assert.equal(row.value, '1.0.0');
+      // Asserted against the exported constant (not a hardcoded literal) so this test stays
+      // correct as the schema evolves — it was hardcoded to the pre-migration '1.0.0' default
+      // and broke the moment initializeForgeMemory started migrating fresh dbs forward.
+      assert.equal(row.value, CURRENT_SCHEMA_VERSION);
     });
   });
 

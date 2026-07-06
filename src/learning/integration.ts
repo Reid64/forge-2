@@ -152,7 +152,7 @@ export function onPromptComplete(result: {
 
           // Check if this error should be elevated to a governance rule
           if (captured.isKnown) {
-            checkAutoElevation(captured.fingerprint, dbPath);
+            checkAutoElevation(captured.fingerprint, result.projectName, dbPath);
           }
         }
       }

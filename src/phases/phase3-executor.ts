@@ -106,11 +106,18 @@ import {
   runSentinel,
   runAutonomousRecovery,
   toPreviousSentinelStatus,
-  normalizeErrorSignature,
   type SentinelResult,
   type SentinelOptions,
   type AutoRecoveryResult,
 } from './phase4-sentinel.js';
+import { analyzeSentinelFailure, type BrainDiagnosis } from '../engine/build-brain.js';
+import {
+  deriveStackTags,
+  mapPromptTypeToTaskType,
+  recordFailureObserved,
+  recordRecoveryOutcome,
+} from '../engine/learning-writeback.js';
+import { LiveStatusWriter } from '../tools/live-status.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { Instinct, JsonObject } from '../types/index.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
@@ -165,6 +172,8 @@ export interface PromptOutcome {
    * distinguish a resumable timeout from a real Sentinel HALT it must never steamroll.
    */
   timedOut: boolean;
+  /** True when this prompt was split into atomic sub-prompts (Contract-decomposition, see prompt-decomposer.ts). */
+  decomposed: boolean;
   /** SHA-256 of the prompt actually executed (rewritten hash when rewritten). */
   promptHash: string;
   /** The `prompt_executions.id` Build Memory assigned, or null in stateless mode. */
@@ -838,6 +847,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   })();
   const instincts: Instinct[] = options.instincts ?? [];
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
+  const liveStatus = new LiveStatusWriter(projectPath, projectName, buildRunId, schedule.order.length);
 
   // Learning engine — non-critical, failures are caught internally
   await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
@@ -852,6 +862,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // 3. Walk the prompts in dependency order.
   const ctx: LoopContext = {
     projectPath,
+    projectName,
     governanceDirName,
     buildRunId,
     machineId,
@@ -873,6 +884,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     updatePromptExecution,
     updateStateProgress,
     writeHaltReport,
+    failedSignaturesThisBuild: new Set<string>(),
+    brainInterventions: { count: 0 },
+    elevatedRuleIds: new Set<string>(),
+    liveStatus,
     log,
     hookManager,
     instincts,
@@ -955,6 +970,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       executePrompt(ctx, entryForExec, index, previousSentinel, schemaPromptsHaveRun)
     );
     outcomes.push(outcome);
+    const realTechStackTags = deriveStackTags(ctx.stackFingerprint);
+    const changedThisPrompt = filesChanged(ctx);
     onPromptComplete({
       promptId: entry.id,
       success: outcome.disposition === 'completed',
@@ -964,8 +981,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       errorOutput: outcome.sentinel?.diagnosticReport ?? undefined,
       buildId: buildRunId ?? '',
       projectName,
-      taskType: entry.prompt_type,
-      techStackTags: ['typescript'],
+      taskType: mapPromptTypeToTaskType(entry.prompt_type),
+      techStackTags: realTechStackTags.length > 0 ? realTechStackTags : ['typescript'],
       templateHash: outcome.promptHash,
     });
 
@@ -975,17 +992,27 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       await handlePostToolUse({
         buildId: buildRunId ?? '',
         promptId: entry.id,
-        taskType: (entry.prompt_type ?? 'SCAFFOLD') as string,
-        techStackTags: ['typescript', 'nextjs'],
+        taskType: mapPromptTypeToTaskType(entry.prompt_type),
+        techStackTags: realTechStackTags.length > 0 ? realTechStackTags : ['typescript', 'nextjs'],
         firstPassSuccess: outcome.disposition === 'completed',
         retryCount: outcome.recovery?.attempted ? 1 : 0,
         tokensConsumed: outcome.tokensEstimated,
         gatPassRate: outcome.disposition === 'completed' ? 1 : 0,
         errorOutput: outcome.sentinel?.diagnosticReport ?? '',
-        filesModified: [],
+        filesModified: [...changedThisPrompt.created, ...changedThisPrompt.modified],
         projectName,
       });
     } catch { /* non-fatal */ }
+
+    const completedSoFar = outcomes.filter((o) => o.disposition === 'completed').length;
+    const failedSoFar = outcomes.filter((o) => o.disposition === 'failed').length;
+    await ctx.liveStatus.totals({
+      completed: completedSoFar,
+      failed: failedSoFar,
+      remaining: Math.max(0, schedule.order.length - outcomes.length),
+      tokensEstimated: outcomes.reduce((sum, o) => sum + o.tokensEstimated, 0),
+      costEstimatedUsd: ctx.costTracker.totalCostUsd(),
+    });
 
     if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
 
@@ -1030,6 +1057,15 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     } catch (error) {
       log(`WARNING: final updateBuild degraded (${describe(error)})`);
     }
+
+    await recordBuildCompletionInsights({
+      projectName,
+      buildRunId,
+      stackFingerprint: options.stackFingerprint ?? null,
+      outcomes,
+      elevatedRuleIds: ctx.elevatedRuleIds,
+      log,
+    });
   }
 
   await onRunEnd(buildRunId ?? '', projectPath, {
@@ -1130,6 +1166,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 /** Shared, immutable context threaded into the per-prompt helpers. */
 interface LoopContext {
   projectPath: string;
+  projectName: string;
   governanceDirName: string;
   buildRunId: string | null;
   machineId: string;
@@ -1182,6 +1219,18 @@ interface LoopContext {
   ) => Promise<unknown>;
   updateStateProgress: (line: string) => Promise<void>;
   writeHaltReport: (report: string) => Promise<void>;
+  /**
+   * Normalized failure signatures Build Brain has already tried (and failed) to recover this
+   * build — shared/mutated across prompts so `analyzeSentinelFailure` never proposes the same
+   * broken fix twice in one run (Task 2's "escalate when the same fix already failed this build").
+   */
+  failedSignaturesThisBuild: Set<string>;
+  /** Count of Build Brain interventions attempted this build (live-status / health reporting). */
+  brainInterventions: { count: number };
+  /** governance_rules ids auto-elevated during this build (Task 1.3's build-completion insight). */
+  elevatedRuleIds: Set<string>;
+  /** Live build-status writer (Task 3 — Session 4). Always present; a disk failure just no-ops. */
+  liveStatus: LiveStatusWriter;
   log: (message: string) => void;
   /** Hook manager for pre_prompt / post_prompt lifecycle events. */
   hookManager: HookManager;
@@ -1213,6 +1262,7 @@ async function executePrompt(
 ): Promise<PromptOutcome> {
   const { log } = ctx;
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) — start`);
+  await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
   try {
     // b. Failure prediction (Contract 8).
@@ -1253,6 +1303,7 @@ async function executePrompt(
       previousSentinel,
       relevantFilesBlock,
     });
+    await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'assembled' });
     let promptText = assembled.prompt;
     let promptHash = assembled.hash;
     let wasRewritten = false;
@@ -1338,6 +1389,7 @@ async function executePrompt(
     let run: ClaudeRunResult;
     let sentinel: SentinelResult;
     let decomposition: DecompositionResult | null = null;
+    await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'executing' });
     if (shouldDecompose(entry.description)) {
       decomposition = await ctx.runDecomposedPrompt(
         { id: entry.id, name: entry.name, promptType: entry.prompt_type, index, description: entry.description },
@@ -1373,6 +1425,8 @@ async function executePrompt(
       // h. Run the Phase 4 Sentinel (the five Contract-13 checks).
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
     }
+    await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'sentinel' });
+    await ctx.liveStatus.sentinelResult({ passed: sentinel.passed, failedCheck: sentinel.failedCheck });
 
     // e1. POST-PROMPT HOOK — fire after execution, before Sentinel. Non-fatal.
     await ctx.hookManager
@@ -1398,45 +1452,84 @@ async function executePrompt(
     // Capture the files this branch changed (for the prompt_execution record).
     const changed = filesChanged(ctx);
 
-    // h1. ERROR PATTERN FIX — when Sentinel fails, check the Build Memory error pattern database
-    // for a known fix. If found, apply it via claude and re-run Sentinel. This retry does NOT count
-    // against max_retries (it is a targeted known fix, not a generic retry). Non-fatal.
-    if (!sentinel.passed) {
-      const errorText = sentinel.diagnosticReport ?? '';
-      const sig = normalizeErrorSignature(errorText);
-      if (sig) {
-        try {
-          const knownPattern = await BuildMemory.errors.findMatchingPattern(sig);
-          if (knownPattern) {
-            const resolution = await BuildMemory.resolutions.getResolutionForPattern(knownPattern.id);
-            if (resolution?.resolution_description) {
-              log(`prompt ${index} '${entry.id}': known error pattern matched (sig=${sig.slice(0, 60)}…) — applying fix`);
-              const fixSteps = Array.isArray(resolution.resolution_steps)
-                ? resolution.resolution_steps.map(String).join('\n')
-                : String(resolution.resolution_steps ?? '');
-              const fixPrompt = fixSteps
-                ? `${resolution.resolution_description}\n\nSteps:\n${fixSteps}`
-                : resolution.resolution_description;
-              const fixRun = await ctx.runClaudeImpl(fixPrompt, ctx.projectPath);
-              if (fixRun.success) {
-                ctx.git.commitAll(
-                  `[FORGE] pattern-fix: ${entry.name}\n\nAuto-applied known resolution for prompt ${index} (${entry.id}).`
-                );
-                const fixedSentinel = await ctx.runSentinelImpl(sentinelOptions);
-                if (fixedSentinel.passed) {
-                  log(`prompt ${index} '${entry.id}': pattern fix succeeded — sentinel now green`);
-                  sentinel = fixedSentinel;
-                } else {
-                  log(`prompt ${index} '${entry.id}': pattern fix applied but sentinel still failing — proceeding to normal recovery`);
-                }
-              } else {
-                log(`prompt ${index} '${entry.id}': pattern fix claude run failed — proceeding to normal recovery`);
-              }
-            }
+    // h1. BUILD BRAIN — when Sentinel fails, seed/update the learning tables (Task 1's write
+    // loop — every failure is a signal, matched or not) then consult accumulated knowledge
+    // (error_patterns, resolutions, fix_patterns, governance_rules) for a TARGETED recovery
+    // prompt, rather than a generic retry. A successful brain fix is applied immediately and
+    // does NOT count against autonomous-recovery's max_retries. Non-fatal throughout — Build
+    // Brain unavailable/erroring falls back to the existing autonomous-recovery / escalation path.
+    const wasFailingInitially = !sentinel.passed;
+    const initialErrorText = sentinel.diagnosticReport;
+    const initialFailedCheck = sentinel.failedCheck;
+    let brainDiagnosis: BrainDiagnosis | null = null;
+
+    if (wasFailingInitially) {
+      await recordFailureObserved({
+        errorText: initialErrorText,
+        failedCheck: initialFailedCheck,
+        promptType: entry.prompt_type,
+        projectName: ctx.projectName,
+        stackFingerprint: ctx.stackFingerprint,
+      }).catch((err) => log(`prompt ${index} '${entry.id}': recordFailureObserved non-fatal — ${describe(err)}`));
+
+      try {
+        brainDiagnosis = await analyzeSentinelFailure(sentinel, entry, {
+          stackFingerprint: ctx.stackFingerprint,
+          buildRunId: ctx.buildRunId,
+          promptIndex: index,
+          priorFailedSignaturesThisBuild: [...ctx.failedSignaturesThisBuild],
+        });
+      } catch (brainErr) {
+        log(`prompt ${index} '${entry.id}': Build Brain unavailable — ${describe(brainErr)}`);
+        brainDiagnosis = null;
+      }
+
+      if (brainDiagnosis && !brainDiagnosis.escalate && brainDiagnosis.knownFix) {
+        ctx.brainInterventions.count += 1;
+        await ctx.liveStatus.promptPhase(
+          { index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' },
+          `Build Brain: applying targeted fix (confidence ${brainDiagnosis.confidence.toFixed(2)})`
+        );
+        await ctx.liveStatus.brainIntervention(
+          `prompt ${index} '${entry.id}': Build Brain targeted recovery (confidence ${brainDiagnosis.confidence.toFixed(2)})`
+        );
+        log(
+          `prompt ${index} '${entry.id}': Build Brain matched a known fix ` +
+            `(confidence ${brainDiagnosis.confidence.toFixed(2)}) — applying targeted recovery`
+        );
+        const fixRun = await ctx.runClaudeImpl(brainDiagnosis.recoveryPrompt, ctx.projectPath);
+        let recovered = false;
+        if (fixRun.success) {
+          ctx.git.commitAll(
+            `[FORGE] brain-fix: ${entry.name}\n\nBuild Brain targeted recovery for prompt ${index} (${entry.id}).`
+          );
+          const fixedSentinel = await ctx.runSentinelImpl(sentinelOptions);
+          recovered = fixedSentinel.passed;
+          if (recovered) {
+            log(`prompt ${index} '${entry.id}': Build Brain fix succeeded — sentinel now green`);
+            sentinel = fixedSentinel;
+          } else {
+            log(`prompt ${index} '${entry.id}': Build Brain fix applied but sentinel still failing — proceeding to normal recovery`);
           }
-        } catch (patternErr) {
-          log(`prompt ${index} '${entry.id}': error pattern lookup non-fatal — ${describe(patternErr)}`);
+        } else {
+          log(`prompt ${index} '${entry.id}': Build Brain fix claude run failed — proceeding to normal recovery`);
         }
+        if (!recovered) ctx.failedSignaturesThisBuild.add(brainDiagnosis.signature);
+        await recordRecoveryOutcome({
+          errorText: initialErrorText,
+          failedCheck: initialFailedCheck,
+          promptType: entry.prompt_type,
+          projectName: ctx.projectName,
+          stackFingerprint: ctx.stackFingerprint,
+          recovered,
+          fixDescription: brainDiagnosis.knownFix.description,
+          fixSteps: brainDiagnosis.knownFix.steps,
+          filesModified: filesChanged(ctx).modified,
+        })
+          .then((r) => {
+            if (r.elevatedRuleId) ctx.elevatedRuleIds.add(r.elevatedRuleId);
+          })
+          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal — ${describe(err)}`));
       }
     }
 
@@ -1450,9 +1543,17 @@ async function executePrompt(
       disposition = 'completed';
       note = 'Sentinel passed — merged to main and checkpointed.';
     } else if (ctx.autonomousRecoveryMode) {
-      // j. Autonomous Recovery (Contract 14): re-run the prompt + Sentinel, up to 2 attempts.
+      // j. Autonomous Recovery (Contract 14): re-run the prompt + Sentinel, up to 2 attempts. Uses
+      // Build Brain's targeted recoveryPrompt instead of the identical original prompt when one is
+      // available AND hasn't already failed this build (never repeat a fix that just failed).
+      await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' });
       const rerunPrompt: RerunPromptFn = async () => {
-        const r = await ctx.runClaudeImpl(promptText, ctx.projectPath);
+        const useBrainFix =
+          brainDiagnosis !== null &&
+          !brainDiagnosis.escalate &&
+          !ctx.failedSignaturesThisBuild.has(brainDiagnosis.signature);
+        const textToRun = useBrainFix ? (brainDiagnosis as BrainDiagnosis).recoveryPrompt : promptText;
+        const r = await ctx.runClaudeImpl(textToRun, ctx.projectPath);
         ctx.git.commitAll(`[FORGE] recovery ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run.`);
         return { success: r.success, output: `${r.stdout}\n${r.stderr}` };
       };
@@ -1466,10 +1567,36 @@ async function executePrompt(
         disposition = 'failed';
         note = `Sentinel failed; auto-recovery did not restore green: ${recovery.reason}`;
       }
+      if (wasFailingInitially) {
+        await recordRecoveryOutcome({
+          errorText: initialErrorText,
+          failedCheck: initialFailedCheck,
+          promptType: entry.prompt_type,
+          projectName: ctx.projectName,
+          stackFingerprint: ctx.stackFingerprint,
+          recovered: recovery.recovered,
+          fixDescription: brainDiagnosis?.knownFix?.description ?? `Autonomous recovery re-run (Contract 14): ${recovery.reason}`,
+          fixSteps: brainDiagnosis?.knownFix?.steps ?? [],
+          filesModified: filesChanged(ctx).modified,
+          resolutionType: 'prompt_rewrite',
+        })
+          .then((r) => {
+            if (r.elevatedRuleId) ctx.elevatedRuleIds.add(r.elevatedRuleId);
+          })
+          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal — ${describe(err)}`));
+      }
     } else {
       disposition = 'failed';
       note = `Sentinel failed (${sentinel.failedCheck ?? 'unknown'}) — Autonomous Recovery disabled, escalating (Contract 14).`;
     }
+
+    await ctx.liveStatus.promptPhase({
+      index,
+      id: entry.id,
+      name: entry.name,
+      type: entry.prompt_type,
+      phase: disposition === 'completed' ? 'merged' : 'failed',
+    });
 
     // Finalize the prompt_execution record with the outcome.
     await finalizePromptExecution(ctx, promptExecutionId, {
@@ -1553,6 +1680,7 @@ async function executePrompt(
       failureProbability: prediction.probability,
       wasRewritten,
       timedOut: run.timedOut,
+      decomposed: decomposition?.decomposed ?? false,
       promptHash,
       promptExecutionId,
       tokensEstimated: run.tokensEstimated,
@@ -1575,6 +1703,7 @@ async function executePrompt(
       failureProbability: null,
       wasRewritten: false,
       timedOut: false,
+      decomposed: false,
       promptHash: '',
       promptExecutionId: null,
       tokensEstimated: 0,
@@ -1624,6 +1753,7 @@ async function dryRunPrompt(
     failureProbability: probability,
     wasRewritten: false,
     timedOut: false,
+    decomposed: false,
     promptHash,
     promptExecutionId: null,
     tokensEstimated: tokens,
@@ -1743,6 +1873,7 @@ function skippedOutcome(entry: QueueEntry, index: number, note: string): PromptO
     failureProbability: null,
     wasRewritten: false,
     timedOut: false,
+    decomposed: false,
     promptHash: '',
     promptExecutionId: null,
     tokensEstimated: 0,
@@ -1787,6 +1918,80 @@ function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]
     }
   }
   return { created, modified, deleted };
+}
+
+/**
+ * On build completion (Task 1.3 — Session 4), write cross_project_insights for the three
+ * build-level compounding signals that don't fit a single prompt's `prompt_executions` row:
+ * any decomposition that occurred, any prompt_type with >1 Sentinel failure this build, and any
+ * governance rule the write loop auto-elevated this build. Guarded — never throws; a Build
+ * Memory outage just means these insights are skipped (Contract 4).
+ */
+async function recordBuildCompletionInsights(input: {
+  projectName: string;
+  buildRunId: string;
+  stackFingerprint: StackFingerprint | null;
+  outcomes: PromptOutcome[];
+  elevatedRuleIds: Set<string>;
+  log: (message: string) => void;
+}): Promise<void> {
+  const fingerprints = input.stackFingerprint ? [input.stackFingerprint as unknown as JsonObject] : [];
+
+  const decomposed = input.outcomes.filter((o) => o.decomposed);
+  if (decomposed.length > 0) {
+    try {
+      await BuildMemory.insights.createInsight({
+        insight_type: 'pattern',
+        source_project: input.projectName,
+        source_build_id: input.buildRunId,
+        applicable_fingerprints: fingerprints,
+        description: `${decomposed.length} prompt(s) were decomposed into atomic sub-prompts this build: ${decomposed
+          .map((o) => o.id)
+          .join(', ')}.`,
+        evidence: { decomposedPromptIds: decomposed.map((o) => o.id) },
+      });
+    } catch (error) {
+      input.log(`WARNING: decomposition insight degraded (${describe(error)})`);
+    }
+  }
+
+  const failuresByType = new Map<PromptType, number>();
+  for (const o of input.outcomes) {
+    if (o.disposition === 'failed') failuresByType.set(o.promptType, (failuresByType.get(o.promptType) ?? 0) + 1);
+  }
+  const repeatedTypes = [...failuresByType.entries()].filter(([, n]) => n > 1);
+  if (repeatedTypes.length > 0) {
+    try {
+      await BuildMemory.insights.createInsight({
+        insight_type: 'prevention',
+        source_project: input.projectName,
+        source_build_id: input.buildRunId,
+        applicable_fingerprints: fingerprints,
+        description:
+          `Prompt type(s) with repeated (>1) Sentinel failures this build: ` +
+          `${repeatedTypes.map(([t, n]) => `${t}×${n}`).join(', ')}. Consider reviewing that stage's governance/template.`,
+        evidence: { failuresByType: Object.fromEntries(repeatedTypes) },
+      });
+    } catch (error) {
+      input.log(`WARNING: repeated-failure insight degraded (${describe(error)})`);
+    }
+  }
+
+  if (input.elevatedRuleIds.size > 0) {
+    try {
+      await BuildMemory.insights.createInsight({
+        insight_type: 'prevention',
+        source_project: input.projectName,
+        source_build_id: input.buildRunId,
+        applicable_fingerprints: fingerprints,
+        description: `${input.elevatedRuleIds.size} governance rule(s) auto-elevated this build from recurring, ` +
+          `now-proven error fixes (occurrence_count >= 3, resolution success_rate >= 0.7).`,
+        evidence: { elevatedRuleIds: [...input.elevatedRuleIds] },
+      });
+    } catch (error) {
+      input.log(`WARNING: auto-elevation insight degraded (${describe(error)})`);
+    }
+  }
 }
 
 /**

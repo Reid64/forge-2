@@ -1,8 +1,101 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: REBUILD Session 3 of 4 — Autonomy — COMPLETE
+## Current Session: REBUILD Session 4 of 4 — Intelligence & Observability — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4 all delivered and verified)
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-06 (Prompt-library compile/versioning + generate-prompts + --auto-resume + mandatory re-anchor injection; schema 2.1.0)
+## Last Updated: 2026-07-06 (Learning write-loop closed + Build Brain + live observability + compounding proven end-to-end; schema 2.1.0 unchanged)
+
+---
+
+## REBUILD Session 4 — Intelligence & Observability (2026-07-06) — COMPLETE
+
+**Objective:** every build writes patterns Build Memory can reuse; a Build Brain converts Sentinel
+failures into targeted recovery prompts using accumulated knowledge; live structured output shows
+what is happening in real time; an end-to-end test proves knowledge compounds across builds. Final
+session of the 4-session rebuild.
+
+**Schema version:** unchanged — **`2.1.0`** (no new tables needed; this session closes write-loop
+gaps and adds two new engine modules on top of the existing schema).
+
+**Files created:**
+- `src/engine/learning-writeback.ts` (312 lines) — `recordFailureObserved`/`recordRecoveryOutcome`
+  (seeds+increments `error_patterns`/`resolutions` AND `fix_patterns`/`governance_rules` on every
+  Sentinel failure/recovery — before this, both table families stayed at 0 rows forever),
+  `computeLearningFingerprint` (the learning schema's OWN fingerprint scheme —
+  `getErrorFingerprint`, NOT src/memory's `normalizeErrorSignature` — the two are not
+  interchangeable), `mapPromptTypeToTaskType` (see bug fix below)
+- `src/engine/build-brain.ts` (262 lines) — `analyzeSentinelFailure`: exact-signature match →
+  resolution → category+stack fallback → governance rules, produces `{rootCauseHypothesis,
+  confidence, knownFix, recoveryPrompt, escalate}`; escalates below 0.3 confidence or when the
+  same signature already failed to recover earlier in the build
+- `src/tools/live-status.ts` (181 lines) — `LiveStatusWriter`, atomic writes to
+  `<project>/.forge/live-status.json` at every prompt lifecycle point
+- `src/cli/status-command.ts` (138 lines) — `forge status --project <path> [--watch]` console
+  dashboard (merged into the pre-existing historical `forge status [build-id]` command)
+- `scripts/verify-compounding.mjs` (309 lines) — 3-build (A/B/C) end-to-end proof against a
+  disposable temp db + temp project: fail → learn → elevate → inject → prevent
+
+**Files modified:**
+- `src/phases/phase3-executor.ts` (+295/-66) — Build Brain replaces the old inline h1 pattern-fix
+  lookup; autonomous recovery re-runs use `brain.recoveryPrompt` instead of the identical prompt
+  verbatim; live-status lifecycle calls at every stage of `executePrompt`;
+  `recordBuildCompletionInsights()` at finalize (writes `cross_project_insights` +
+  `prompt_scores`); `PromptOutcome` gained `timedOut`/`decomposed`; `LoopContext` gained
+  `projectName`/`failedSignaturesThisBuild`/`brainInterventions`/`elevatedRuleIds`/`liveStatus`
+- `src/learning/queries.ts` — `registerFix` was dead code that never incremented
+  `times_fix_succeeded` (permanently blocking auto-elevation's success-rate gate); rewritten to
+  actually track success
+- `src/learning/loops.ts` — `checkAutoElevation` threshold (>=0.7) + scope (GLOBAL vs
+  PROJECT_SPECIFIC by stack-tag presence) fixed
+- `src/learning/database.ts` — exported `CURRENT_SCHEMA_VERSION` as single source of truth (fixes
+  Task 0's second, previously-masked bug — a hardcoded `'1.0.0'` test assertion)
+- `src/memory/errors.ts` — generic `updateErrorPattern()` partial-update (needed to flip
+  `auto_resolve_eligible`/set `prevention_rule` from the write-loop)
+- `src/cli/health-command.ts` — 4 new wiring checks (error-pattern writes, auto-elevation, Build
+  Brain, live status) + a "Learning" section (row counts + last-write timestamps)
+- `src/cli/index.ts` — `--project`/`--watch` options merged into the existing `forge status`
+  command registration
+- `tests/learning-sync.test.ts` — Task 0: `closeConnection()` before `rmSync` in `after()` (root
+  cause of the Windows-only EBUSY flake carried since Session 1 — WAL connection never closed)
+- `tests/learning-database.test.ts` — Task 0: schema_version assertion now uses
+  `CURRENT_SCHEMA_VERSION` instead of a stale hardcoded `'1.0.0'`
+
+**Bug found BY the compounding gate, then fixed (not papered over):** `prompt_scores` writes
+silently failed on every single build (caught by a try/catch, logged as "Loop 1 scoring failed")
+because `entry.prompt_type` (`schema|auth|api|ui|feature|agent|test|deploy`) was passed straight
+through as the learning schema's `task_type`, which has an entirely different
+`CHECK(task_type IN ('SCAFFOLD','CRUD','INTEGRATION','AI_PIPELINE','CONFIG','TEST','FIX'))`
+constraint. No value from the first vocabulary ever satisfied it — this bug predates this session
+and affected every real build so far. Fixed with `mapPromptTypeToTaskType()`, wired into both
+`phase3-executor.ts` call sites that write a `taskType`.
+
+Also fixed during Task 1: a fingerprint-scheme mismatch — `fix_patterns.error_fingerprint`
+(`getErrorFingerprint`) and `error_patterns.error_signature` (`normalizeErrorSignature`) are
+different keys for different table families; code (including `build-brain.ts`'s own fallback path)
+that used one scheme where the other was needed would silently never match. Fixed by introducing
+and consistently using `computeLearningFingerprint()`.
+
+**Verification (all green):**
+1. `pnpm tsc --noEmit` → 0 errors.
+2. `pnpm test` (learning suite) → **35/35 PASS** — the Windows EBUSY flake carried since Session 1
+   is genuinely fixed, not skipped.
+3. `node scripts/verify-compounding.mjs` → **all assertions PASS**. Build A seeds
+   `error_patterns`/`resolutions`/`prompt_scores` on a novel failure. Builds B/C recur the same
+   signature: occurrence_count reaches 3, a `governance_rules` row auto-elevates, build C's real
+   assembled prompt (captured via an `assembleImpl` wrapper around the REAL prompt-assembler)
+   contains the injected warning + prevention text, and `analyzeSentinelFailure` returns a
+   `knownFix` with `historicalSuccessRate > 0`, `escalate: false`. `live-status.json` tracked real
+   prompt-level progression throughout. The FIRST run of this script caught the `prompt_scores`
+   bug above — fixed the link, did not weaken the assertion.
+4. `node scripts/verify-memory.mjs` / `verify-design-wiring.mjs` / `verify-autonomy.mjs` → all
+   still green, no regressions.
+5. `forge health` → schema 2.1.0, all 14 wiring checks (10 from Sessions 1-3 + 4 new) report
+   WIRED, "Learning" section present (0 rows against the real db, as expected — no real build has
+   run yet; the compounding proof exercised a disposable temp db, not the real one).
+
+**Next action:** the 4-session rebuild is COMPLETE. Recommended: run FORGE on a small greenfield
+test project (not AFS) as the first real-world build — exercises the full pipeline with a real
+`claude` subprocess, real Sentinel checks, real git branching — before pointing it at AFS.
 
 ---
 

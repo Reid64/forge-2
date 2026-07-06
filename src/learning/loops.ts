@@ -74,23 +74,46 @@ export function captureError(error: {
   }
 }
 
-export function checkAutoElevation(fingerprint: string, dbPath?: string): GovernanceRule | null {
+/**
+ * The compounding mechanism (Session 4 — Intelligence & Observability, Task 1.2): once a
+ * recurring error pattern has a proven fix (occurrence_count >= 3, resolution success_rate >=
+ * 0.7), auto-elevate it to a `governance_rules` row so `handlePreToolUse` injects it into every
+ * future matching prompt — no human has to notice the pattern and write the rule by hand.
+ *
+ * Scope: GLOBAL when the pattern is stack-agnostic (`tech_stack_tags` empty — the fix applies
+ * everywhere); PROJECT_SPECIFIC (tied to `projectName`) when it carries specific stack tags,
+ * since a stack-specific fix (e.g. a Next.js App Router quirk) shouldn't be asserted globally.
+ */
+export function checkAutoElevation(
+  fingerprint: string,
+  projectName?: string,
+  dbPath?: string,
+): GovernanceRule | null {
   try {
     const pattern = getFixPattern(fingerprint, dbPath);
     if (!pattern) return null;
     if (pattern.occurrence_count < 3) return null;
     if (!pattern.fix_description) return null;
-    if (pattern.success_rate <= 0.5) return null;
+    if (pattern.success_rate < 0.7) return null;
     if (pattern.governance_rule_id) return null; // already has a rule
+
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(pattern.tech_stack_tags) as string[];
+    } catch {
+      // malformed tags — treat as stack-agnostic
+    }
+    const stackAgnostic = tags.length === 0;
 
     // Create a governance rule from this recurring pattern
     const ruleId = saveToForgeMemory('governance_rules', {
-      rule_text: `Auto-elevated from error pattern (${pattern.occurrence_count}x): ${pattern.error_message}. Known fix: ${pattern.fix_description}`,
+      rule_text: `Auto-elevated from error pattern (${pattern.occurrence_count}x, ${(pattern.success_rate * 100).toFixed(0)}% fix success): ${pattern.error_message}. Known fix: ${pattern.fix_description}`,
       rule_short_name: `auto-${fingerprint.substring(0, 8)}`,
       source: 'AUTO_ELEVATED',
       source_error_fingerprint: fingerprint,
       tech_stack_tags: pattern.tech_stack_tags,
-      scope: 'GLOBAL',
+      scope: stackAgnostic ? 'GLOBAL' : 'PROJECT_SPECIFIC',
+      project_name: stackAgnostic ? null : (projectName ?? null),
       active: 1,
       enforcement_count: 0,
     }, dbPath);

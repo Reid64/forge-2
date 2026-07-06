@@ -142,6 +142,8 @@ export interface HealthReport {
   anthropicApiKeyPresent: boolean;
   /** Total `queue_versions` rows + the most recent snapshot across every project (Session 3 — Autonomy). */
   promptLibrary: { totalSnapshots: number; latest: QueueVersionRow | null };
+  /** Learning-loop table row counts + last-write timestamps (Session 4 — Intelligence & Observability). */
+  learning: Array<{ table: string; rowCount: number; lastWrite: string | null }>;
   wiring: WiringStatus[];
 }
 
@@ -215,10 +217,38 @@ export async function gatherHealthReport(): Promise<HealthReport> {
       wired: isReferencedIn(forgeRoot, 'src/cli/compile-command.ts', 'REANCHOR_INTERVAL'),
       detail: 'src/cli/compile-command.ts injects a re-anchor entry every REANCHOR_INTERVAL (15) real prompts.',
     },
+    {
+      capability: 'error-pattern writes',
+      wired:
+        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'recordFailureObserved') &&
+        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'recordRecoveryOutcome'),
+      detail: 'src/phases/phase3-executor.ts calls recordFailureObserved/recordRecoveryOutcome (src/engine/learning-writeback.ts) on every Sentinel failure/recovery.',
+    },
+    {
+      capability: 'auto-elevation',
+      wired: isReferencedIn(forgeRoot, 'src/engine/learning-writeback.ts', 'checkAutoElevation'),
+      detail: 'src/engine/learning-writeback.ts calls checkAutoElevation (src/learning/loops.ts) after every recovery outcome.',
+    },
+    {
+      capability: 'build brain',
+      wired: isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'analyzeSentinelFailure'),
+      detail: 'src/phases/phase3-executor.ts calls analyzeSentinelFailure (src/engine/build-brain.ts) on every Sentinel failure.',
+    },
+    {
+      capability: 'live status',
+      wired: isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'LiveStatusWriter'),
+      detail: 'src/phases/phase3-executor.ts writes .forge/live-status.json (src/tools/live-status.ts) at every prompt lifecycle point.',
+    },
   ];
 
   const queueVersionsCount = tableRowCount('queue_versions');
   const promptLibrary = { totalSnapshots: queueVersionsCount, latest: latestQueueVersion() };
+
+  const LEARNING_TABLES = ['error_patterns', 'fix_patterns', 'governance_rules', 'cross_project_insights', 'prompt_scores'] as const;
+  const learning = LEARNING_TABLES.map((table) => {
+    const t = tables.find((x) => x.table === table);
+    return { table, rowCount: t?.rowCount ?? 0, lastWrite: t?.mostRecentCreatedAt ?? null };
+  });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -230,6 +260,7 @@ export async function gatherHealthReport(): Promise<HealthReport> {
     skillFolders,
     anthropicApiKeyPresent,
     promptLibrary,
+    learning,
     wiring,
   };
 }
@@ -283,6 +314,14 @@ export function renderHealthReportMarkdown(report: HealthReport): string {
     lines.push(`  - \`${l.snapshot_path}\``);
   } else {
     lines.push('- Latest: (none yet — run `forge compile`)');
+  }
+  lines.push('');
+  lines.push('## Learning (Session 4 — Intelligence & Observability)');
+  lines.push('');
+  lines.push('| Table | Rows | Last write |');
+  lines.push('|---|---|---|');
+  for (const l of report.learning) {
+    lines.push(`| ${l.table} | ${l.rowCount} | ${l.lastWrite ?? '—'} |`);
   }
   lines.push('');
   lines.push('## Environment');
@@ -347,6 +386,11 @@ function renderHealthReportConsole(report: HealthReport): string {
     lines.push(`  latest:    ${l.project_name} — ${l.queue_hash} (${l.entry_count} entries, ${chalk.dim(l.created_at)})`);
   } else {
     lines.push(chalk.dim('  latest:    (none yet — run `forge compile`)'));
+  }
+
+  lines.push(chalk.bold('\nLearning'));
+  for (const l of report.learning) {
+    lines.push(`  ${l.table.padEnd(24, ' ')} ${String(l.rowCount).padStart(6, ' ')}  ${chalk.dim(l.lastWrite ?? '—')}`);
   }
 
   lines.push(chalk.bold('\nEnvironment'));

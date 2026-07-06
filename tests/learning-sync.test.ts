@@ -4,13 +4,22 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { acquireSyncLock, releaseSyncLock, loadSyncConfig, syncForgeMemory, getLastSyncTimestamp, setLastSyncTimestamp } from '../src/learning/sync.js';
-import { initializeForgeMemory } from '../src/learning/database.js';
+import { initializeForgeMemory, closeConnection } from '../src/learning/database.js';
 
 describe('Learning Engine — Sync', () => {
   const testDir = join(tmpdir(), `forge_sync_test_${Date.now()}`);
   mkdirSync(testDir, { recursive: true });
 
-  after(() => { rmSync(testDir, { recursive: true, force: true }); });
+  // The 'timestamps' suite below opens a REAL better-sqlite3 connection via
+  // initializeForgeMemory(localDb) — src/learning/database.ts caches it (WAL mode) in a
+  // module-level Map and never closes it on its own. On Windows, NTFS keeps that file (and its
+  // -wal/-shm siblings) locked for as long as the handle is open, so rmSync'ing testDir here
+  // used to fail with EBUSY (POSIX allows unlinking open files; Windows does not). Fix: close
+  // the connection explicitly before removing the directory that contains it.
+  after(() => {
+    closeConnection(join(testDir, 'ts_test.db'));
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   describe('acquireSyncLock', () => {
     it('should create a lock file', () => {

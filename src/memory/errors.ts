@@ -163,6 +163,47 @@ export async function updateOccurrenceCount(
   });
 }
 
+/** Mutable columns of an error_pattern (everything except identity/creation/signature/category). */
+export type ErrorPatternUpdate = Partial<
+  Omit<ErrorPattern, 'id' | 'created_at' | 'error_signature' | 'error_category' | 'first_seen_project'>
+>;
+
+const ERROR_PATTERN_UPDATE_TRANSFORMS: Partial<Record<keyof ErrorPatternUpdate, (v: unknown) => unknown>> = {
+  stack_fingerprints: (v) => toJsonText(v),
+  auto_resolve_eligible: (v) => toSqliteBool(v as boolean),
+};
+
+/**
+ * Patch an error_pattern by id (e.g. flip `auto_resolve_eligible` and set `success_rate`/
+ * `prevention_rule`/`resolution_id` once a resolution proves reliable — Session 4's
+ * write-loop closes this gap: `runAutonomousRecovery`'s auto-resolve matching requires
+ * `auto_resolve_eligible = true` and `success_rate` above its threshold, but nothing previously
+ * set either field after `createErrorPattern`). `updated_at` is stamped automatically. Returns
+ * the updated row, or null on failure / missing id.
+ */
+export function updateErrorPattern(id: string, patch: ErrorPatternUpdate): Promise<ErrorPattern | null> {
+  return runQuery<ErrorPattern>(TABLE + '.updateErrorPattern', (db) => {
+    const keys = Object.keys(patch) as Array<keyof ErrorPatternUpdate>;
+    if (keys.length === 0) {
+      const row = db.prepare('SELECT * FROM error_patterns WHERE id = ?').get(id) as ErrorPatternRow | undefined;
+      return row ? rowToErrorPattern(row) : null;
+    }
+    const ts = nowIso();
+    const setParts = ['updated_at = @updated_at'];
+    const params: Record<string, unknown> = { id, updated_at: ts };
+    for (const k of keys) {
+      const transform = ERROR_PATTERN_UPDATE_TRANSFORMS[k];
+      const value = (patch as Record<string, unknown>)[k as string];
+      params[k as string] = transform ? transform(value) : value;
+      setParts.push(`${String(k)} = @${String(k)}`);
+    }
+    const result = db.prepare(`UPDATE error_patterns SET ${setParts.join(', ')} WHERE id = @id`).run(params);
+    if (result.changes === 0) return null;
+    const row = db.prepare('SELECT * FROM error_patterns WHERE id = ?').get(id) as ErrorPatternRow;
+    return rowToErrorPattern(row);
+  });
+}
+
 /**
  * List error patterns whose `trigger_prompt_pattern` matches a prompt type (e.g.
  * 'schema', 'auth', 'ui', 'api'), most-frequent first. Used by the prompt-assembler
