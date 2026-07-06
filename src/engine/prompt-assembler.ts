@@ -71,6 +71,21 @@ export const STATE_AUDIT_FOOTER =
 const MAX_GOVERNANCE_CHARS_PER_DOC = 6000;
 /** Max characters of the head-overview fallback when no specific section matched. */
 const MAX_OVERVIEW_CHARS = 1800;
+/**
+ * Per-document overrides of the head-overview cap. DESIGN_SYSTEM.md has no fine-grained
+ * `context_injection` sections (it always falls through to `headOverview`), but its palette
+ * / typography / spacing token tables ARE the payload — capping it at the generic
+ * {@link MAX_OVERVIEW_CHARS} would truncate the tokens a UI prompt needs. Documents not
+ * listed here use {@link MAX_OVERVIEW_CHARS}.
+ */
+const OVERVIEW_CHARS_BY_DOC: Readonly<Record<string, number>> = {
+  'DESIGN_SYSTEM.md': MAX_GOVERNANCE_CHARS_PER_DOC,
+};
+
+/** Resolve the head-overview character cap for a governance document by its exact filename. */
+function overviewCapForDoc(docName: string): number {
+  return OVERVIEW_CHARS_BY_DOC[docName] ?? MAX_OVERVIEW_CHARS;
+}
 /** Max number of Build Memory warnings injected (highest occurrence first). */
 const MAX_WARNINGS = 8;
 /** Heuristic characters-per-token used to size the prompt's input-token estimate (matches the Claude Runner). */
@@ -317,7 +332,7 @@ function buildGovernanceSection(input: AssembleInput): {
     }
     const matchers = matchersForDoc(docName, input.entry.context_injection);
     const excerpt = extractMatchingSections(content, matchers, MAX_GOVERNANCE_CHARS_PER_DOC) ??
-      headOverview(content, MAX_OVERVIEW_CHARS);
+      headOverview(content, overviewCapForDoc(docName));
     used.push(docName);
     parts.push(`### ${docName}\n\n${excerpt}`);
   }

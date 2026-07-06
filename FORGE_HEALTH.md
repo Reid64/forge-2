@@ -1,6 +1,6 @@
 # FORGE 2.0 — Health Report
 
-Generated: 2026-07-06T00:19:30.744Z
+Generated: 2026-07-06T00:39:50.294Z
 
 ## Build Memory
 
@@ -41,9 +41,17 @@ Generated: 2026-07-06T00:19:30.744Z
 - search.py: found at `C:\Users\manag\Documents\forge-2\.claude\skills\ui-ux-pro-max\scripts\search.py`
 - Python interpreter: responds (`python` → Python 3.14.0)
 
-## Skills directory (.claude/skills/)
+## Skills directories (.claude/skills/ + skills/)
 
-- ui-ux-pro-max (SKILL.md present)
+- .claude/skills/ui-ux-pro-max (SKILL.md present)
+- skills/deploy-sequence (SKILL.md present)
+- skills/frontend-design (SKILL.md present)
+- skills/middleware-role-routing (SKILL.md present)
+- skills/no-cache-dashboard-serving (SKILL.md present)
+- skills/playwright-gate (SKILL.md present)
+- skills/rls-company-scoping (SKILL.md present)
+- skills/six-laws-gate (SKILL.md present)
+- skills/ui-ux-pro-max (SKILL.md present)
 
 ## Environment
 
@@ -55,6 +63,8 @@ Generated: 2026-07-06T00:19:30.744Z
 |---|---|---|
 | design-system generation | WIRED | src/phases/phase1b-architect.ts calls generateDesignSystem() during Phase 1B. |
 | skill injection | WIRED | src/phases/phase3-executor.ts reads queue entry `skills:` via loadSkillContent(). |
-| brands storage | NEVER-INVOKED | brand_identities has 0 row(s). |
+| ui skill declarations | WIRED | src/engine/queue-generator.ts declares skills: [frontend-design, ui-ux-pro-max] on every UI-producing entry. |
+| design-doc injection | WIRED | src/phases/phase3-executor.ts GOVERNANCE_DOC_NAMES includes DESIGN_SYSTEM.md. |
+| brands storage | WIRED | src/phases/phase1b-architect.ts calls createBrand/updateBrand; brand_identities has 0 row(s). |
 | learning hooks | WIRED | hook_execution_log has 7 row(s). |
 | codebase RAG | WIRED | src/phases/phase3-executor.ts imports CodebaseRag from src/tools/codebase-rag.ts. |

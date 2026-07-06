@@ -67,11 +67,15 @@ import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { ConstraintManifest } from './phase1c-ingest.js';
 import type { CallModel } from './phase1a-prd.js';
 import { providerCallModel } from '../engine/provider-router.js';
-import { generateDesignSystem, renderDesignSystemPromptBlock } from '../tools/design-system-generator.js';
+import {
+  generateDesignSystem,
+  renderDesignSystemPromptBlock,
+  deriveProductTypeQuery,
+} from '../tools/design-system-generator.js';
 import type { DesignSystemOptions } from '../tools/design-system-generator.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
-import type { CrossProjectInsight, DesignPattern, JsonObject } from '../types/index.js';
+import type { BrandIdentity, CrossProjectInsight, DesignPattern, JsonObject } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Artifact contract types (each artifact: a structured object + a `markdown` field)
@@ -520,6 +524,15 @@ export interface Phase1bOptions {
   designSystemOptions?: DesignSystemOptions;
   /** Injected design-system generator (tests). Default {@link generateDesignSystem}. */
   generateDesignSystemImpl?: typeof generateDesignSystem;
+  /**
+   * Cross-project design token inheritance (Session 2 — Design Intelligence). When set to
+   * another project's name, its `brand_identities` row (if any) is resolved BEFORE design-system
+   * generation: its product-type is folded into the generated design system's query (so the new
+   * system continues the same visual lineage), and a compact "Brand baseline (inherit, then
+   * diverge deliberately)" block is injected alongside the design system into the frontend +
+   * interactionMaps artifact prompts. Non-fatal when no baseline brand is found.
+   */
+  inheritBrandFrom?: string;
   /** Progress reporter. Default logs to the console with a [FORGE:phase1b] prefix. */
   log?: (message: string) => void;
   /** Write the eight governance documents to `governanceDir` after ARCHITECTURE.md. Default true. */
@@ -1052,6 +1065,82 @@ function renderGrounding(g: Grounding): string {
   if (g.patterns.length === 0) lines.push('- _(none on record)_');
   else for (const p of g.patterns) lines.push(`- [${p.pattern_type}] ${p.name} — ${p.description}`);
   lines.push('');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Cross-project brand inheritance (Session 2 — Design Intelligence)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the baseline brand for `Phase1bOptions.inheritBrandFrom`, if set. Guarded — a
+ * missing brand or a Build Memory failure degrades to `null` plus a warning, never a throw.
+ */
+async function resolveBrandBaseline(
+  inheritBrandFrom: string | undefined,
+  warnings: string[],
+  log: (message: string) => void
+): Promise<BrandIdentity | null> {
+  if (!inheritBrandFrom || inheritBrandFrom.trim() === '') return null;
+  try {
+    const baseline = await BuildMemory.brands.getBrandByProject(inheritBrandFrom);
+    if (!baseline) {
+      warnings.push(`inheritBrandFrom: no brand found for project "${inheritBrandFrom}" — designing without a baseline.`);
+      return null;
+    }
+    log(`inheriting brand baseline from "${inheritBrandFrom}"`);
+    return baseline;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    warnings.push(`inheritBrandFrom: could not resolve baseline brand for "${inheritBrandFrom}" (${detail}).`);
+    return null;
+  }
+}
+
+/** The baseline's stored UI/UX Pro Max product-type query, or `''` if not recorded. */
+function baselineProductType(baseline: BrandIdentity): string {
+  return asString(asRecord(baseline.design_tokens)['productType']);
+}
+
+/**
+ * Render a compact "brand baseline" block from a prior project's persisted brand, injected
+ * alongside the design system into the frontend + interactionMaps artifact prompts. Summarizes
+ * whichever structured tokens the baseline carries (colors/typography/spacing/radii/shadows);
+ * degrades to a product-type-only note when no structured tokens were ever merged in. Never
+ * throws — every field access goes through the file's existing `asRecord`/`asString` coercions.
+ */
+function renderBrandBaselineBlock(baseline: BrandIdentity, baselineProjectName: string): string {
+  const stored = asRecord(baseline.design_tokens);
+  const structured = asRecord(stored['tokens']);
+  const buckets: Array<[string, Record<string, unknown>]> = [
+    ['colors', asRecord(structured['colors'])],
+    ['typography', asRecord(structured['typography'])],
+    ['spacing', asRecord(structured['spacing'])],
+    ['radii', asRecord(structured['radii'])],
+    ['shadows', asRecord(structured['shadows'])],
+  ];
+
+  const lines: string[] = [
+    '## Brand baseline (inherit, then diverge deliberately)',
+    '',
+    `This project inherits its visual lineage from "${baselineProjectName}". Start from the tokens`,
+    "below, then adapt deliberately for THIS product's subject matter and audience — do not copy",
+    'verbatim where the baseline product differs materially from this one.',
+    '',
+  ];
+
+  let anyBucket = false;
+  for (const [name, values] of buckets) {
+    const entries = Object.entries(values).slice(0, 12);
+    if (entries.length === 0) continue;
+    anyBucket = true;
+    lines.push(`- **${name}:** ${entries.map(([k, v]) => `${k}=${String(v)}`).join(', ')}`);
+  }
+  if (!anyBucket) lines.push('- _(no structured tokens recorded yet for the baseline — see its product-type query below)_');
+
+  const productType = baselineProductType(baseline);
+  if (productType !== '') lines.push('', `Baseline product-type query: ${productType}`);
+
   return lines.join('\n');
 }
 
@@ -2061,6 +2150,13 @@ export async function runPhase1bArchitect(
     constraintsBlock,
   ].join('\n');
 
+  // 2.4. Resolve a cross-project brand baseline (Session 2 — Design Intelligence), BEFORE
+  // design-system generation, so its product-type lineage can enrich the generator's query.
+  const brandBaseline = await resolveBrandBaseline(options.inheritBrandFrom, warnings, log);
+  const brandBaselineBlock = brandBaseline
+    ? renderBrandBaselineBlock(brandBaseline, options.inheritBrandFrom as string)
+    : '';
+
   // 2.5. Generate the project design system (UI/UX Pro Max) and write DESIGN_SYSTEM.md to
   // the target governance. Its content is injected into every UI prompt below. Non-fatal:
   // a missing skill / Python degrades to no injection (the build still designs UI).
@@ -2070,11 +2166,18 @@ export async function runPhase1bArchitect(
   if (options.generateDesignSystem !== false) {
     log('generating project design system via UI/UX Pro Max');
     const generateDs = options.generateDesignSystemImpl ?? generateDesignSystem;
+    const explicitProductType = options.designSystemOptions?.productType;
+    const derivedProductType = explicitProductType ?? deriveProductTypeQuery(prd, projectName);
+    const productType = brandBaseline
+      ? `${derivedProductType} — continuing the visual lineage of "${options.inheritBrandFrom}"` +
+        (baselineProductType(brandBaseline) !== '' ? ` (${baselineProductType(brandBaseline)})` : '')
+      : derivedProductType;
     const dsOptions: DesignSystemOptions = {
       projectName,
       prd,
       log: (m) => log(`design-system: ${m}`),
       ...(options.designSystemOptions ?? {}),
+      productType,
     };
     const ds = await generateDs(projectPath, dsOptions);
     designSystemGenerated = ds.generated;
@@ -2083,6 +2186,31 @@ export async function runPhase1bArchitect(
     if (ds.generated) {
       designSystemBlock = renderDesignSystemPromptBlock(ds.markdown);
       log(`design system ready ("${ds.productType}") → ${ds.designSystemPath ?? 'not written'}; injecting into UI prompts`);
+
+      // Persist the generated design system to Build Memory (brands.ts) — guarded/non-fatal
+      // (Contract 4): a failed write logs a warning and never blocks Phase 1B.
+      try {
+        const designTokensPayload: JsonObject = {
+          markdown: ds.markdown,
+          productType: ds.productType,
+          generatedAt: ds.generatedAt,
+        };
+        const existingBrand = await BuildMemory.brands.getBrandByProject(projectName);
+        if (existingBrand) {
+          await BuildMemory.brands.updateBrand(projectName, { design_tokens: designTokensPayload });
+        } else {
+          await BuildMemory.brands.createBrand({
+            project_name: projectName,
+            brand_name: projectName,
+            design_tokens: designTokensPayload,
+          });
+        }
+        log(`persisted brand identity for "${projectName}" to Build Memory`);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        warnings.push(`design-system: could not persist brand to Build Memory (${detail})`);
+        log(`WARNING: could not persist brand (${detail})`);
+      }
     } else {
       log('design system not generated (non-fatal) — UI prompts proceed without it');
     }
@@ -2094,9 +2222,11 @@ export async function runPhase1bArchitect(
   let tokensInput = 0;
   let tokensOutput = 0;
 
-  /** The UI-generating artifacts that receive the injected design system. */
+  /** The UI-generating artifacts that receive the injected design system + brand baseline. */
   const isUiArtifact = (kind: ArtifactKind): boolean =>
     kind === 'frontend' || kind === 'interactionMaps';
+
+  const uiExtraContext = [designSystemBlock, brandBaselineBlock].filter((s) => s.trim() !== '').join('\n\n');
 
   const sys = (kind: ArtifactKind): string =>
     buildSystemPrompt(projectName, constrained, ARTIFACT_SCHEMAS[kind].schema);
@@ -2105,7 +2235,7 @@ export async function runPhase1bArchitect(
       baseContext,
       stateSummary,
       ARTIFACT_SCHEMAS[kind].instruction,
-      isUiArtifact(kind) ? designSystemBlock : ''
+      isUiArtifact(kind) ? uiExtraContext : ''
     );
 
   // 1/8 database
@@ -2128,6 +2258,24 @@ export async function runPhase1bArchitect(
   tokensOutput += feGen.tokensOutput;
   const frontend = feGen.artifact;
   stateSummary = `${stateSummary}\n${summarizeFrontend(frontend)}`.trim();
+
+  // Merge the structured design tokens (colors/typography/spacing/radii/shadows) from the
+  // FrontendArchitecture artifact into the SAME brand row the design system persisted above,
+  // so it carries both the UI/UX Pro Max markdown AND the structured token set. Guarded/non-fatal.
+  if (designSystemGenerated) {
+    try {
+      const existingBrand = await BuildMemory.brands.getBrandByProject(projectName);
+      if (existingBrand) {
+        await BuildMemory.brands.updateBrand(projectName, {
+          design_tokens: { ...existingBrand.design_tokens, tokens: frontend.designTokens as unknown as JsonObject },
+        });
+        log(`merged structured design tokens into brand "${projectName}"`);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      warnings.push(`design-system: could not merge structured tokens into brand (${detail})`);
+    }
+  }
 
   // 4/8 interaction maps
   const imGen = await generateArtifact('interactionMaps', '4/8 InteractionMaps', sys('interactionMaps'), usr('interactionMaps'), parseInteractionMaps, fallbackInteractionMaps, ctx);

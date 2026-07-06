@@ -435,13 +435,14 @@ export interface Phase3Options {
 // ---------------------------------------------------------------------------
 
 /** The governance documents the assembler may inject — read into the doc map for assembly. */
-const GOVERNANCE_DOC_NAMES: readonly string[] = [
+export const GOVERNANCE_DOC_NAMES: readonly string[] = [
   'BLUEPRINT.md',
   'SCHEMA_REGISTRY.md',
   'BEHAVIORAL_CONTRACTS.md',
   'INTERACTION_MAPS.md',
   'AGENTS.md',
   'TESTING.md',
+  'DESIGN_SYSTEM.md',
 ];
 
 // ---------------------------------------------------------------------------

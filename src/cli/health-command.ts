@@ -72,26 +72,38 @@ function detectPython(candidates: readonly string[]): { command: string; version
   return null;
 }
 
-/** One skill folder found under `.claude/skills/`. */
+/** One skill folder found under `.claude/skills/` (the corpus) or `skills/` (Phase 3's `skillsDir`). */
 interface SkillFolder {
+  /** e.g. `.claude/skills/ui-ux-pro-max` or `skills/frontend-design`. */
   name: string;
   hasSkillMd: boolean;
 }
 
-function listSkillFolders(forgeRoot: string): SkillFolder[] {
-  const skillsDir = join(forgeRoot, '.claude', 'skills');
+/** List every skill sub-folder under `<forgeRoot>/<relDir>`, labelled `<relDir>/<name>`. */
+function listSkillFoldersIn(forgeRoot: string, relDir: string): SkillFolder[] {
+  const skillsDir = join(forgeRoot, ...relDir.split('/'));
   if (!existsSync(skillsDir)) return [];
   try {
     return readdirSync(skillsDir, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => ({
-        name: e.name,
+        name: `${relDir}/${e.name}`,
         hasSkillMd: existsSync(join(skillsDir, e.name, 'SKILL.md')),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     return [];
   }
+}
+
+/**
+ * List every skill folder FORGE knows about: the `.claude/skills/` corpus (the UI/UX Pro Max
+ * design-intelligence source `src/tools/design-system-generator.ts` queries) AND the
+ * `skills/` directory beside the FORGE root that Phase 3's `skillsDir` resolves for
+ * queue-declared `skills:` injection (`src/phases/phase3-executor.ts` → `loadSkillContent`).
+ */
+function listSkillFolders(forgeRoot: string): SkillFolder[] {
+  return [...listSkillFoldersIn(forgeRoot, '.claude/skills'), ...listSkillFoldersIn(forgeRoot, 'skills')];
 }
 
 interface WiringStatus {
@@ -131,6 +143,10 @@ export async function gatherHealthReport(): Promise<HealthReport> {
 
   const tableRowCount = (name: string): number => tables.find((t) => t.table === name)?.rowCount ?? 0;
 
+  const brandsRows = tableRowCount('brand_identities');
+  const brandsSourceWired = isReferencedIn(forgeRoot, 'src/phases/phase1b-architect.ts', 'createBrand') &&
+    isReferencedIn(forgeRoot, 'src/phases/phase1b-architect.ts', 'updateBrand');
+
   const wiring: WiringStatus[] = [
     {
       capability: 'design-system generation',
@@ -143,9 +159,19 @@ export async function gatherHealthReport(): Promise<HealthReport> {
       detail: 'src/phases/phase3-executor.ts reads queue entry `skills:` via loadSkillContent().',
     },
     {
+      capability: 'ui skill declarations',
+      wired: isReferencedIn(forgeRoot, 'src/engine/queue-generator.ts', 'frontend-design'),
+      detail: 'src/engine/queue-generator.ts declares skills: [frontend-design, ui-ux-pro-max] on every UI-producing entry.',
+    },
+    {
+      capability: 'design-doc injection',
+      wired: isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'DESIGN_SYSTEM.md'),
+      detail: 'src/phases/phase3-executor.ts GOVERNANCE_DOC_NAMES includes DESIGN_SYSTEM.md.',
+    },
+    {
       capability: 'brands storage',
-      wired: tableRowCount('brand_identities') > 0,
-      detail: `brand_identities has ${tableRowCount('brand_identities')} row(s).`,
+      wired: brandsSourceWired || brandsRows > 0,
+      detail: `src/phases/phase1b-architect.ts ${brandsSourceWired ? 'calls' : 'does NOT call'} createBrand/updateBrand; brand_identities has ${brandsRows} row(s).`,
     },
     {
       capability: 'learning hooks',
@@ -202,7 +228,7 @@ export function renderHealthReportMarkdown(report: HealthReport): string {
     }`
   );
   lines.push('');
-  lines.push('## Skills directory (.claude/skills/)');
+  lines.push('## Skills directories (.claude/skills/ + skills/)');
   lines.push('');
   if (report.skillFolders.length === 0) {
     lines.push('- (none found)');
@@ -258,7 +284,7 @@ function renderHealthReportConsole(report: HealthReport): string {
     }`
   );
 
-  lines.push(chalk.bold('\nSkills directory'));
+  lines.push(chalk.bold('\nSkills directories'));
   if (report.skillFolders.length === 0) {
     lines.push(chalk.yellow('  (none found)'));
   } else {

@@ -1,10 +1,93 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-07-05 (FORGE 2.0 Rebuild — Session 1: Memory Consolidation COMPLETE)
+**Last Updated:** 2026-07-05 (FORGE 2.0 Rebuild — Session 2: Design Intelligence COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD IN PROGRESS (4-session Memory/Design/Intelligence/Verify plan)
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Session 1
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-2
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## REBUILD Session 2 — Design Intelligence (2026-07-05) — COMPLETE
+
+**Objective:** wire the design system pipeline end-to-end so no UI prompt ever executes
+without design context: Phase 1B generates a design system → `brands.ts` persists it → the
+Queue Generator declares design skills on every UI entry → Phase 3 injects `DESIGN_SYSTEM.md`
+and the design skills into every UI prompt. Plus cross-project design token inheritance.
+
+- **`src/phases/phase1b-architect.ts`** — after `generateDesignSystem()` succeeds (step 2.5),
+  the result is persisted to Build Memory via `BuildMemory.brands.getBrandByProject` /
+  `createBrand` / `updateBrand` (`design_tokens: { markdown, productType, generatedAt }`),
+  guarded/non-fatal. After the FrontendArchitecture artifact (3/8) generates, its structured
+  `designTokens` (colors/typography/spacing/radii/shadows) are merged into the SAME brand row
+  under `design_tokens.tokens`, so the row ends up carrying both the UI/UX Pro Max markdown and
+  the structured token set. New `Phase1bOptions.inheritBrandFrom?: string`: when set, the
+  baseline project's brand is resolved BEFORE design-system generation, its product-type is
+  folded into the generated system's search query ("… — continuing the visual lineage of
+  X"), and a new `renderBrandBaselineBlock()` renders a compact "Brand baseline (inherit, then
+  diverge deliberately)" block injected alongside the design-system block into the frontend +
+  interactionMaps artifact prompts.
+- **`src/engine/queue-generator.ts`** — new `withUiDesignContext(entry)` helper (added
+  `DraftEntry.skills?`) applied ONCE at construction to every UI-producing entry: the `ui`
+  shell, every page-building `feature` entry (feature/dashboard/settings buckets), and the
+  interaction-map-only leftover `feature` entries. It merges `skills: ['frontend-design',
+  'ui-ux-pro-max']` (no dupes) and adds `'DESIGN_SYSTEM.md'` to `governance_refs` if absent.
+  Non-UI entries (schema/auth/api/agent/test/deploy/verify) are untouched.
+- **`src/phases/phase3-executor.ts`** — `GOVERNANCE_DOC_NAMES` (now exported) gained
+  `'DESIGN_SYSTEM.md'`, so `defaultLoadGovernanceDocs` reads it from the governance dir.
+- **`src/engine/prompt-assembler.ts`** — new `OVERVIEW_CHARS_BY_DOC` per-doc cap lookup +
+  `overviewCapForDoc()`: `DESIGN_SYSTEM.md` has no fine-grained `context_injection` sections (it
+  always falls through to `headOverview`), so it now gets the full `MAX_GOVERNANCE_CHARS_PER_DOC`
+  (6000 chars) instead of the generic `MAX_OVERVIEW_CHARS` (1800) — the palette/type/spacing
+  token tables ARE the payload and must not be truncated.
+- **New skills:** `skills/frontend-design/SKILL.md` (~64 lines — subject-matter grounding,
+  token discipline, typography personality, information-encoding structure, the "three generic
+  AI looks" to avoid, one-signature-element restraint, an unannounced quality floor
+  responsive/focus-visible/reduced-motion/WCAG-AA, copy as design material, deliberate sparse
+  motion) and `skills/ui-ux-pro-max/SKILL.md` (~20 lines — a thin pointer: the generated DESIGN
+  SYSTEM block is authoritative, honor its anti-patterns, treat component specs as contracts;
+  the full corpus stays in `.claude/skills/`).
+- **`src/tools/brand-inheritance.ts` (new)** — `deriveBrandFromBaseline(baselineProjectName,
+  newProjectName, overrides?)`: reads the baseline via `getBrandByProject`, deep-merges
+  `overrides` over its structured tokens bucket-by-bucket, returns the derived object; never
+  auto-persists. Guarded — a missing baseline degrades to `baselineFound: false` (overrides
+  still applied), never throws.
+- **`forge brand-inherit <baseline-project> <new-project> [--tokens <json>]`** (new CLI
+  command, `src/cli/index.ts`) — derives via the tool above, persists through
+  `createBrand`/`updateBrand`, prints the resulting palette + typography summary.
+- **`forge health` wiring checks** (`src/cli/health-command.ts`) — "brands storage" now WIRED
+  whenever `phase1b-architect.ts` references `createBrand`/`updateBrand` (source-based; no
+  longer gated on `brand_identities` having rows yet). Two new checks: "ui skill declarations"
+  (`queue-generator.ts` references `frontend-design`) and "design-doc injection"
+  (`phase3-executor.ts` references `DESIGN_SYSTEM.md`). The skills-directory listing now scans
+  BOTH `.claude/skills/` and the FORGE-root `skills/` directory (labelled by source dir), so
+  `skills/frontend-design` and `skills/ui-ux-pro-max` appear alongside the `.claude/` corpus.
+
+**Verification (all green):**
+1. `npx tsc --noEmit -p .` → 0 errors.
+2. `node scripts/verify-design-wiring.mjs` → 18/18 assertions PASS: brand roundtrip
+   (`createBrand`/`getBrandByProject`, including nested structured-token preservation),
+   `deriveBrandFromBaseline` override-merge behavior (override wins, untouched keys/buckets
+   preserved, missing-baseline degrade), a synthetic `ArchitectureDesign` → `buildQueueEntries`
+   proving every UI-producing entry carries both `skills: [frontend-design, ui-ux-pro-max]`
+   and `DESIGN_SYSTEM.md` in `governance_refs` (and that non-UI entries do NOT), and
+   `GOVERNANCE_DOC_NAMES` includes `DESIGN_SYSTEM.md`.
+3. `forge health` → "brands storage" now reports **WIRED** (was NEVER-INVOKED after Session 1;
+   `brand_identities` is still 0 rows — no real build has run yet — but the check is
+   source-based per the verification gate). "ui skill declarations" and "design-doc injection"
+   both report WIRED. All other Session 1 wiring checks unchanged.
+4. `node --import tsx --test tests/learning-*.test.ts` → 34/35 pass (same pre-existing Windows
+   `EBUSY` test-cleanup flake as Session 1, in an untouched file — not a regression).
+
+**Files modified (6) + created (5, one a 2-file skill directory pair):**
+`src/phases/phase1b-architect.ts`, `src/engine/queue-generator.ts`,
+`src/phases/phase3-executor.ts`, `src/engine/prompt-assembler.ts`, `src/cli/index.ts`,
+`src/cli/health-command.ts` — plus new `src/tools/brand-inheritance.ts`,
+`skills/frontend-design/SKILL.md`, `skills/ui-ux-pro-max/SKILL.md`,
+`scripts/verify-design-wiring.mjs`.
+
+**Next action:** Session 3 — Autonomy (`forge compile`, `generate-prompts`, `--auto-resume`,
+re-anchor injection, prompt library versioning).
 
 ---
 

@@ -58,10 +58,11 @@ import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
 import { cmdHealth } from './health-command.js';
 
-import { BuildMemory } from '../memory/index.js';
+import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
 import { getLogger } from '../tools/forge-logger.js';
 import { getForgeDbPath, getSchemaVersion, initializeForgeMemory } from '../learning/database.js';
+import { deriveBrandFromBaseline, type DesignTokenSet } from '../tools/brand-inheritance.js';
 import {
   createTaskScheduler,
   getSchedulerDashboard,
@@ -1298,6 +1299,91 @@ async function cmdScheduleTrigger(name: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `forge brand-inherit <baseline-project> <new-project>` — cross-project design tokens
+// ---------------------------------------------------------------------------
+
+/** Parse the optional `--tokens <json>` flag into a `Partial<DesignTokenSet>`. Null on bad JSON/shape. */
+function parseTokenOverrides(raw: string | undefined): Partial<DesignTokenSet> | null {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Partial<DesignTokenSet>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `forge brand-inherit <baseline-project> <new-project> [--tokens <json>]` — derive a new
+ * project's design tokens from a proven baseline brand, persist them, and print the resulting
+ * palette summary (Session 2 — Design Intelligence, cross-project token inheritance).
+ */
+async function cmdBrandInherit(
+  baselineProject: string,
+  newProject: string,
+  opts: { tokens?: string }
+): Promise<void> {
+  const overrides = parseTokenOverrides(opts.tokens);
+  if (overrides === null) {
+    fail('--tokens must be a JSON object, e.g. \'{"colors":{"primary":"#123456"}}\'.');
+    return;
+  }
+
+  const derived = await deriveBrandFromBaseline(baselineProject, newProject, overrides);
+  if (!derived.baselineFound) {
+    console.log(
+      chalk.yellow(`\nNo brand found for baseline project "${baselineProject}" — deriving from overrides only.`)
+    );
+  }
+
+  const designTokens: JsonObject = {
+    markdown: derived.baselineMarkdown,
+    productType: derived.baselineProductType,
+    generatedAt: nowIso(),
+    inheritedFrom: baselineProject,
+    tokens: derived.tokens as unknown as JsonObject,
+  };
+
+  const existing = await BuildMemory.brands.getBrandByProject(newProject);
+  const saved = existing
+    ? await BuildMemory.brands.updateBrand(newProject, { design_tokens: designTokens })
+    : await BuildMemory.brands.createBrand({
+        project_name: newProject,
+        brand_name: newProject,
+        design_tokens: designTokens,
+      });
+
+  if (!saved) {
+    fail('Could not persist the derived brand to Build Memory (see memory warnings above).');
+    return;
+  }
+
+  console.log(
+    chalk.bold(
+      `\nDerived brand "${newProject}" from "${baselineProject}"` +
+        (derived.baselineFound ? '' : ' (baseline not found — overrides only)')
+    )
+  );
+
+  const colorEntries = Object.entries(derived.tokens.colors);
+  console.log(chalk.bold('\nPalette:'));
+  if (colorEntries.length === 0) {
+    console.log(chalk.dim('  (no colors recorded)'));
+  } else {
+    for (const [name, hex] of colorEntries) console.log(`  ${name.padEnd(16, ' ')} ${chalk.cyan(hex)}`);
+  }
+
+  const typographyEntries = Object.entries(derived.tokens.typography);
+  if (typographyEntries.length > 0) {
+    console.log(chalk.bold('\nTypography:'));
+    for (const [name, value] of typographyEntries) console.log(`  ${name.padEnd(16, ' ')} ${value}`);
+  }
+
+  console.log(chalk.dim(`\nPersisted to Build Memory as brand_identities.project_name = "${newProject}".`));
+}
+
+// ---------------------------------------------------------------------------
 // `forge repair <path>` — repair a broken TypeScript repository
 // ---------------------------------------------------------------------------
 
@@ -1567,6 +1653,16 @@ async function main(): Promise<void> {
     .command('health')
     .description('Diagnose Build Memory, the UI/UX Pro Max skill, and capability wiring; writes FORGE_HEALTH.md')
     .action(() => cmdHealth());
+
+  program
+    .command('brand-inherit')
+    .description("Derive a new project's design tokens from a baseline project's brand and persist them")
+    .argument('<baseline-project>', 'project name whose brand_identities row to inherit from')
+    .argument('<new-project>', 'project name to persist the derived brand under')
+    .option('--tokens <json>', 'token overrides as a JSON object (colors/typography/spacing/radii/shadows), merged over the baseline')
+    .action((baselineProject: string, newProject: string, opts: { tokens?: string }) =>
+      cmdBrandInherit(baselineProject, newProject, opts)
+    );
 
   program
     .command('retrofit')

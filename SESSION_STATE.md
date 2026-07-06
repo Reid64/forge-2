@@ -1,8 +1,60 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: REBUILD Session 1 of 4 — Memory Consolidation — COMPLETE
+## Current Session: REBUILD Session 2 of 4 — Design Intelligence — COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-05 (Build Memory migrated Supabase → SQLite, schema_version 2.0.0, `forge health` added)
+## Last Updated: 2026-07-05 (Design system pipeline wired end-to-end: Phase 1B → brands.ts → queue skills → Phase 3 injection; cross-project token inheritance added)
+
+---
+
+## REBUILD Session 2 — Design Intelligence (2026-07-05)
+
+**Objective:** no UI prompt ever executes without design context. Phase 1B generates a design
+system → persists it to `brands.ts` → the Queue Generator declares design skills on every UI
+entry → Phase 3 injects `DESIGN_SYSTEM.md` + the design skills into every UI prompt. Plus
+cross-project design token inheritance.
+
+**Files modified:**
+- `src/phases/phase1b-architect.ts` — persists the generated design system to Build Memory
+  (`createBrand`/`updateBrand`) right after generation; merges the FrontendArchitecture
+  artifact's structured `designTokens` into the same brand row after artifact 3/8 generates;
+  new `Phase1bOptions.inheritBrandFrom` resolves a baseline brand before generation, enriches
+  the design-system query with its product-type lineage, and injects a "Brand baseline
+  (inherit, then diverge deliberately)" block into the frontend + interactionMaps prompts
+  (new helpers: `resolveBrandBaseline`, `baselineProductType`, `renderBrandBaselineBlock`)
+- `src/engine/queue-generator.ts` — new `withUiDesignContext(entry)` applied at construction to
+  the `ui` shell entry and every page-building `feature` entry: merges `skills:
+  [frontend-design, ui-ux-pro-max]` and adds `DESIGN_SYSTEM.md` to `governance_refs`
+- `src/phases/phase3-executor.ts` — `GOVERNANCE_DOC_NAMES` (now exported) gained
+  `DESIGN_SYSTEM.md`
+- `src/engine/prompt-assembler.ts` — per-doc overview-cap lookup (`OVERVIEW_CHARS_BY_DOC` /
+  `overviewCapForDoc`): `DESIGN_SYSTEM.md` gets the full 6000-char cap instead of the generic
+  1800-char overview cap
+- `src/cli/index.ts` — new `forge brand-inherit <baseline-project> <new-project> [--tokens
+  <json>]` command (`cmdBrandInherit`, `parseTokenOverrides`)
+- `src/cli/health-command.ts` — "brands storage" wiring check is now source-based (WIRED once
+  `phase1b-architect.ts` references `createBrand`/`updateBrand`, not gated on row count); added
+  "ui skill declarations" and "design-doc injection" wiring checks; skills-directory listing now
+  scans both `.claude/skills/` and the FORGE-root `skills/` directory
+
+**Files created:**
+- `src/tools/brand-inheritance.ts` — `deriveBrandFromBaseline()` (cross-project token
+  inheritance, non-persisting)
+- `skills/frontend-design/SKILL.md` — production design mandates (subject-matter grounding,
+  token discipline, typography, information-encoding structure, avoiding the three generic AI
+  looks, one signature element per page, an unannounced quality floor, copy as design material,
+  deliberate motion)
+- `skills/ui-ux-pro-max/SKILL.md` — thin pointer skill (the generated DESIGN SYSTEM block is
+  authoritative; full corpus stays in `.claude/skills/`)
+- `scripts/verify-design-wiring.mjs` — verification script (brand roundtrip, inheritance merge,
+  queue-generator UI-entry assertions, `GOVERNANCE_DOC_NAMES` assertion)
+
+**Verification:** `npx tsc --noEmit -p .` → 0 errors · `node scripts/verify-design-wiring.mjs` →
+18/18 PASS · `forge health` → brands storage / ui skill declarations / design-doc injection all
+report WIRED · `node --import tsx --test tests/learning-*.test.ts` → 34/35 pass (1 pre-existing
+Windows `EBUSY` test-cleanup flake, unrelated, same as Session 1).
+
+**Next action:** Session 3 of 4 — Autonomy: `forge compile`, `generate-prompts`,
+`--auto-resume`, re-anchor injection, prompt library versioning.
 
 ---
 

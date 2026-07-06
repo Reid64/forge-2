@@ -290,6 +290,36 @@ interface DraftEntry {
   estimated_tokens: number;
   context_injection: ContextInjection;
   description: string;
+  /** Skill folder names to prepend (Phase 3 reads `<skillsDir>/<name>/SKILL.md`). */
+  skills?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// UI design context (Session 2 — Design Intelligence)
+// ---------------------------------------------------------------------------
+
+/**
+ * Skills every UI-producing entry (the shell + every page-building feature) must declare
+ * so no UI prompt ever executes without design context: `frontend-design` (the design
+ * mandates) and `ui-ux-pro-max` (a pointer to the generated DESIGN SYSTEM block being
+ * authoritative). See `skills/frontend-design/SKILL.md` and `skills/ui-ux-pro-max/SKILL.md`.
+ */
+const UI_DESIGN_SKILLS: readonly string[] = ['frontend-design', 'ui-ux-pro-max'];
+
+/**
+ * Apply the UI design context to a UI-producing draft entry: merge in {@link UI_DESIGN_SKILLS}
+ * (no duplicates) and ensure `DESIGN_SYSTEM.md` is in `governance_refs` so Phase 3 injects the
+ * project's generated design system into the assembled prompt. Applied ONCE at entry
+ * construction (the `ui` shell entry + every `feature`-typed page/component entry) rather than
+ * edited inline per call site.
+ */
+function withUiDesignContext(entry: DraftEntry): DraftEntry {
+  const skills = new Set(entry.skills ?? []);
+  for (const s of UI_DESIGN_SKILLS) skills.add(s);
+  const governance_refs = entry.governance_refs.includes('DESIGN_SYSTEM.md')
+    ? entry.governance_refs
+    : [...entry.governance_refs, 'DESIGN_SYSTEM.md'];
+  return { ...entry, skills: [...skills], governance_refs };
 }
 
 /**
@@ -634,7 +664,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
   if (hasFrontend) {
     const id = uniqueId('ui-shell', used);
     uiIds.push(id);
-    drafts.push({
+    drafts.push(withUiDesignContext({
       id,
       name: 'UI shell, layouts & design tokens',
       prompt_type: 'ui',
@@ -646,7 +676,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
       ),
       context_injection: { schemaSections: [], behavioralSections: [], interactionMaps: [] },
       description: describeUiShell(design.frontend),
-    });
+    }));
   }
 
   // --- Stages: features / dashboards / settings (page-centric) ------------
@@ -681,7 +711,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
         .filter((r) => apiDeps.includes(routePathToApiId.get(normRoute(r.path)) ?? ''))
         .flatMap((r) => [...r.dbReads, ...r.dbWrites].map(normTable)),
     ]);
-    pageBuckets[bucket].push({
+    pageBuckets[bucket].push(withUiDesignContext({
       id,
       name: `${bucket === 'feature' ? 'Feature' : bucket === 'dashboard' ? 'Dashboard' : 'Settings'}: ${page.name || page.path}`,
       prompt_type: 'feature',
@@ -697,7 +727,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
         interactionMaps: uniqueSorted(maps.map((m) => `${m.feature}: ${m.element}`)),
       },
       description: describePage(page, maps, bucket),
-    });
+    }));
   }
 
   // Interaction-map features with no matching page → standalone feature prompts (Contract 18).
@@ -715,7 +745,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
     const tablesTouched = uniqueSorted(
       maps.map((m) => normTable(m.dbWrite)).filter((t) => t !== '' && t !== 'none')
     );
-    pageBuckets.feature.push({
+    pageBuckets.feature.push(withUiDesignContext({
       id,
       name: `Feature: ${feature}`,
       prompt_type: 'feature',
@@ -736,7 +766,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
           `Use real API calls to real tables — no mock data (Iron Law 8).`,
         ].join(' ')
       ),
-    });
+    }));
   }
 
   // Emit feature/dashboard/settings stages in standard order, parallel-grouped per stage.
@@ -879,6 +909,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
       description: d.description,
     };
     if (d.parallel_group !== null) entry.parallel_group = d.parallel_group;
+    if (d.skills && d.skills.length > 0) entry.skills = d.skills;
     return entry;
   });
 }
