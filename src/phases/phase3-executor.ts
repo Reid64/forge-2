@@ -69,7 +69,8 @@
  * derives an approximate scope from the queue so the report is always complete (with a warning).
  */
 
-import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
+import { readFile, mkdir, appendFile } from 'node:fs/promises';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -100,7 +101,7 @@ import {
   type AssembledPrompt,
   type PreviousSentinelStatus,
 } from '../engine/prompt-assembler.js';
-import { runClaude, type ClaudeRunResult } from '../engine/claude-runner.js';
+import { runClaude, DEFAULT_TIMEOUT_MS, type ClaudeRunResult } from '../engine/claude-runner.js';
 import { GitManager } from '../engine/git-manager.js';
 import {
   runSentinel,
@@ -116,8 +117,18 @@ import {
   mapPromptTypeToTaskType,
   recordFailureObserved,
   recordRecoveryOutcome,
+  recordSmokeTestFailureObserved,
 } from '../engine/learning-writeback.js';
 import { LiveStatusWriter } from '../tools/live-status.js';
+import {
+  acquireRunLock,
+  checkStaleLock,
+  clearDeathForensicsState,
+  installDeathForensics,
+  recordLogLine,
+  releaseRunLock,
+} from '../tools/death-forensics.js';
+import { toAsciiGovernanceText, writeGovernanceFile } from '../tools/governance-text.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { Instinct, JsonObject } from '../types/index.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
@@ -180,6 +191,8 @@ export interface PromptOutcome {
   promptExecutionId: string | null;
   /** Coarse token estimate for this prompt (claude-runner heuristic). */
   tokensEstimated: number;
+  /** Wall-clock duration of this prompt, in ms (Session 5 finding #12/#7). */
+  durationMs: number;
   /** The Sentinel result (null when not run — skipped/dry-run). */
   sentinel: SentinelResult | null;
   /** The Autonomous Recovery result, when recovery was attempted. */
@@ -349,7 +362,12 @@ export interface Phase3Options {
   features?: Array<FeatureSpec | string>;
   /** The main branch merges target / rollback resets. Default `'main'`. */
   mainBranch?: string;
-  /** Per-prompt claude timeout (ms). Default: claude-runner's 15 minutes. */
+  /**
+   * Per-prompt claude timeout (ms). Default: per-prompt-type budget from `forge_config.json`'s
+   * `build.timeoutMinutes` / `build.longTimeoutMinutes` (Session 5 finding #14) — `test`/`deploy`
+   * prompts get the long budget, everything else gets the default. Setting this OVERRIDES the
+   * per-type budget uniformly for every prompt (kept for tests / a manual global override).
+   */
   claudeTimeoutMs?: number;
   /**
    * Directory containing skill sub-folders (each with a SKILL.md file). When a queue entry
@@ -360,8 +378,12 @@ export interface Phase3Options {
   skillsDir?: string;
 
   // -- injectable collaborators (tests) -------------------------------------
-  /** Override the claude execution. Default: {@link runClaude}. */
-  runClaudeImpl?: (prompt: string, cwd: string) => Promise<ClaudeRunResult>;
+  /**
+   * Override the claude execution. Default: {@link runClaude}. The optional third argument is
+   * the per-prompt-type timeout budget (ms) the loop computed (Session 5 finding #14) — an
+   * injected override may ignore it (existing 2-arg fakes remain valid).
+   */
+  runClaudeImpl?: (prompt: string, cwd: string, timeoutMs?: number) => Promise<ClaudeRunResult>;
   /** Override the failure prediction. Default: {@link predictFailure}. */
   predictImpl?: (input: {
     promptType: PromptType;
@@ -462,6 +484,78 @@ export const GOVERNANCE_DOC_NAMES: readonly string[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Per-prompt-type timeout budgets (Session 5 finding #14)
+// ---------------------------------------------------------------------------
+
+/** Prompt types whose work is inherently slower than average generation (a full test/deploy run). */
+const LONG_TIMEOUT_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['test', 'deploy']);
+
+interface TimeoutBudgetConfig {
+  timeoutMinutes: number;
+  longTimeoutMinutes: number;
+}
+
+/** The built-in defaults, mirroring `DEFAULT_FORGE_CONFIG.build` in src/cli/config.ts. */
+const DEFAULT_TIMEOUT_BUDGET_CONFIG: TimeoutBudgetConfig = { timeoutMinutes: 15, longTimeoutMinutes: 30 };
+
+/**
+ * Read `<projectPath>/forge_config.json`'s `build.timeoutMinutes` / `build.longTimeoutMinutes`
+ * (falling back to the built-in defaults for a missing file/field — never throws). Read directly
+ * rather than via `src/cli/config.ts` to keep phases free of a dependency on the cli layer.
+ */
+async function loadTimeoutBudgetConfig(projectPath: string): Promise<TimeoutBudgetConfig> {
+  try {
+    const raw = await readFile(join(projectPath, 'forge_config.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { build?: { timeoutMinutes?: unknown; longTimeoutMinutes?: unknown } };
+    const timeoutMinutes =
+      typeof parsed.build?.timeoutMinutes === 'number' && parsed.build.timeoutMinutes > 0
+        ? parsed.build.timeoutMinutes
+        : DEFAULT_TIMEOUT_BUDGET_CONFIG.timeoutMinutes;
+    const longTimeoutMinutes =
+      typeof parsed.build?.longTimeoutMinutes === 'number' && parsed.build.longTimeoutMinutes > 0
+        ? parsed.build.longTimeoutMinutes
+        : DEFAULT_TIMEOUT_BUDGET_CONFIG.longTimeoutMinutes;
+    return { timeoutMinutes, longTimeoutMinutes };
+  } catch {
+    return DEFAULT_TIMEOUT_BUDGET_CONFIG;
+  }
+}
+
+/** Build a `promptType -> timeout budget (ms)` resolver bound to one build's config. */
+function makeTimeoutBudgetResolver(config: TimeoutBudgetConfig): (promptType: PromptType) => number {
+  return (promptType) =>
+    (LONG_TIMEOUT_PROMPT_TYPES.has(promptType) ? config.longTimeoutMinutes : config.timeoutMinutes) * 60_000;
+}
+
+/**
+ * Force a "silent timeout" (claude timed out, but Sentinel still reports PASS on whatever code
+ * happened to exist) to read as a failure — Sentinel proves the code doesn't obviously break, not
+ * that the prompt's work happened (Session 5 finding #14). A no-op when Sentinel already failed
+ * for its own reason (that failure already stands on its own).
+ */
+function forceFailOnTimeout(
+  sentinel: SentinelResult,
+  timeoutMs: number,
+  entry: QueueEntry,
+  log: (message: string) => void,
+  index: number
+): SentinelResult {
+  if (!sentinel.passed) return sentinel;
+  // Unquoted "prompt type X" (not `'X'`) deliberately — normalizeErrorSignature strips quoted
+  // literals, which would erase the prompt type and collapse every timeout onto one signature.
+  // Session 5 finding #15 needs a signature that stays distinct PER prompt type (timeout+type).
+  const timeoutNote =
+    `claude-runner TIMEOUT after ${Math.round(timeoutMs / 1000)}s for prompt type ${entry.prompt_type} — ` +
+    'Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.';
+  log(`prompt ${index} '${entry.id}': ${timeoutNote}`);
+  return {
+    ...sentinel,
+    passed: false,
+    diagnosticReport: `${timeoutNote}\n\n--- Sentinel's checks (informational only — not authoritative given the timeout) ---\n${sentinel.diagnosticReport}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // queue.yaml parsing
 // ---------------------------------------------------------------------------
 
@@ -540,6 +634,8 @@ export function coerceQueueEntry(
   if (group !== '') entry.parallel_group = group;
   const skills = asStringArray(o.skills);
   if (skills.length > 0) entry.skills = skills;
+  const infra = asString(o.infra).trim();
+  if (infra === 'local' || infra === 'cloud') entry.infra = infra;
   return entry;
 }
 
@@ -637,6 +733,17 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Render a millisecond duration as a compact human string (`"12.3s"`, `"1m45s"`, `"2h03m"`). */
+function humanDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, '0')}m`;
+  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+  return totalSeconds >= 10 ? `${totalSeconds}s` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -648,7 +755,7 @@ function describe(error: unknown): string {
  * the default. Always resolves — every collaborator is guarded and the loop never throws.
  */
 export async function runPhase3Executor(options: Phase3Options): Promise<Phase3Result> {
-  const log = options.log ?? logLine('phase3');
+  const baseLog = options.log ?? logLine('phase3');
   const projectPath = options.projectPath;
   const governanceDirName = options.governanceDirName ?? 'governance';
   const governanceDir = join(projectPath, governanceDirName);
@@ -659,6 +766,50 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const mainBranch = options.mainBranch ?? 'main';
   const generatedAt = nowIso();
   const warnings: string[] = [];
+
+  // Persistent log tee (Session 5 finding #12): the dialtest deaths left no forensics because
+  // console history was the ONLY record. Every log line this build emits is also appended to
+  // <project>/.forge/logs/build_<timestamp>.log — a real file that survives a closed terminal.
+  // Skipped for dry runs (nothing executes; no build worth a persistent log).
+  let buildLogPath: string | null = null;
+  if (!dryRun) {
+    try {
+      const logsDir = join(projectPath, '.forge', 'logs');
+      mkdirSync(logsDir, { recursive: true });
+      buildLogPath = join(logsDir, `build_${generatedAt.replace(/[:.]/g, '-')}.log`);
+    } catch {
+      buildLogPath = null; // best-effort — a build must never fail because its log file couldn't open
+    }
+  }
+  // Feed every Phase 3 progress line into the death-forensics ring buffer (Session 5 finding
+  // #13) AND the persistent log file (finding #12) so a death report / post-mortem always has
+  // the full story, not just whatever was left in a closed terminal.
+  const log = (message: string): void => {
+    recordLogLine(message);
+    baseLog(message);
+    if (buildLogPath) {
+      try {
+        appendFileSync(buildLogPath, `[${new Date().toISOString()}] ${message}\n`, 'utf8');
+      } catch {
+        /* best-effort */
+      }
+    }
+  };
+
+  // Stale-lock recovery (Session 5 finding #13): a forge_running.lock left behind by a build
+  // that died before reaching its own cleanup means a PRIOR run silently died. Detect it, log
+  // it loudly, clear it, and continue — a dead lock must never block a new build. Skipped for
+  // dry runs (they never acquire the lock in the first place).
+  if (!dryRun) {
+    const staleLock = checkStaleLock(projectPath, log);
+    if (staleLock.stale) {
+      warnings.push(
+        `Recovered from a stale forge_running.lock (prior build ${staleLock.buildRunId ?? '(unknown)'}, ` +
+          `pid ${staleLock.pid ?? '?'} not running) — a previous FORGE run died silently.`
+      );
+    }
+  }
+
   const skillsDir =
     options.skillsDir ??
     (() => {
@@ -674,8 +825,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // and a `??` never synthesises a union-of-functions call site.
   const runClaudeImpl: NonNullable<Phase3Options['runClaudeImpl']> =
     options.runClaudeImpl ??
-    ((prompt, cwd) =>
-      runClaude(prompt, options.claudeTimeoutMs !== undefined ? { cwd, timeoutMs: options.claudeTimeoutMs } : { cwd }));
+    ((prompt, cwd, timeoutMs) =>
+      runClaude(prompt, { cwd, timeoutMs: options.claudeTimeoutMs ?? timeoutMs ?? DEFAULT_TIMEOUT_MS }));
   const predictImpl: NonNullable<Phase3Options['predictImpl']> =
     options.predictImpl ?? ((input) => predictFailure(input));
   const assembleImpl: NonNullable<Phase3Options['assembleImpl']> =
@@ -802,6 +953,30 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // below via runWithBuildContext, and the whole context is cleared before returning.
   setLogContext({ ...(buildRunId ? { buildRunId } : {}), project: projectName });
 
+  // Death forensics + run lock (Session 5 finding #13): from this point on, an uncaught
+  // exception / unhandled rejection / abnormal exit writes .forge/death-report.md (current
+  // prompt + last 50 log lines) and best-effort finalizes this build_run so the NEXT run's
+  // checkStaleLock() (above) finds a clean story instead of silence.
+  const deathState = { currentPromptIndex: null as number | null, currentPromptId: null as string | null };
+  if (!dryRun) {
+    acquireRunLock(projectPath, buildRunId);
+    installDeathForensics({
+      projectPath,
+      getState: () => ({ buildRunId, currentPromptIndex: deathState.currentPromptIndex, currentPromptId: deathState.currentPromptId }),
+      finalizeBuildAsInterrupted: async (id, reason) => {
+        try {
+          await updateBuild(id, {
+            status: 'halted',
+            completed_at: nowIso(),
+            toolchain_manifest: { ...toolchainManifest, _forge_interrupted: { reason, at: nowIso() } },
+          });
+        } catch {
+          /* best-effort — this runs during process death */
+        }
+      },
+    });
+  }
+
   // 2b. Replay rollback (F12, step 2): hard-reset main to the original build's checkpoint BEFORE
   //     reloading governance, so the repo is at the resume point and governance is read fresh from
   //     current disk (step 3 — it may have been edited since the original build). Non-fatal: a
@@ -847,6 +1022,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   })();
   const instincts: Instinct[] = options.instincts ?? [];
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
+  const timeoutBudgetConfig = await loadTimeoutBudgetConfig(projectPath);
+  const timeoutBudgetMsFor = makeTimeoutBudgetResolver(timeoutBudgetConfig);
+  log(
+    `timeout budgets: default ${timeoutBudgetConfig.timeoutMinutes}m, ` +
+      `test/deploy ${timeoutBudgetConfig.longTimeoutMinutes}m` +
+      (options.claudeTimeoutMs !== undefined ? ` (overridden uniformly to ${Math.round(options.claudeTimeoutMs / 60_000)}m by claudeTimeoutMs)` : '')
+  );
   const liveStatus = new LiveStatusWriter(projectPath, projectName, buildRunId, schedule.order.length);
 
   // Learning engine — non-critical, failures are caught internally
@@ -873,6 +1055,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     git,
     rag,
     runClaudeImpl,
+    timeoutBudgetMsFor,
     predictImpl,
     assembleImpl,
     rewriteImpl,
@@ -906,6 +1089,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     const entry = schedule.order[i];
     if (entry === undefined) continue;
     const index = i + 1;
+    deathState.currentPromptIndex = index;
+    deathState.currentPromptId = entry.id;
 
     // a0. Replay carry (F12): prompts before the resume index are already present in the
     //     checkpoint — record them as carried (skipped, not re-executed) and treat them as
@@ -1006,12 +1191,18 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
     const completedSoFar = outcomes.filter((o) => o.disposition === 'completed').length;
     const failedSoFar = outcomes.filter((o) => o.disposition === 'failed').length;
+    const totalElapsedMs = outcomes.reduce((sum, o) => sum + o.durationMs, 0);
+    log(
+      `prompt ${index} '${entry.id}': ${humanDuration(outcome.durationMs)} this prompt, ` +
+        `${humanDuration(totalElapsedMs)} build total so far.`
+    );
     await ctx.liveStatus.totals({
       completed: completedSoFar,
       failed: failedSoFar,
       remaining: Math.max(0, schedule.order.length - outcomes.length),
       tokensEstimated: outcomes.reduce((sum, o) => sum + o.tokensEstimated, 0),
       costEstimatedUsd: ctx.costTracker.totalCostUsd(),
+      totalElapsedMs,
     });
 
     if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
@@ -1156,6 +1347,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         startTime: new Date(generatedAt),
       });
     } catch { /* non-fatal */ }
+
+    // Build finished (normally or via a caught error) — release the run lock and stop
+    // attributing process-level deaths to this build; the NEXT build re-installs its own state.
+    if (!dryRun) {
+      releaseRunLock(projectPath);
+      clearDeathForensicsState();
+    }
   }
 }
 
@@ -1175,7 +1373,9 @@ interface LoopContext {
   dryRun: boolean;
   governanceDocs: Record<string, string>;
   git: GitManager;
-  runClaudeImpl: (prompt: string, cwd: string) => Promise<ClaudeRunResult>;
+  runClaudeImpl: (prompt: string, cwd: string, timeoutMs?: number) => Promise<ClaudeRunResult>;
+  /** Per-prompt-type timeout budget (ms) — `test`/`deploy` get the long budget (Session 5 finding #14). */
+  timeoutBudgetMsFor: (promptType: PromptType) => number;
   predictImpl: (input: {
     promptType: PromptType;
     stackFingerprint?: StackFingerprint | null;
@@ -1261,6 +1461,8 @@ async function executePrompt(
   schemaPromptsHaveRun: boolean
 ): Promise<PromptOutcome> {
   const { log } = ctx;
+  // Session 5 finding #12/#7: per-prompt elapsed duration, for console/live-status/prompt_executions.
+  const promptStartedAt = Date.now();
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) — start`);
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
@@ -1389,13 +1591,15 @@ async function executePrompt(
     let run: ClaudeRunResult;
     let sentinel: SentinelResult;
     let decomposition: DecompositionResult | null = null;
+    // Session 5 finding #14: per-prompt-type timeout budget (test/deploy get the long budget).
+    const timeoutMs = ctx.timeoutBudgetMsFor(entry.prompt_type);
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'executing' });
     if (shouldDecompose(entry.description)) {
       decomposition = await ctx.runDecomposedPrompt(
         { id: entry.id, name: entry.name, promptType: entry.prompt_type, index, description: entry.description },
         promptText,
         {
-          runClaude: (p) => ctx.runClaudeImpl(p, ctx.projectPath),
+          runClaude: (p) => ctx.runClaudeImpl(p, ctx.projectPath, timeoutMs),
           runSentinel: () => ctx.runSentinelImpl(sentinelOptions),
           commit: (message) => {
             const c = ctx.git.commitAll(message);
@@ -1413,7 +1617,7 @@ async function executePrompt(
         log(`prompt ${index} '${entry.id}': decomposed run not green — ${decomposition.note}`);
       }
     } else {
-      run = await ctx.runClaudeImpl(promptText, ctx.projectPath);
+      run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
       const commit = ctx.git.commitAll(`[FORGE] ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}).`);
       if (!commit.success) {
         log(`prompt ${index} '${entry.id}': commit failed — ${commit.error ?? 'unknown'}`);
@@ -1425,6 +1629,44 @@ async function executePrompt(
       // h. Run the Phase 4 Sentinel (the five Contract-13 checks).
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
     }
+
+    // Session 5 finding #14: a claude TIMEOUT is a failure regardless of what Sentinel finds —
+    // Sentinel only proves the code that exists doesn't obviously break, not that the prompt's
+    // work actually happened. A "silent" timeout (Sentinel reports PASS on a timed-out run) is
+    // overridden to a failure so every downstream reader (live status, Build Brain, the learning
+    // write-loop, the merge/recovery decision, the returned PromptOutcome) sees one consistent,
+    // honest outcome instead of a misleading green.
+    if (run.timedOut) sentinel = forceFailOnTimeout(sentinel, timeoutMs, entry, log, index);
+
+    // One automatic retry at 2x the budget before failing outright (autonomous recovery only) —
+    // a single timeout is often just an undersized budget for THIS prompt, not a real defect.
+    if (run.timedOut && ctx.autonomousRecoveryMode) {
+      const retryTimeoutMs = timeoutMs * 2;
+      log(
+        `prompt ${index} '${entry.id}': claude TIMEOUT — retrying once with 2x budget ` +
+          `(${Math.round(retryTimeoutMs / 1000)}s) before failing (Session 5 finding #14)`
+      );
+      await ctx.liveStatus.promptPhase(
+        { index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' },
+        `Timeout retry: re-running with 2x budget (${Math.round(retryTimeoutMs / 1000)}s)`
+      );
+      const retryRun = await ctx.runClaudeImpl(promptText, ctx.projectPath, retryTimeoutMs);
+      const retryCommit = ctx.git.commitAll(
+        `[FORGE] timeout-retry ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run with 2x timeout budget.`
+      );
+      if (!retryCommit.success) {
+        log(`prompt ${index} '${entry.id}': timeout-retry commit failed — ${retryCommit.error ?? 'unknown'}`);
+      }
+      let retrySentinel = await ctx.runSentinelImpl(sentinelOptions);
+      if (retryRun.timedOut) retrySentinel = forceFailOnTimeout(retrySentinel, retryTimeoutMs, entry, log, index);
+      run = retryRun;
+      sentinel = retrySentinel;
+      log(
+        `prompt ${index} '${entry.id}': timeout retry ` +
+          `${sentinel.passed ? 'succeeded — Sentinel green' : `still failing (${retryRun.timedOut ? 'timed out again' : sentinel.failedCheck ?? 'unknown'})`}.`
+      );
+    }
+
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'sentinel' });
     await ctx.liveStatus.sentinelResult({ passed: sentinel.passed, failedCheck: sentinel.failedCheck });
 
@@ -1458,6 +1700,8 @@ async function executePrompt(
     // prompt, rather than a generic retry. A successful brain fix is applied immediately and
     // does NOT count against autonomous-recovery's max_retries. Non-fatal throughout — Build
     // Brain unavailable/erroring falls back to the existing autonomous-recovery / escalation path.
+    // `sentinel.passed` already reflects the finding-#14 timeout override above, so a plain
+    // `!sentinel.passed` correctly covers both a genuine Sentinel failure and a silent timeout.
     const wasFailingInitially = !sentinel.passed;
     const initialErrorText = sentinel.diagnosticReport;
     const initialFailedCheck = sentinel.failedCheck;
@@ -1497,7 +1741,7 @@ async function executePrompt(
           `prompt ${index} '${entry.id}': Build Brain matched a known fix ` +
             `(confidence ${brainDiagnosis.confidence.toFixed(2)}) — applying targeted recovery`
         );
-        const fixRun = await ctx.runClaudeImpl(brainDiagnosis.recoveryPrompt, ctx.projectPath);
+        const fixRun = await ctx.runClaudeImpl(brainDiagnosis.recoveryPrompt, ctx.projectPath, timeoutMs);
         let recovered = false;
         if (fixRun.success) {
           ctx.git.commitAll(
@@ -1553,7 +1797,7 @@ async function executePrompt(
           !brainDiagnosis.escalate &&
           !ctx.failedSignaturesThisBuild.has(brainDiagnosis.signature);
         const textToRun = useBrainFix ? (brainDiagnosis as BrainDiagnosis).recoveryPrompt : promptText;
-        const r = await ctx.runClaudeImpl(textToRun, ctx.projectPath);
+        const r = await ctx.runClaudeImpl(textToRun, ctx.projectPath, timeoutMs);
         ctx.git.commitAll(`[FORGE] recovery ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run.`);
         return { success: r.success, output: `${r.stdout}\n${r.stderr}` };
       };
@@ -1603,6 +1847,7 @@ async function executePrompt(
       disposition,
       sentinel,
       tokens: run.tokensEstimated,
+      durationMs: Date.now() - promptStartedAt,
       errorOutput: sentinel.passed ? null : sentinel.diagnosticReport,
       changed,
       recovery,
@@ -1643,8 +1888,18 @@ async function executePrompt(
               `(${smokeResult.passedFiles}/${smokeResult.totalFiles} checks)`
           );
           if (!smokeResult.passed) {
-            const failing = smokeResult.results.filter((r) => !r.passed).map((r) => r.file);
-            log(`prompt ${index} '${entry.id}': smoke failures — ${failing.join(', ')}`);
+            const failing = smokeResult.results.filter((r) => !r.passed);
+            log(`prompt ${index} '${entry.id}': smoke failures — ${failing.map((r) => r.file).join(', ')}`);
+            // Session 5 finding #6: smoke-test failures are a learning signal too — one
+            // error_patterns/fix_patterns row PER failing check, not just Sentinel failures.
+            for (const r of failing) {
+              recordSmokeTestFailureObserved({
+                file: r.file,
+                errorText: r.error ?? r.output ?? 'smoke check failed',
+                projectName: ctx.projectName,
+                stackFingerprint: ctx.stackFingerprint,
+              }).catch((err) => log(`prompt ${index} '${entry.id}': recordSmokeTestFailureObserved non-fatal — ${describe(err)}`));
+            }
           }
         })
         .catch((smokeErr) => {
@@ -1669,7 +1924,8 @@ async function executePrompt(
     );
     if (decomposition?.decomposed) note = `${note} (${decomposition.note})`;
 
-    log(`prompt ${index} '${entry.id}': ${disposition} — ${note}`);
+    const durationMs = Date.now() - promptStartedAt;
+    log(`prompt ${index} '${entry.id}': ${disposition} — ${note} (${humanDuration(durationMs)})`);
     return {
       index,
       id: entry.id,
@@ -1684,6 +1940,7 @@ async function executePrompt(
       promptHash,
       promptExecutionId,
       tokensEstimated: run.tokensEstimated,
+      durationMs,
       sentinel,
       recovery,
       note,
@@ -1691,6 +1948,7 @@ async function executePrompt(
   } catch (error) {
     // Defensive: the collaborators never throw, but if one does, fail this prompt (don't crash).
     // Not a claude-runner timeout (the error happened in FORGE's own orchestration) — timedOut: false.
+    const durationMs = Date.now() - promptStartedAt;
     const note = `Unexpected error executing prompt ${index} '${entry.id}': ${describe(error)}`;
     ctx.log(`ERROR: ${note}`);
     return {
@@ -1707,6 +1965,7 @@ async function executePrompt(
       promptHash: '',
       promptExecutionId: null,
       tokensEstimated: 0,
+      durationMs,
       sentinel: null,
       recovery: null,
       note,
@@ -1757,6 +2016,7 @@ async function dryRunPrompt(
     promptHash,
     promptExecutionId: null,
     tokensEstimated: tokens,
+    durationMs: 0,
     sentinel: null,
     recovery: null,
     note: `Dry run — assembled + predicted (p=${probability === null ? 'n/a' : probability.toFixed(3)}), not executed.`,
@@ -1877,6 +2137,7 @@ function skippedOutcome(entry: QueueEntry, index: number, note: string): PromptO
     promptHash: '',
     promptExecutionId: null,
     tokensEstimated: 0,
+    durationMs: 0,
     sentinel: null,
     recovery: null,
     note,
@@ -2093,6 +2354,7 @@ async function finalizePromptExecution(
     disposition: PromptDisposition;
     sentinel: SentinelResult;
     tokens: number;
+    durationMs: number;
     errorOutput: string | null;
     changed: { created: string[]; modified: string[]; deleted: string[] };
     recovery: AutoRecoveryResult | null;
@@ -2109,6 +2371,7 @@ async function finalizePromptExecution(
     await ctx.updatePromptExecution(promptExecutionId, {
       status: data.disposition === 'completed' ? 'completed' : 'failed',
       completed_at: nowIso(),
+      duration_ms: data.durationMs,
       tokens_output: data.tokens,
       sentinel_passed: data.sentinel.passed,
       sentinel_details: sentinelDetails,
@@ -2135,7 +2398,7 @@ async function finalizePromptExecution(
 async function defaultUpdateStateProgress(governanceDir: string, line: string): Promise<void> {
   const target = join(governanceDir, 'STATE_OF_THE_BUILD.md');
   try {
-    await appendFile(target, `\n> ${nowIso()} ${line}\n`, 'utf8');
+    await appendFile(target, toAsciiGovernanceText(`\n> ${nowIso()} ${line}\n`), 'utf8');
   } catch {
     /* non-fatal — the state document update must never block the build */
   }
@@ -2186,7 +2449,7 @@ async function defaultWriteHaltReport(projectPath: string, report: string): Prom
   const dir = join(projectPath, 'state');
   try {
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, 'halt-reason.md'), report, 'utf8');
+    await writeGovernanceFile(join(dir, 'halt-reason.md'), report);
   } catch {
     /* non-fatal */
   }

@@ -194,6 +194,138 @@ export async function recordFailureObserved(ctx: FailureContext): Promise<Failur
   };
 }
 
+// ---------------------------------------------------------------------------
+// Session 5 finding #6 / #15 — learn from smoke-test failures + adversary blockers too, not just
+// Sentinel failures. Both feed the SAME `recordFailureObserved` seed path (src/memory
+// error_patterns + learning-schema fix_patterns) so the rest of the write-loop (auto-elevation,
+// warnings injection) sees them exactly like any other failure signature.
+// ---------------------------------------------------------------------------
+
+/** Build a signature-safe token from a smoke-test file id (e.g. `page:/dashboard` -> `page-dashboard`). Slashes read as filesystem paths to `normalizeErrorSignature` and would otherwise collapse every page onto one signature (`<path>`), destroying the "per failing page" distinction. */
+function smokeFileSignatureToken(file: string): string {
+  const token = file.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return token.length > 0 ? token : 'unknown';
+}
+
+export interface SmokeFailureContext {
+  /** The failing check's id, e.g. `page:/dashboard`, `compile:tsc --noEmit`, `build:pnpm run build`. */
+  file: string;
+  /** The captured error/output for this specific check. */
+  errorText: string;
+  projectName: string;
+  stackFingerprint: StackFingerprint | null | undefined;
+}
+
+/** Record a single failing smoke-test check (Session 5 finding #6) — one signature PER failing page/check. */
+export async function recordSmokeTestFailureObserved(ctx: SmokeFailureContext): Promise<FailureObservedResult> {
+  const token = smokeFileSignatureToken(ctx.file);
+  return recordFailureObserved({
+    errorText: `smoke test failure for check ${token}: ${ctx.errorText}`,
+    failedCheck: null,
+    promptType: 'test',
+    projectName: ctx.projectName,
+    stackFingerprint: ctx.stackFingerprint,
+  });
+}
+
+export interface AdversaryBlockerContext {
+  /** The adversary vector (SCHEMA/SECURITY/SCALE/INTEGRATION/UX/ARCH/DATA). */
+  vector: string;
+  /** The adversary phase this blocker was raised in (ARCHITECT_PRD, ARCHITECT_GOVERNANCE, …). */
+  phase: string;
+  specificIssue: string;
+  evidence: string;
+  recommendedFix: string;
+  projectName: string;
+}
+
+/** Map an adversary vector to the src/memory `error_patterns.error_category` enum. */
+function errorCategoryForVector(vector: string): ErrorCategory {
+  switch (vector) {
+    case 'SECURITY':
+      return 'auth';
+    case 'SCHEMA':
+    case 'DATA':
+      return 'schema';
+    case 'ARCH':
+      return 'build_failure';
+    default:
+      return 'runtime'; // SCALE, INTEGRATION, UX
+  }
+}
+
+/** Map an adversary vector to the learning-schema `fix_patterns.error_category` enum. */
+function learningCategoryForVector(
+  vector: string
+): 'COMPILE' | 'RUNTIME' | 'TEST' | 'LINT' | 'SECURITY' | 'SCHEMA' | 'DEPLOY' {
+  switch (vector) {
+    case 'SECURITY':
+      return 'SECURITY';
+    case 'SCHEMA':
+    case 'DATA':
+      return 'SCHEMA';
+    case 'ARCH':
+      return 'COMPILE';
+    default:
+      return 'RUNTIME'; // SCALE, INTEGRATION, UX
+  }
+}
+
+/**
+ * Record one adversarial-review BLOCKER finding (Session 5 finding #6/#2) — one signature PER
+ * vector+phase so a recurring class of blocker (e.g. every ARCHITECT_GOVERNANCE SECURITY finding)
+ * is visible to the same compounding write-loop Sentinel failures already feed. Guarded — never
+ * throws; a Build Memory failure here must never block the CLI's halt/accept-blockers decision.
+ */
+export async function recordAdversaryBlockerObserved(ctx: AdversaryBlockerContext): Promise<FailureObservedResult> {
+  const signature = normalizeErrorSignature(
+    `adversary blocker vector ${ctx.vector} phase ${ctx.phase}: ${ctx.specificIssue}`
+  );
+  const category = errorCategoryForVector(ctx.vector);
+  const sample = `[${ctx.vector}] ${ctx.specificIssue}\nEvidence: ${ctx.evidence}\nRecommended fix: ${ctx.recommendedFix}`;
+
+  let errorPattern: ErrorPattern | null = null;
+  try {
+    const existing = await BuildMemory.errors.findMatchingPattern(signature);
+    if (existing) {
+      errorPattern = await BuildMemory.errors.updateOccurrenceCount(existing.id);
+    } else {
+      errorPattern = await BuildMemory.errors.createErrorPattern({
+        error_signature: signature,
+        error_category: category,
+        error_message_sample: sample.slice(0, 500),
+        first_seen_project: ctx.projectName,
+        trigger_phase: ctx.phase,
+        trigger_prompt_pattern: ctx.vector,
+      } as Parameters<typeof BuildMemory.errors.createErrorPattern>[0]);
+    }
+  } catch (error) {
+    log(`WARNING: adversary-blocker error_patterns write degraded (${error instanceof Error ? error.message : String(error)})`);
+  }
+
+  try {
+    captureError(
+      {
+        errorCode: category,
+        filePath: '',
+        errorMessage: sample.slice(0, 300),
+        errorCategory: learningCategoryForVector(ctx.vector),
+        techStack: [],
+      },
+      undefined
+    );
+  } catch (error) {
+    log(`WARNING: adversary-blocker fix_patterns write degraded (${error instanceof Error ? error.message : String(error)})`);
+  }
+
+  return {
+    signature,
+    category,
+    errorPattern,
+    occurrenceCount: errorPattern?.occurrence_count ?? 1,
+  };
+}
+
 export interface RecoveryContext extends FailureContext {
   /** Whether the recovery attempt actually turned Sentinel green. */
   recovered: boolean;

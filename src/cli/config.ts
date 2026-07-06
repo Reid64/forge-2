@@ -236,7 +236,20 @@ export function describeConfig(config: EnvConfig): string {
 
 export interface ForgeConfig {
   version: string;
-  build: { model: string; maxRetries: number; parallelism: number; timeoutMinutes: number };
+  build: {
+    model: string;
+    maxRetries: number;
+    parallelism: number;
+    /** Default per-prompt claude timeout budget, in minutes (Session 5 finding #14). */
+    timeoutMinutes: number;
+    /**
+     * Timeout budget for prompt types whose work is inherently slower (`test`, `deploy` —
+     * running a full test suite or a deploy sequence takes longer than average generation).
+     * Session 5 finding #14: a claude TIMEOUT is a failure regardless of what Sentinel later
+     * finds, so an undersized budget for these types would manufacture false failures.
+     */
+    longTimeoutMinutes: number;
+  };
   sentinel: { ring1OnEveryPrompt: boolean; ring2EveryNthPrompt: number; ring3OnRunEnd: boolean; eslintConfig: string; coverageThreshold: number };
   learning: { dbPath: string; syncEnabled: boolean; syncMasterPath: string | null; adversarialReview: boolean; selfModification: boolean };
   deploy: { provider: string; canaryEnabled: boolean; rollbackOnFailure: boolean; healthCheckPath: string };
@@ -245,7 +258,7 @@ export interface ForgeConfig {
 
 export const DEFAULT_FORGE_CONFIG: ForgeConfig = {
   version: '2.0',
-  build: { model: 'claude-sonnet-4-6', maxRetries: 3, parallelism: 1, timeoutMinutes: 15 },
+  build: { model: 'claude-sonnet-4-6', maxRetries: 3, parallelism: 1, timeoutMinutes: 15, longTimeoutMinutes: 30 },
   sentinel: { ring1OnEveryPrompt: true, ring2EveryNthPrompt: 10, ring3OnRunEnd: true, eslintConfig: 'next/core-web-vitals', coverageThreshold: 60 },
   learning: { dbPath: '~/.forge/forge_memory.db', syncEnabled: false, syncMasterPath: null, adversarialReview: true, selfModification: true },
   deploy: { provider: 'vercel', canaryEnabled: true, rollbackOnFailure: true, healthCheckPath: '/api/health' },

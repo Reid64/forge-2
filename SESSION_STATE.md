@@ -1,9 +1,74 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: REBUILD Session 4 of 4 — Intelligence & Observability — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4 all delivered and verified)
+## Current Session: Session 5 — Field Hardening — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-06 (Learning write-loop closed + Build Brain + live observability + compounding proven end-to-end; schema 2.1.0 unchanged)
+## Last Updated: 2026-07-06 (all 16 dialtest findings fixed and verified; schema 2.1.0 -> 2.2.0)
+
+---
+
+## Session 5 — Field Hardening (2026-07-06) — COMPLETE
+
+**Objective:** fix the 16 defects the first real build (dialtest) exposed instead of more
+synthetic verification: ~8 silent FORGE process deaths with zero forensics, 2 claude timeouts
+marked `completed` because Sentinel still passed on unfinished work, and 4 adversarial-review
+BLOCKER findings that were surfaced but never actually stopped anything.
+
+**Schema version:** `2.1.0` -> **`2.2.0`** (`prompt_executions.duration_ms` added via a guarded
+`ALTER TABLE ... ADD COLUMN` — safe against a live db, no CHECK-constraint/table rebuild).
+
+**Findings fixed (see STATE_OF_THE_BUILD.md for full detail on each):**
+1. Silent process death (~8x) — detached `claude` spawn (own process group) +
+   `src/tools/death-forensics.ts` (death-report.md on uncaughtException/unhandledRejection/exit,
+   stale `forge_running.lock` detection at startup).
+2. Timeout != completion (2x) — `forceFailOnTimeout()` forces `disposition: 'failed'` on a silent
+   timeout regardless of Sentinel; one 2x-budget retry under `--autonomous-recovery`; per-type
+   timeout budgets (900s default, 1800s test/deploy), configurable via `forge_config.json`.
+3. Adversary blockers built anyway (4x) — `src/cli/adversary-gate.ts`: any BLOCKER halts (writes
+   `state/halt-reason.md`) even in autonomous mode; `--accept-blockers`/`--auto-approve-gates` are
+   the explicit overrides, separate from `--autonomous-recovery` (Contract 14 self-heal ONLY).
+4. Design phases could route to a non-Claude provider — `provider-router.ts`'s
+   `complex_reasoning` pinned to `['anthropic']` only (was `['gemini', 'deepseek', 'openai',
+   'anthropic']` — Gemini led the chain for every Phase 1A/1B call).
+5. No git init on greenfield — `ensureGitRepo()` runs as Phase 0 step 0; Sentinel's File
+   Integrity check now WARNs at actual Pino warn level (not info) when git is absent.
+6. Only Sentinel failures were learned from — `recordSmokeTestFailureObserved` (per failing
+   page) + `recordAdversaryBlockerObserved` (per vector) added to the learning write-loop.
+7. `forge status <path>` misparsed the path as a build id — `looksLikeProjectPath` (new
+   `src/tools/path-heuristics.ts`) routes a path-shaped argument to `--project` instead.
+8. No clock time / persistent logs — per-prompt + running-build-total duration (console +
+   `live-status.json` + new `prompt_executions.duration_ms`); every build's log tee'd to
+   `.forge/logs/build_<timestamp>.log`.
+9. No infra-provisioning policy — `QueueEntry.infra`/`ArchitectureDesign.infraMode` +
+   `determineInfraMode()` (cloud only with real creds already configured, else local — the
+   sanctioned default; local infra commands like `supabase start` are SANCTIONED, not a violation).
+   Recorded in BLUEPRINT.md.
+10. 4 phantom agents — AgentArchitecture instruction rewritten: defines what counts as an agent,
+    states explicitly that a simple app has ZERO agents and an empty array is correct.
+11. Six Laws Law 1 ignored an explicit single-tenant declaration — both `phase1a-prd.ts`'s
+    governance check and `phase1b-architect.ts`'s system prompt now detect it and skip
+    company/tenant scaffolding for that build.
+12. Mojibake in governance writes — new `src/tools/governance-text.ts` sanitizes ✅❌⚠️→—""''… and
+    box-drawing to ASCII before every governance/state file write.
+
+**Files created:** `src/tools/death-forensics.ts`, `src/tools/governance-text.ts`,
+`src/tools/path-heuristics.ts`, `src/cli/adversary-gate.ts`, `scripts/verify-hardening.mjs`.
+
+**Verification:** `pnpm tsc --noEmit` -> 0 errors * `pnpm test` -> 35/35 PASS * extended
+`scripts/verify-compounding.mjs` (timeout-forces-failure + adversary-blocker-halt, both PASS) *
+new `scripts/verify-hardening.mjs` (stale-lock, death-report, per-type timeout budgets + config
+override, git-init-on-greenfield, status path heuristic, infra-mode logging — all PASS) *
+`verify-memory.mjs`/`verify-design-wiring.mjs`/`verify-autonomy.mjs` still green * `forge health`
+-> schema 2.2.0, 17/17 wiring checks WIRED (3 new: design-model pinning, death forensics,
+git-init on greenfield).
+
+**Known pre-existing issue, out of scope:** `tests/memory.test.ts` (untouched since 2026-06-11,
+predates Session 1's Supabase->SQLite rewrite) fails 11/11 on `client.from is not a function` —
+not part of the tracked learning suite, not caused by or in scope of this session.
+
+**Next action:** Session 6 — retrofit verification against a real target project (run FORGE on a
+small greenfield test project to prove the hardening holds under a genuine `claude` subprocess)
++ Cordial resurrection.
 
 ---
 

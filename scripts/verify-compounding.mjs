@@ -293,6 +293,137 @@ assert(
 );
 
 // ---------------------------------------------------------------------------
+// (4) Session 5 finding #14 — a claude TIMEOUT must fail the prompt regardless of a passing
+// Sentinel, and (finding #6/#15) that timeout must seed a distinct, prompt-type-scoped
+// error_patterns signature just like any other failure.
+// ---------------------------------------------------------------------------
+
+const timeoutEntries = () => [
+  {
+    id: 'timeout-prompt',
+    name: 'Prompt that always times out',
+    prompt_type: 'schema',
+    dependencies: [],
+    governance_refs: [],
+    estimated_tokens: 500,
+    context_injection: { schemaSections: [], behavioralSections: [], interactionMaps: [] },
+    description: 'Simulates a claude-runner timeout on a prompt whose Sentinel would otherwise pass.',
+  },
+];
+
+// The claude-runner fake ALWAYS times out (both the initial run AND the one 2x-budget retry
+// Session 5 finding #14 grants under autonomous recovery), so the final disposition must be
+// 'failed' even though Sentinel below reports PASS every single time it's asked.
+const claudeAlwaysTimesOutFake = async (_prompt, _cwd, _timeoutMs) => ({
+  stdout: '',
+  stderr: '',
+  exitCode: null,
+  durationMs: 5,
+  tokensEstimated: 20,
+  timedOut: true,
+  signal: null,
+  success: false,
+});
+const sentinelAlwaysPassFake = async (_options) => ({
+  passed: true,
+  checks: [{ name: 'typescript', passed: true, skipped: false, detail: 'ok', output: '', durationMs: 5 }],
+  failedCheck: null,
+  diagnosticReport: '# Sentinel PASS (but the run timed out — this must NOT count as completed)',
+});
+const runRecoveryImplNoRecoverFake = async (failedSentinel, _rerunPrompt, _sentinelOptions) => ({
+  enabled: true,
+  attempted: true,
+  recovered: false,
+  escalated: true,
+  attempts: [],
+  finalSentinel: failedSentinel,
+  reason: 'test: autonomous recovery could not resolve a persistent timeout',
+});
+
+const buildD = await runPhase3Executor({
+  projectPath,
+  projectName: PROJECT_NAME,
+  entries: timeoutEntries(),
+  stackFingerprint: null,
+  autonomousRecoveryMode: true,
+  dryRun: false,
+  gitManager: makeGitFake(),
+  runClaudeImpl: claudeAlwaysTimesOutFake,
+  runSentinelImpl: sentinelAlwaysPassFake,
+  runRecoveryImpl: runRecoveryImplNoRecoverFake,
+  predictImpl: predictImplFake,
+  log: () => {},
+});
+
+const timeoutOutcome = buildD.outcomes.find((o) => o.id === 'timeout-prompt');
+assert(timeoutOutcome !== undefined, 'build D produced an outcome for timeout-prompt');
+assert(
+  timeoutOutcome?.disposition === 'failed',
+  `a claude TIMEOUT forces disposition 'failed' even though Sentinel reported PASS (got '${timeoutOutcome?.disposition}')`
+);
+assert(timeoutOutcome?.timedOut === true, 'the outcome reports timedOut: true');
+assert(buildD.status !== 'completed', `build D's overall status is not 'completed' (got '${buildD.status}')`);
+
+const timeoutPattern = getConnection()
+  .prepare("SELECT * FROM error_patterns WHERE error_message_sample LIKE '%TIMEOUT%' AND error_message_sample LIKE '%schema%'")
+  .get();
+assert(
+  timeoutPattern !== undefined,
+  'a distinct error_patterns row was seeded for the timeout, scoped to its prompt type (schema)'
+);
+
+// ---------------------------------------------------------------------------
+// (5) Session 5 finding #2/#6 — an adversarial-review BLOCKER halts the pipeline (writes
+// state/halt-reason.md) and is recorded as a learning signal; --accept-blockers overrides it.
+// ---------------------------------------------------------------------------
+
+const { checkAdversaryBlockers } = await import('../dist/cli/adversary-gate.js');
+const { existsSync, readFileSync: readFileSyncNode } = await import('node:fs');
+
+const blockerReview = {
+  phase: 'ARCHITECT_GOVERNANCE',
+  findings: [
+    {
+      severity: 'BLOCKER',
+      vector: 'SECURITY',
+      specificIssue: 'RLS policy missing on a user-data table',
+      evidence: 'table `invoices` has no row-level-security policy',
+      recommendedFix: 'add a company-scoped RLS policy',
+    },
+  ],
+  blockers: [
+    {
+      severity: 'BLOCKER',
+      vector: 'SECURITY',
+      specificIssue: 'RLS policy missing on a user-data table',
+      evidence: 'table `invoices` has no row-level-security policy',
+      recommendedFix: 'add a company-scoped RLS policy',
+    },
+  ],
+  significant: [],
+  minor: [],
+  canProceed: false,
+  reviewedAt: new Date(0).toISOString(),
+  tokensUsed: 0,
+};
+
+const haltReasonPath = join(projectPath, 'state', 'halt-reason.md');
+const proceededWithoutOverride = await checkAdversaryBlockers(projectPath, 'ARCHITECT_GOVERNANCE', blockerReview, false);
+assert(proceededWithoutOverride === false, 'a BLOCKER finding halts (checkAdversaryBlockers returns false) without --accept-blockers');
+assert(existsSync(haltReasonPath), 'state/halt-reason.md was written on halt');
+const haltReasonContent = readFileSyncNode(haltReasonPath, 'utf8');
+assert(haltReasonContent.includes('SECURITY'), 'halt-reason.md includes the blocking vector');
+assert(haltReasonContent.includes('RLS policy missing'), 'halt-reason.md includes the specific issue');
+
+const blockerPattern = getConnection()
+  .prepare("SELECT * FROM error_patterns WHERE error_message_sample LIKE '%RLS policy missing%'")
+  .get();
+assert(blockerPattern !== undefined, 'the adversary BLOCKER was recorded as a learning signal (error_patterns row)');
+
+const proceededWithOverride = await checkAdversaryBlockers(projectPath, 'ARCHITECT_GOVERNANCE', blockerReview, true);
+assert(proceededWithOverride === true, '--accept-blockers (acceptBlockers=true) overrides the halt and proceeds');
+
+// ---------------------------------------------------------------------------
 
 try {
   rmSync(tmpHome, { recursive: true, force: true });

@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '2.1.0';
+export const CURRENT_SCHEMA_VERSION = '2.2.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -139,6 +139,7 @@ const BUILD_MEMORY_SCHEMA_SQL = `
       status                     TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','skipped')),
       started_at                 TEXT,
       completed_at                TEXT,
+      duration_ms                 INTEGER,
       tokens_input                 INTEGER NOT NULL DEFAULT 0,
       tokens_output                INTEGER NOT NULL DEFAULT 0,
       cost_usd                    REAL NOT NULL DEFAULT 0,
@@ -617,6 +618,14 @@ export function initializeForgeMemory(dbPath?: string): void {
   db.exec(BUILD_MEMORY_SCHEMA_SQL);
   // 2.0.0 -> 2.1.0 (Session 3 — Autonomy): prompt-library versioning.
   db.exec(QUEUE_VERSIONING_SCHEMA_SQL);
+  // 2.1.0 -> 2.2.0 (Session 5 — Field Hardening): per-prompt duration tracking for the cost
+  // estimator. ALTER TABLE ADD COLUMN (unlike a CHECK-constraint change) is safe to run against a
+  // live db with data; guarded because SQLite errors if the column already exists.
+  try {
+    db.exec('ALTER TABLE prompt_executions ADD COLUMN duration_ms INTEGER');
+  } catch {
+    /* column already present — idempotent across repeated init calls */
+  }
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

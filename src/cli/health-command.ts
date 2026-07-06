@@ -239,6 +239,23 @@ export async function gatherHealthReport(): Promise<HealthReport> {
       wired: isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'LiveStatusWriter'),
       detail: 'src/phases/phase3-executor.ts writes .forge/live-status.json (src/tools/live-status.ts) at every prompt lifecycle point.',
     },
+    {
+      capability: 'design-model pinning',
+      wired: isReferencedIn(forgeRoot, 'src/engine/provider-router.ts', "complex_reasoning: ['anthropic']"),
+      detail: "src/engine/provider-router.ts pins DEFAULT_ROUTES.complex_reasoning to ['anthropic'] only (Phase 1A/1B/adversarial review never route to a non-Claude provider).",
+    },
+    {
+      capability: 'death forensics',
+      wired:
+        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'installDeathForensics') &&
+        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'checkStaleLock'),
+      detail: 'src/phases/phase3-executor.ts installs process-death handlers (src/tools/death-forensics.ts) and checks for a stale forge_running.lock at startup.',
+    },
+    {
+      capability: 'git-init on greenfield',
+      wired: isReferencedIn(forgeRoot, 'src/phases/phase0-scout.ts', 'ensureGitRepo'),
+      detail: 'src/phases/phase0-scout.ts runs git init + an initial commit when the target project has no .git (Contract 10/11/12 never silently no-op on a greenfield project).',
+    },
   ];
 
   const queueVersionsCount = tableRowCount('queue_versions');

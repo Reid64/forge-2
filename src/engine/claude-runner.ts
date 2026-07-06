@@ -152,6 +152,12 @@ export function runClaude(
         env,
         shell: useShell,
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Detached + its own process group (Windows: its own console group, hidden via
+        // windowsHide): a crash/signal delivered to this child can never propagate back and
+        // kill the FORGE parent process (Session 5 finding #13 — ~8 silent FORGE deaths traced
+        // to exactly this). We still await 'close' below (no unref()), so reporting is unchanged.
+        detached: true,
+        windowsHide: true,
       });
     } catch (error) {
       // Synchronous spawn failure (rare) — report, never throw.

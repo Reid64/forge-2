@@ -185,9 +185,16 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
  * Task type → ordered provider preference (preferred first, then the failover chain). The first
  * entry encodes the spec's role for each provider; the tail keeps FORGE working when the
  * preferred provider has no key / is rate-limited / has spent its free tier.
+ *
+ * `complex_reasoning` is PINNED to `anthropic` alone — Session 5 finding #1: this task type is
+ * used by Phase 1A (PRD), every Phase 1B artifact, and adversarial review, and a design phase
+ * silently routed to a cheaper/weaker model (previously Gemini Flash-Lite led this chain) produces
+ * governance a human never actually reviewed against Claude's judgment. Cost-optimized failover
+ * across providers is fine for the mechanical tiers below (`validation`, `simple_analysis`,
+ * `documentation`, `research_verification`, `code_review`, `pattern_matching`) — never for design.
  */
 export const DEFAULT_ROUTES: Record<ForgeTaskType, ProviderName[]> = {
-  complex_reasoning: ['gemini', 'deepseek', 'openai', 'anthropic'],
+  complex_reasoning: ['anthropic'],
   validation: ['openai', 'gemini', 'anthropic', 'deepseek'],
   simple_analysis: ['openai', 'gemini', 'deepseek', 'anthropic'],
   documentation: ['gemini', 'openai', 'anthropic', 'deepseek'],

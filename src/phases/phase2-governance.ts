@@ -61,6 +61,7 @@ import { readCodebase } from '../tools/codebase-reader.js';
 import type { CodebaseSnapshot } from '../tools/codebase-reader.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
+import { toAsciiGovernanceText } from '../tools/governance-text.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -1205,7 +1206,9 @@ async function renderAndWrite(
   ctx: RenderWriteContext
 ): Promise<InternalDocResult> {
   const { template, source } = await loadTemplate(doc, ctx.templatesDir, ctx.warnings);
-  const { content, missing } = applyTemplate(template, vars);
+  const applied = applyTemplate(template, vars);
+  const missing = applied.missing;
+  const content = toAsciiGovernanceText(applied.content);
   const contentHash = sha256(content);
   const bytes = Buffer.byteLength(content, 'utf8');
 

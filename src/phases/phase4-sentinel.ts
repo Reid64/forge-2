@@ -107,7 +107,7 @@ import type { DeadCodeReport } from '../tools/dead-code-scanner.js';
 import { runSixLawsCheck } from '../engine/governance-gate.js';
 import type { SixLawsResult } from '../analysis/six-laws-verifier.js';
 import { BuildMemory } from '../memory/index.js';
-import { logLine } from '../tools/forge-logger.js';
+import { getLogger, logLine } from '../tools/forge-logger.js';
 import { initializeForgeMemory } from '../learning/database.js';
 import { registerError } from '../learning/queries.js';
 
@@ -689,12 +689,19 @@ async function defaultGetFileChanges(cwd: string, log: (m: string) => void): Pro
   try {
     const { stdout } = await execAsync('git branch --list main', { cwd, windowsHide: true });
     if (String(stdout ?? '').trim() === '') {
-      log('WARNING: no `main` branch exists — skipping File Integrity check (git diff main...HEAD not runnable)');
+      const msg = 'no `main` branch exists — skipping File Integrity check (git diff main...HEAD not runnable)';
+      log(`WARNING: ${msg}`);
+      // Session 5 finding #3/#5: git absence must WARN LOUDLY (actual Pino warn level), not sit
+      // at the same info level as routine progress lines — Contract 10/11/12 (branch isolation,
+      // checkpoints, rollback) are ALL silently no-op-ing for this build without a repo.
+      getLogger('sentinel').warn({ contract: ['10', '11', '12'] }, msg);
       return null;
     }
   } catch (error) {
     // git unavailable / not a repo — also un-evaluable; skip rather than fail.
-    log(`WARNING: could not check for a \`main\` branch (${describe(error)}) — skipping File Integrity check`);
+    const msg = `could not check for a \`main\` branch (${describe(error)}) — skipping File Integrity check`;
+    log(`WARNING: ${msg}`);
+    getLogger('sentinel').warn({ contract: ['10', '11', '12'] }, msg);
     return null;
   }
 

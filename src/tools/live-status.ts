@@ -44,6 +44,8 @@ export interface LiveStatusTotals {
   remaining: number;
   tokensEstimated: number;
   costEstimatedUsd: number;
+  /** Running sum of every completed prompt's wall-clock duration, in ms (Session 5 finding #12/#7). */
+  totalElapsedMs: number;
 }
 
 export interface LiveStatusSentinel {
@@ -106,7 +108,7 @@ export class LiveStatusWriter {
       startedAt: now,
       updatedAt: now,
       currentPrompt: null,
-      totals: { completed: 0, failed: 0, remaining: totalPrompts, tokensEstimated: 0, costEstimatedUsd: 0 },
+      totals: { completed: 0, failed: 0, remaining: totalPrompts, tokensEstimated: 0, costEstimatedUsd: 0, totalElapsedMs: 0 },
       lastSentinel: null,
       recentEvents: [],
       brainInterventions: 0,

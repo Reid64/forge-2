@@ -1014,6 +1014,13 @@ const GOVERNANCE_CHECKS: ReadonlyArray<{
   {
     rule: 'Six Laws SCHEMA — company_id scoping on multi-tenant entities',
     test: (prd) => {
+      // Session 5 finding #9: an EXPLICIT single-tenant declaration means Six Laws Law 1 (tenant
+      // scoping) does not apply — without this, a PRD that says "single-tenant, no organizations"
+      // was flagged as a violation because "tenant"/"organization" appear in the very sentence
+      // DENYING multi-tenancy. Checked first so it always wins over the generic tenant-word match.
+      if (/\b(single[\s-]?tenant|single[\s-]?organi[sz]ation|not multi[\s-]?tenant|no multi[\s-]?tenancy)\b/i.test(prd)) {
+        return true;
+      }
       const hasTenant = /\b(?:company|tenant|organization|workspace)\b/i.test(prd);
       const hasScope = /\bcompany_id\b|\btenant_id\b|\borg_id\b/i.test(prd);
       return !hasTenant || hasScope;

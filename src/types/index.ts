@@ -80,6 +80,8 @@ export interface PromptExecution {
   status: PromptExecutionStatus;
   started_at: string | null;
   completed_at: string | null;
+  /** Wall-clock duration of this prompt's execution, in ms (Session 5 finding #12 / #7). */
+  duration_ms: number | null;
   tokens_input: number;
   tokens_output: number;
   cost_usd: number;

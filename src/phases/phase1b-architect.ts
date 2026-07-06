@@ -57,7 +57,8 @@
  * logged or returned. No secrets from the target project are read here.
  */
 
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, readFile } from 'node:fs/promises';
+import { writeGovernanceFile } from '../tools/governance-text.js';
 import { join, basename } from 'node:path';
 
 import { runAdversarialReview } from '../analysis/adversarial-review.js';
@@ -462,6 +463,15 @@ export interface ArchitectureDesign {
   crossValidation: ValidationIssue[];
   /** True when a ConstraintManifest (partial build) shaped the design. */
   constrained: boolean;
+  /**
+   * Infra-provisioning policy (Session 5 finding #16): `local` (default for greenfield/test
+   * projects — agents MAY run local infra commands like `supabase start` on non-colliding ports)
+   * or `cloud` (use the creds already configured in `.env.local`; missing creds skip-with-warning,
+   * never provision). Recorded in BLUEPRINT.md so the decision is governed, not improvised per prompt.
+   */
+  infraMode: 'local' | 'cloud';
+  /** Why {@link infraMode} was chosen (e.g. which env vars were/weren't found). */
+  infraModeReason: string;
   /** True when a project design system was generated and injected into the UI prompts. */
   designSystemGenerated: boolean;
   /** Absolute path DESIGN_SYSTEM.md was written to, or `null` if skipped/failed. */
@@ -1124,6 +1134,74 @@ function renderConstraints(manifest: ConstraintManifest): string {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Infra-provisioning policy (Session 5 finding #16)
+// ---------------------------------------------------------------------------
+
+/** Cloud-credential env-var pairs FORGE recognizes (either pair present -> cloud infra). */
+const CLOUD_CRED_VAR_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+  ['FORGE_SUPABASE_URL', 'FORGE_SUPABASE_SERVICE_KEY'],
+];
+
+/** True for an empty/placeholder-looking value (`your-...`, `xxx`, `<...>`, `changeme`, …). */
+function looksLikeRealCredential(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const trimmed = value.trim();
+  if (trimmed === '') return false;
+  return !/^(your|xxx|placeholder|changeme|<)/i.test(trimmed);
+}
+
+/**
+ * Decide the infra-provisioning mode (Session 5 finding #16): `cloud` when real credentials are
+ * already configured (`.env.local`, `.env`, or the process environment); otherwise `local` — the
+ * sanctioned default for greenfield/test builds, where an agent MAY run local infra commands
+ * (e.g. `supabase start` on a non-colliding port) itself rather than skip. Never provisions
+ * anything itself; this only decides which POLICY gets recorded for Phase 3 prompts to follow.
+ * Guarded — a missing/unreadable env file just means fewer candidates were checked.
+ */
+export async function determineInfraMode(
+  projectPath: string,
+  log: (message: string) => void
+): Promise<{ mode: 'local' | 'cloud'; reason: string }> {
+  const combined: Record<string, string | undefined> = { ...process.env };
+  for (const fileName of ['.env.local', '.env']) {
+    try {
+      const text = await readFile(join(projectPath, fileName), 'utf8');
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (line === '' || line.startsWith('#')) continue;
+        const eq = line.indexOf('=');
+        if (eq === -1) continue;
+        const key = line.slice(0, eq).trim();
+        let value = line.slice(eq + 1).trim();
+        if (
+          value.length >= 2 &&
+          ((value[0] === '"' && value[value.length - 1] === '"') || (value[0] === "'" && value[value.length - 1] === "'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+        if (key !== '' && combined[key] === undefined) combined[key] = value;
+      }
+    } catch {
+      /* file absent/unreadable — try the next candidate */
+    }
+  }
+
+  for (const [urlVar, keyVar] of CLOUD_CRED_VAR_PAIRS) {
+    if (looksLikeRealCredential(combined[urlVar]) && looksLikeRealCredential(combined[keyVar])) {
+      const reason = `${urlVar} + ${keyVar} are configured (.env.local/.env/environment) — using cloud infra.`;
+      log(`infra mode: cloud (${reason})`);
+      return { mode: 'cloud', reason };
+    }
+  }
+  const reason =
+    'no cloud credentials found in .env.local/.env/environment — defaulting to local infra ' +
+    '(greenfield/test default; agents may run local infra commands, e.g. `supabase start` on a non-colliding port).';
+  log(`infra mode: local (${reason})`);
+  return { mode: 'local', reason };
+}
+
 /** Seed the running "design state" with the manifest's immutable names (artifact #1 awareness). */
 function seedStateFromManifest(manifest: ConstraintManifest): string {
   const m = manifest.immutable;
@@ -1169,8 +1247,25 @@ function summarizeInfra(inf: InfraArchitecture): string {
 // ---------------------------------------------------------------------------
 
 
+/**
+ * Session 5 finding #9: detect an EXPLICIT single-tenant declaration in the PRD so Six Laws Law 1
+ * (company/tenant scoping) can be skipped rather than forced onto a product that says outright it
+ * has one tenant. Deliberately narrow — requires an explicit phrase, not merely the ABSENCE of a
+ * multi-tenant mention (silence still defaults to the proven multi-tenant SaaS pattern).
+ */
+function detectSingleTenantDeclaration(prd: string): boolean {
+  return /\b(single[\s-]?tenant|single[\s-]?organi[sz]ation|not multi[\s-]?tenant|no multi[\s-]?tenancy)\b/i.test(
+    prd
+  );
+}
+
 /** The shared system-prompt preamble + the per-artifact schema + rules. */
-function buildSystemPrompt(projectName: string, constrained: boolean, artifactSchema: string): string {
+function buildSystemPrompt(
+  projectName: string,
+  constrained: boolean,
+  artifactSchema: string,
+  singleTenant: boolean
+): string {
   const lines: string[] = [
     'You are FORGE Phase 1B, the Architecture Engine inside an autonomous software factory.',
     `You transform an APPROVED PRD into precise, buildable design artifacts for the project "${projectName}".`,
@@ -1189,8 +1284,15 @@ function buildSystemPrompt(projectName: string, constrained: boolean, artifactSc
   lines.push('Rules:');
   lines.push('- Be specific and buildable. NO "TBD"/"TODO"/placeholder values (Contract 18). If a detail is');
   lines.push('  unspecified, apply the most common proven pattern and proceed.');
-  lines.push('- Enforce company/tenant-scoped data isolation on every multi-tenant table (Six Laws Law 1):');
-  lines.push('  such tables carry a company_id (or tenant_id) column, RLS enabled, and a company-scoped policy.');
+  if (singleTenant) {
+    lines.push('- The PRD EXPLICITLY declares this product is SINGLE-TENANT. Six Laws Law 1 (company/tenant');
+    lines.push('  scoping) does NOT apply here — do NOT scaffold a companies/organizations table, a');
+    lines.push('  company_id/tenant_id column, or tenant-scoped RLS policies. Design a normal per-user (or');
+    lines.push('  global) data model instead; honor the PRD\'s explicit declaration rather than the default.');
+  } else {
+    lines.push('- Enforce company/tenant-scoped data isolation on every multi-tenant table (Six Laws Law 1):');
+    lines.push('  such tables carry a company_id (or tenant_id) column, RLS enabled, and a company-scoped policy.');
+  }
   lines.push('- Prefer the FORGE default stack: Next.js 14 (App Router) + Supabase (Postgres + Auth + RLS) +');
   lines.push('  Vercel, pnpm, TypeScript strict.');
   lines.push('');
@@ -1308,7 +1410,16 @@ const ARTIFACT_SCHEMAS: Record<ArtifactKind, { schema: string; instruction: stri
       '}',
     ].join('\n'),
     instruction:
-      'Now produce the AgentArchitecture JSON object. Include only agents the PRD actually needs (an empty "agents" array is valid if none are required). Give each a concrete trigger, I/O contract, system prompt, model, and token budget.',
+      'Now produce the AgentArchitecture JSON object. An autonomous AGENT here means a background process ' +
+        'that runs WITHOUT a user waiting on it — a cron job, a webhook handler, a queue consumer. A ' +
+        'plain CRUD feature, a form submission, a page that calls an API route and shows the result, or ' +
+        'anything a user directly waits on is NOT an agent — it belongs in the API/frontend artifacts, ' +
+        'never here. Session 5 finding #9: a simple app (a CRUD tool, a dashboard, a form-driven workflow) ' +
+        'has ZERO agents — do not invent one to look thorough. An EMPTY "agents": [] array is the CORRECT ' +
+        'and EXPECTED output whenever the PRD describes no autonomous background behavior; leaving it ' +
+        'empty is not a gap to fill. Only include an agent when the PRD explicitly describes recurring, ' +
+        'unattended, scheduled, or event-triggered work with no human in the loop. Give each agent you DO ' +
+        'include a concrete trigger, I/O contract, system prompt, model, and token budget.',
   },
   infra: {
     schema: [
@@ -1601,6 +1712,15 @@ export function renderBlueprintMd(design: ArchitectureDesign): string {
     '## Infrastructure',
     '',
     design.infra.deployConfig || '_Not specified._',
+    '',
+    '## Infra Provisioning Policy (Canonical Rule — Session 5 finding #16)',
+    '',
+    `- **Mode:** ${design.infraMode}`,
+    `- **Reason:** ${design.infraModeReason}`,
+    design.infraMode === 'local'
+      ? '- Agents MAY run local infra commands (e.g. `supabase start`) on non-colliding ports — this is SANCTIONED, not a violation.'
+      : '- Agents MUST use the credentials already configured in `.env.local` — missing credentials skip-with-warning; NEVER provision cloud infra automatically.',
+    '- This decision is governed here, not improvised per prompt — every queue entry inherits it via its `infra:` field.',
   ];
   return lines.join('\n');
 }
@@ -2054,6 +2174,16 @@ export async function runPhase1bArchitect(
 
   if (prd.trim() === '') warnings.push('The supplied PRD is empty — artifacts will be sparse.');
 
+  // 0. Infra-provisioning policy (Session 5 finding #16) — decided once, up front, and recorded
+  // into BLUEPRINT.md below so every Phase 3 prompt follows the SAME governed decision instead
+  // of improvising per prompt.
+  const infraDecision = await determineInfraMode(projectPath, log);
+
+  // 0b. Single-tenant declaration (Session 5 finding #9 / Six Laws Law 1): an explicit PRD
+  // statement skips company/tenant scaffolding for every artifact generated below.
+  const singleTenant = detectSingleTenantDeclaration(prd);
+  if (singleTenant) log('PRD explicitly declares single-tenant — Six Laws Law 1 scaffolding will be skipped');
+
   // 1. Build Memory grounding (proven patterns + applicable insights). Guarded.
   log('querying Build Memory for proven patterns and applicable insights');
   const grounding = await gatherGrounding(options.stackFingerprint);
@@ -2150,7 +2280,7 @@ export async function runPhase1bArchitect(
   const uiExtraContext = [designSystemBlock, brandBaselineBlock].filter((s) => s.trim() !== '').join('\n\n');
 
   const sys = (kind: ArtifactKind): string =>
-    buildSystemPrompt(projectName, constrained, ARTIFACT_SCHEMAS[kind].schema);
+    buildSystemPrompt(projectName, constrained, ARTIFACT_SCHEMAS[kind].schema, singleTenant);
   const usr = (kind: ArtifactKind): string =>
     buildUserPrompt(
       baseContext,
@@ -2261,6 +2391,8 @@ export async function runPhase1bArchitect(
     testing,
     crossValidation,
     constrained,
+    infraMode: infraDecision.mode,
+    infraModeReason: infraDecision.reason,
     designSystemGenerated,
     designSystemPath,
     architecturePath: null,
@@ -2286,7 +2418,7 @@ export async function runPhase1bArchitect(
   if (writeArchitectureFile) {
     const target = join(projectPath, architectureFileName);
     try {
-      await writeFile(target, renderArchitectureMarkdown(design), 'utf8');
+      await writeGovernanceFile(target, renderArchitectureMarkdown(design));
       design.architecturePath = target;
       log(`wrote ${target}`);
     } catch (error) {
@@ -2325,7 +2457,7 @@ export async function runPhase1bArchitect(
         try {
           const content = render();
           const docPath = join(govDir, name);
-          await writeFile(docPath, content, 'utf8');
+          await writeGovernanceFile(docPath, content);
           governanceDocs[name] = docPath;
           log(`wrote governance/${name}`);
         } catch (error) {

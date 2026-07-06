@@ -37,3 +37,5 @@ docker/volumes/db/data/
 docker/volumes/storage/
 docker/data/
 docker/.env
+
+.claude/worktrees/

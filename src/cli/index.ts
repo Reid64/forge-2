@@ -54,6 +54,9 @@ import { runPhase3Executor, type Phase3Options, type Phase3Result } from '../pha
 import { runPhase5Learner } from '../phases/phase5-learner.js';
 import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
+import type { AdversaryResult } from '../analysis/adversarial-review.js';
+import { checkAdversaryBlockers as checkAdversaryBlockersCore } from './adversary-gate.js';
+import { looksLikeProjectPath } from '../tools/path-heuristics.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
 import { cmdHealth } from './health-command.js';
@@ -136,6 +139,28 @@ function gateBanner(name: string, detail: string): void {
   console.log(chalk.yellow(detail));
   console.log(chalk.dim('  (autonomous mode: FORGE proceeds — review the generated artifact when you can.)'));
   console.log('');
+}
+
+/**
+ * Session 5 finding #2: any adversarial-review BLOCKER halts the pipeline — even in autonomous
+ * mode — writing the blocker list to `<project>/state/halt-reason.md`. `--accept-blockers` is
+ * the explicit human override (separate from `--autonomous-recovery`, which is Contract 14
+ * self-heal ONLY and never bypasses a gate). Console-wired wrapper around the extracted, testable
+ * {@link checkAdversaryBlockersCore} (src/cli/adversary-gate.ts).
+ */
+async function checkAdversaryBlockers(
+  projectPath: string,
+  phaseLabel: string,
+  review: AdversaryResult | null,
+  acceptBlockers: boolean
+): Promise<boolean> {
+  return checkAdversaryBlockersCore(projectPath, phaseLabel, review, acceptBlockers, {
+    onOverride: (m) => console.log(chalk.yellow(`  ⚠ ${m}`)),
+    onHalt: (m) => {
+      if (m.startsWith('  [')) console.log(chalk.red(`  ${m.trim()}`));
+      else fail(m);
+    },
+  });
 }
 
 /** Print a list of warnings under a heading, if any. */
@@ -228,7 +253,10 @@ async function cmdScout(pathArg: string): Promise<void> {
 }
 
 /** `forge design <path> --idea` — Phase 0 + 1 (PRD + Architecture), stops at Gate 2. */
-async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string; skipSecurityGate?: boolean }): Promise<ArchitectureDesign | null> {
+async function cmdDesign(
+  pathArg: string,
+  opts: { idea?: string; prd?: string; skipSecurityGate?: boolean; acceptBlockers?: boolean }
+): Promise<ArchitectureDesign | null> {
   const projectPath = resolveProjectPath(pathArg);
 
   const scout = await runScout(projectPath, { skipSecurityGate: opts.skipSecurityGate });
@@ -254,6 +282,13 @@ async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string; s
     }
     console.log(chalk.dim(`  PRD: ${prdResult.metadata.featureCount} feature(s), ${prdResult.prdPath ?? '(not written)'}`));
     gateBanner(prdResult.gate.name, prdResult.gate.detail);
+    const prdOk = await checkAdversaryBlockers(
+      projectPath,
+      'Phase 1A — PRD adversarial review',
+      prdResult.passes.pass2.adversarialReview,
+      opts.acceptBlockers ?? false
+    );
+    if (!prdOk) return null;
   } else {
     fail('design requires either --idea "<text>" or --prd <path>.');
     return null;
@@ -273,6 +308,13 @@ async function cmdDesign(pathArg: string, opts: { idea?: string; prd?: string; s
     console.log(chalk.yellow(`  ${design.fallbackArtifacts.length} artifact(s) used a fallback skeleton — refine before approval.`));
   }
   gateBanner(design.gate.name, design.gate.detail);
+  const designOk = await checkAdversaryBlockers(
+    projectPath,
+    'Phase 1B — Architecture adversarial review',
+    design.adversaryReview,
+    opts.acceptBlockers ?? false
+  );
+  if (!designOk) return null;
   return design;
 }
 
@@ -597,9 +639,15 @@ async function cmdBuild(
     autoResume?: boolean;
     resumeWaitMinutes?: string;
     maxResumes?: string;
+    acceptBlockers?: boolean;
+    autoApproveGates?: boolean;
   }
 ): Promise<void> {
   const autoResume = opts.autoResume ?? false;
+  // Session 5 finding #2/#3: adversary-review blockers are a SEPARATE concern from Contract 14
+  // self-heal (--autonomous-recovery). Either --accept-blockers or --auto-approve-gates bypasses
+  // the blocker halt; --autonomous-recovery alone does NOT.
+  opts = { ...opts, acceptBlockers: (opts.acceptBlockers ?? false) || (opts.autoApproveGates ?? false) };
   const resumeWaitMinutes = Number.parseInt(opts.resumeWaitMinutes ?? '5', 10);
   const maxResumes = Number.parseInt(opts.maxResumes ?? '20', 10);
   // --start-at: parse and validate early so bad input exits before Phase 0.
@@ -909,6 +957,14 @@ async function cmdStatus(
   config: EnvConfig,
   opts: { project?: string; watch?: boolean } = {}
 ): Promise<void> {
+  // Session 5 finding #7: `forge status <path>` (no --project) used to silently misparse the
+  // path as a build-id UUID ("No build ./my-project found."). Detect a path-shaped positional
+  // argument and route it to --project instead.
+  if (buildId && !opts.project && looksLikeProjectPath(buildId)) {
+    opts = { ...opts, project: buildId };
+    buildId = undefined;
+  }
+
   // Live observability (Session 4 — Task 3): when --watch is requested, or no explicit build-id
   // was given and a live-status.json exists, show the REAL-TIME dashboard instead of (or before
   // falling back to) the historical Build Memory query below.
@@ -1650,7 +1706,11 @@ async function main(): Promise<void> {
     .argument('<path>', 'target project directory')
     .option('--idea <text>', 'raw product idea (generates the PRD)')
     .option('--prd <path>', 'use an existing PRD file instead of generating one')
-    .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14)', false)
+    .option(
+      '--autonomous-recovery',
+      'enable Autonomous Recovery Mode (Contract 14) — self-heals Sentinel FAILURES during Phase 3 by re-running prompts. Does NOT bypass adversary-review blockers or approval gates; use --auto-approve-gates for that.',
+      false
+    )
     .option('--dry-run', 'simulate the build (plan + cost, no execution)', false)
     .option('--skip-design', 'skip Phase 1A+1B and use existing governance docs', false)
     .option('--use-existing-queue', 'skip Phase 1 (design) and Phase 2 (governance + queue generation); run Phase 3 directly against the existing queue.yaml', false)
@@ -1662,6 +1722,16 @@ async function main(): Promise<void> {
     )
     .option('--resume-wait-minutes <n>', 'backoff between --auto-resume cycles', '5')
     .option('--max-resumes <n>', 'cap on --auto-resume cycles', '20')
+    .option(
+      '--accept-blockers',
+      'proceed past adversarial-review BLOCKER findings (Phase 1A/1B) instead of halting (writes state/halt-reason.md). Explicit override — separate from --autonomous-recovery.',
+      false
+    )
+    .option(
+      '--auto-approve-gates',
+      'gate-bypass flag: also proceeds past adversarial-review BLOCKER findings (same effect as --accept-blockers, offered under the gate-bypass name). Both --autonomous-recovery AND this flag are needed to reproduce the old "self-heal + blockers ignored" behavior.',
+      false
+    )
     .action(
       (
         pathArg: string,
@@ -1677,6 +1747,8 @@ async function main(): Promise<void> {
           autoResume?: boolean;
           resumeWaitMinutes?: string;
           maxResumes?: string;
+          acceptBlockers?: boolean;
+          autoApproveGates?: boolean;
         }
       ) => cmdBuild(pathArg, opts)
     );
@@ -1693,7 +1765,8 @@ async function main(): Promise<void> {
     .argument('<path>', 'target project directory')
     .option('--idea <text>', 'raw product idea (generates the PRD)')
     .option('--prd <path>', 'use an existing PRD file instead of generating one')
-    .action(async (pathArg: string, opts: { idea?: string; prd?: string }) => {
+    .option('--accept-blockers', 'proceed past adversarial-review BLOCKER findings instead of halting', false)
+    .action(async (pathArg: string, opts: { idea?: string; prd?: string; acceptBlockers?: boolean }) => {
       await cmdDesign(pathArg, opts);
     });
 

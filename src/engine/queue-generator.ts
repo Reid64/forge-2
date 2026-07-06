@@ -110,6 +110,13 @@ export interface QueueEntry {
   context_injection: ContextInjection;
   /** Skill folder names whose SKILL.md content is prepended to the description before assembly. */
   skills?: string[];
+  /**
+   * Infra-provisioning policy (Session 5 finding #16): `local` — the agent MAY run local infra
+   * commands (e.g. `supabase start` on a non-colliding port) itself; `cloud` — use the creds
+   * already configured in `.env.local`, and skip-with-warning (never provision) if absent.
+   * Defaults to the project-level choice `ArchitectureDesign.infraMode` recorded in BLUEPRINT.md.
+   */
+  infra?: 'local' | 'cloud';
   /** The detailed, buildable task text. */
   description: string;
 }
@@ -1020,6 +1027,12 @@ function emitEntry(entry: QueueEntry): string {
     lines.push(`  parallel_group: ${yamlScalar(entry.parallel_group)}`);
   }
   lines.push(`  governance_refs: ${yamlFlowList(entry.governance_refs)}`);
+  if (entry.skills && entry.skills.length > 0) {
+    lines.push(`  skills: ${yamlFlowList(entry.skills)}`);
+  }
+  if (entry.infra !== undefined) {
+    lines.push(`  infra: ${yamlScalar(entry.infra)}`);
+  }
   lines.push(`  estimated_tokens: ${entry.estimated_tokens}`);
   lines.push('  context_injection:');
   lines.push(`    schema_sections: ${yamlFlowList(entry.context_injection.schemaSections)}`);
@@ -1081,7 +1094,11 @@ export async function generateQueue(
 
   log(`generating build queue for "${projectName}"`);
 
-  const entries = buildQueueEntries(design, warnings);
+  // Session 5 finding #16: the project-level infra-provisioning decision (local|cloud, made by
+  // Phase 1B and recorded in BLUEPRINT.md) rides on every queue entry so Phase 3 can log which
+  // mode it's operating under, per prompt, without re-deriving it.
+  const infraMode = design.infraMode ?? 'local';
+  const entries = buildQueueEntries(design, warnings).map((e) => ({ ...e, infra: e.infra ?? infraMode }));
   const stats = computeStats(entries);
   const yaml = serializeQueue(entries, { projectName, projectPath, generatedAt, stats });
 

@@ -40,6 +40,17 @@ function phaseLabel(phase: LiveStatusPhase): string {
   }
 }
 
+/** Render a millisecond duration as a compact human string (`"12.3s"`, `"1m45s"`, `"2h03m"`). */
+function humanDurationForStatus(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, '0')}m`;
+  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+  return totalSeconds >= 10 ? `${totalSeconds}s` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 /** True when the status file was updated recently enough to represent an active/recent build. */
 export function isLiveStatusFresh(status: LiveStatus, now: number = Date.now()): boolean {
   const updated = Date.parse(status.updatedAt);
@@ -65,6 +76,7 @@ export function renderLiveStatusConsole(status: LiveStatus): string {
       `${chalk.dim(`${t.remaining} remaining`)}`
   );
   lines.push(chalk.dim(`tokens:   ~${t.tokensEstimated}    cost ≈ $${t.costEstimatedUsd.toFixed(4)}`));
+  lines.push(chalk.dim(`elapsed:  ${humanDurationForStatus(t.totalElapsedMs ?? 0)} (build total)`));
 
   if (status.lastSentinel) {
     lines.push(

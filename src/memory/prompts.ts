@@ -47,6 +47,7 @@ interface PromptExecutionRow {
   status: string;
   started_at: string | null;
   completed_at: string | null;
+  duration_ms: number | null;
   tokens_input: number;
   tokens_output: number;
   cost_usd: number;
@@ -76,6 +77,7 @@ function rowToPromptExecution(row: PromptExecutionRow): PromptExecution {
     status: row.status as PromptExecution['status'],
     started_at: row.started_at,
     completed_at: row.completed_at,
+    duration_ms: row.duration_ms,
     tokens_input: row.tokens_input,
     tokens_output: row.tokens_output,
     cost_usd: row.cost_usd,
@@ -104,13 +106,13 @@ export function createPromptExecution(
     db.prepare(
       `INSERT INTO prompt_executions (
         id, build_run_id, prompt_index, prompt_name, prompt_hash, prompt_content, status,
-        started_at, completed_at, tokens_input, tokens_output, cost_usd, error_output,
+        started_at, completed_at, duration_ms, tokens_input, tokens_output, cost_usd, error_output,
         resolution_applied, was_rewritten, original_prompt_hash, rewrite_reason,
         failure_prediction_score, branch_name, sentinel_passed, sentinel_details,
         files_created, files_modified, files_deleted
       ) VALUES (
         @id, @build_run_id, @prompt_index, @prompt_name, @prompt_hash, @prompt_content, @status,
-        @started_at, @completed_at, @tokens_input, @tokens_output, @cost_usd, @error_output,
+        @started_at, @completed_at, @duration_ms, @tokens_input, @tokens_output, @cost_usd, @error_output,
         @resolution_applied, @was_rewritten, @original_prompt_hash, @rewrite_reason,
         @failure_prediction_score, @branch_name, @sentinel_passed, @sentinel_details,
         @files_created, @files_modified, @files_deleted
@@ -125,6 +127,7 @@ export function createPromptExecution(
       status: input.status ?? 'pending',
       started_at: input.started_at ?? null,
       completed_at: input.completed_at ?? null,
+      duration_ms: input.duration_ms ?? null,
       tokens_input: input.tokens_input ?? 0,
       tokens_output: input.tokens_output ?? 0,
       cost_usd: input.cost_usd ?? 0,

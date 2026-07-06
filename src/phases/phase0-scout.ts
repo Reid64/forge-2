@@ -33,13 +33,14 @@
  * on). Authoring this file performs no installs.
  */
 
-import { mkdir, writeFile, stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 import { detectStack, type StackFingerprint } from '../tools/stack-detector.js';
+import { writeGovernanceFile } from '../tools/governance-text.js';
 import {
   auditEnvironment,
   type EnvironmentAudit,
@@ -118,6 +119,8 @@ export interface ToolchainManifest {
   remediations: RemediationAction[];
   /** Docker / FORGE Build Memory runtime status (from the final audit). */
   dockerStatus: DockerStatus;
+  /** True when this Phase 0 run had to `git init` the project (Session 5 finding #3: greenfield). */
+  gitInitialized: boolean;
   /** Non-fatal observations carried over from the environment audit. */
   warnings: string[];
 }
@@ -228,6 +231,81 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Greenfield git init (Session 5 finding #3)
+// ---------------------------------------------------------------------------
+
+/** The outcome of {@link ensureGitRepo}. */
+export interface EnsureGitRepoResult {
+  /** True when this call actually ran `git init` (the project had no `.git`). */
+  initialized: boolean;
+  /** Non-fatal problem encountered while initializing, or null. */
+  warning: string | null;
+}
+
+/**
+ * Greenfield git init (Session 5 finding #3): if `projectPath` has no `.git`, run `git init` +
+ * an initial commit on a `main` branch BEFORE anything else touches the project. Without this,
+ * Contract 10 (branch isolation), Contract 11 (checkpoint tags), and Contract 12 (rollback) all
+ * silently no-op for the whole build — GitManager's commands just fail one-by-one with no gate
+ * ever catching it. Guarded — never throws; a failed init degrades to a warning (the same
+ * non-fatal posture as the rest of Phase 0), and Sentinel's file_integrity check (Phase 4) WARNS
+ * loudly rather than at INFO level when git is still absent by the time a prompt runs.
+ */
+export async function ensureGitRepo(
+  projectPath: string,
+  log: (message: string) => void
+): Promise<EnsureGitRepoResult> {
+  if (await pathExists(join(projectPath, '.git'))) {
+    return { initialized: false, warning: null };
+  }
+
+  log(`No .git found at ${projectPath} — initializing a repository (Contract 10/11/12 require one).`);
+  const opts = { cwd: projectPath, windowsHide: true, maxBuffer: 1024 * 1024 } as const;
+  const runIn = async (command: string, timeoutMs: number): Promise<CommandResult> => {
+    try {
+      const { stdout, stderr } = await execAsync(command, { ...opts, timeout: timeoutMs });
+      return { ok: true, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') };
+    } catch (error) {
+      const e = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+      return { ok: false, stdout: String(e.stdout ?? ''), stderr: String(e.stderr ?? '') || String(e.message ?? '') };
+    }
+  };
+
+  const initRes = await runIn('git init', 15000);
+  if (!initRes.ok) {
+    const warning = `git init failed at ${projectPath} (${firstLine(initRes.stderr) || 'unknown error'}) — branch/checkpoint/rollback (Contract 10/11/12) will no-op for this build.`;
+    log(`WARNING: ${warning}`);
+    return { initialized: false, warning };
+  }
+
+  // Land on a `main` branch regardless of the local/global `init.defaultBranch` setting.
+  await runIn('git symbolic-ref HEAD refs/heads/main', 10000);
+
+  // Set a commit identity ONLY if none is already configured (never override the user's own).
+  const nameSet = await runIn('git config user.name', 5000);
+  if (!nameSet.ok || nameSet.stdout.trim() === '') await runIn('git config user.name "FORGE"', 5000);
+  const emailSet = await runIn('git config user.email', 5000);
+  if (!emailSet.ok || emailSet.stdout.trim() === '') await runIn('git config user.email "forge@localhost"', 5000);
+
+  const addRes = await runIn('git add -A', 60000);
+  if (!addRes.ok) {
+    const warning = `git add failed after git init at ${projectPath} (${firstLine(addRes.stderr) || 'unknown error'}).`;
+    log(`WARNING: ${warning}`);
+    return { initialized: true, warning };
+  }
+
+  const commitRes = await runIn('git commit --allow-empty -m "FORGE: initial commit (greenfield git init)"', 30000);
+  if (!commitRes.ok) {
+    const warning = `initial commit failed after git init at ${projectPath} (${firstLine(commitRes.stderr) || 'unknown error'}).`;
+    log(`WARNING: ${warning}`);
+    return { initialized: true, warning };
+  }
+
+  log(`git initialized at ${projectPath}: 'main' branch created with an initial commit.`);
+  return { initialized: true, warning: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +524,7 @@ export function renderToolchainMarkdown(
   lines.push(`- **Generated:** ${manifest.generatedAt}`);
   lines.push(`- **Machine ID:** ${manifest.machineId}`);
   lines.push(`- **Machine registered in Build Memory:** ${manifest.machineRegistered ? 'yes' : 'no (first build here)'}`);
+  lines.push(`- **Git initialized this run:** ${manifest.gitInitialized ? 'yes (greenfield — git init + initial commit on main)' : 'no (repository already existed)'}`);
   lines.push(`- **Platform:** ${manifest.platform}`);
   lines.push(`- **Node.js:** ${manifest.nodeVersion}`);
   lines.push('');
@@ -568,6 +647,9 @@ export async function runPhase0Scout(
   const governanceDirName = options.governanceDirName ?? 'governance';
   const log = options.log ?? logLine('phase0');
 
+  // 0. Greenfield git init (Session 5 finding #3) — before anything else touches the project.
+  const gitInit = await ensureGitRepo(projectPath, log);
+
   // 1. Detect the project's stack ------------------------------------------
   log(`scanning stack at ${projectPath}`);
   const stackFingerprint = await detectStack(projectPath);
@@ -624,7 +706,8 @@ export async function runPhase0Scout(
     skillManifest: deriveSkillManifest(presentCli, stackFingerprint, audit.dockerStatus),
     remediations,
     dockerStatus: audit.dockerStatus,
-    warnings: audit.warnings,
+    gitInitialized: gitInit.initialized,
+    warnings: gitInit.warning ? [...audit.warnings, gitInit.warning] : audit.warnings,
   };
 
   // 8. Compute the gate -----------------------------------------------------
@@ -639,7 +722,7 @@ export async function runPhase0Scout(
     const toolchainPath = join(governanceDir, 'TOOLCHAIN.md');
     try {
       await mkdir(governanceDir, { recursive: true });
-      await writeFile(toolchainPath, markdown, 'utf8');
+      await writeGovernanceFile(toolchainPath, markdown);
       log(`wrote ${toolchainPath}`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
