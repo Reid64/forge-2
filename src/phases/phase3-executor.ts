@@ -158,6 +158,13 @@ export interface PromptOutcome {
   failureProbability: number | null;
   /** Whether the prompt was rewritten (Contract 9). */
   wasRewritten: boolean;
+  /**
+   * True when the claude-runner subprocess itself timed out or exited abnormally on this
+   * prompt (session/cap exhaustion) — as opposed to Sentinel finding a genuine defect in
+   * code that finished running. `--auto-resume` (`src/engine/auto-resume.ts`) uses this to
+   * distinguish a resumable timeout from a real Sentinel HALT it must never steamroll.
+   */
+  timedOut: boolean;
   /** SHA-256 of the prompt actually executed (rewritten hash when rewritten). */
   promptHash: string;
   /** The `prompt_executions.id` Build Memory assigned, or null in stateless mode. */
@@ -483,9 +490,53 @@ function asContextInjection(v: unknown): ContextInjection {
 }
 
 /**
- * Parse queue.yaml text into {@link QueueEntry}[]. Tolerant of the Queue Generator's emitted
- * shape (snake_case `context_injection`, flow-list dependencies, `|` block description). A
- * malformed entry is skipped with a warning rather than throwing. Returns the entries + warnings.
+ * Coerce a single raw YAML mapping into a {@link QueueEntry}. Tolerant of the Queue
+ * Generator's emitted shape (snake_case `context_injection`, flow-list dependencies, `|`
+ * block description). Returns `null` (with a warning) when `raw` isn't a mapping or has no
+ * id — shared by {@link parseQueueYaml} (one queue.yaml = a list of these) and
+ * {@link parseSingleQueueEntryYaml} (`forge compile`'s one-entry-per-file prompt library —
+ * see `src/cli/compile-command.ts`), so the tolerant-coercion rules live in exactly one place.
+ */
+export function coerceQueueEntry(
+  raw: unknown,
+  label: string,
+  warn: (message: string) => void
+): QueueEntry | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    warn(`${label} is not a mapping — skipped.`);
+    return null;
+  }
+  const o = raw as Record<string, unknown>;
+  const id = asString(o.id).trim();
+  if (id === '') {
+    warn(`${label} has no id — skipped.`);
+    return null;
+  }
+  const rawType = asString(o.prompt_type).trim();
+  const promptType = (PROMPT_TYPES.has(rawType) ? rawType : 'feature') as PromptType;
+  if (!PROMPT_TYPES.has(rawType)) {
+    warn(`${label} ('${id}') has unknown prompt_type '${rawType}' — defaulted to 'feature'.`);
+  }
+  const entry: QueueEntry = {
+    id,
+    name: asString(o.name).trim() || id,
+    prompt_type: promptType,
+    dependencies: asStringArray(o.dependencies),
+    governance_refs: asStringArray(o.governance_refs),
+    estimated_tokens: typeof o.estimated_tokens === 'number' ? o.estimated_tokens : 0,
+    context_injection: asContextInjection(o.context_injection),
+    description: asString(o.description),
+  };
+  const group = asString(o.parallel_group).trim();
+  if (group !== '') entry.parallel_group = group;
+  const skills = asStringArray(o.skills);
+  if (skills.length > 0) entry.skills = skills;
+  return entry;
+}
+
+/**
+ * Parse queue.yaml text into {@link QueueEntry}[]. A malformed entry is skipped with a
+ * warning rather than throwing. Returns the entries + warnings.
  */
 export function parseQueueYaml(yamlText: string): { entries: QueueEntry[]; warnings: string[] } {
   const warnings: string[] = [];
@@ -503,39 +554,33 @@ export function parseQueueYaml(yamlText: string): { entries: QueueEntry[]; warni
 
   const entries: QueueEntry[] = [];
   doc.forEach((raw, i) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      warnings.push(`queue.yaml entry #${i + 1} is not a mapping — skipped.`);
-      return;
-    }
-    const o = raw as Record<string, unknown>;
-    const id = asString(o.id).trim();
-    if (id === '') {
-      warnings.push(`queue.yaml entry #${i + 1} has no id — skipped.`);
-      return;
-    }
-    const rawType = asString(o.prompt_type).trim();
-    const promptType = (PROMPT_TYPES.has(rawType) ? rawType : 'feature') as PromptType;
-    if (!PROMPT_TYPES.has(rawType)) {
-      warnings.push(`queue.yaml entry '${id}' has unknown prompt_type '${rawType}' — defaulted to 'feature'.`);
-    }
-    const entry: QueueEntry = {
-      id,
-      name: asString(o.name).trim() || id,
-      prompt_type: promptType,
-      dependencies: asStringArray(o.dependencies),
-      governance_refs: asStringArray(o.governance_refs),
-      estimated_tokens: typeof o.estimated_tokens === 'number' ? o.estimated_tokens : 0,
-      context_injection: asContextInjection(o.context_injection),
-      description: asString(o.description),
-    };
-    const group = asString(o.parallel_group).trim();
-    if (group !== '') entry.parallel_group = group;
-    const skills = asStringArray(o.skills);
-    if (skills.length > 0) entry.skills = skills;
-    entries.push(entry);
+    const entry = coerceQueueEntry(raw, `queue.yaml entry #${i + 1}`, (m) => warnings.push(m));
+    if (entry) entries.push(entry);
   });
 
   return { entries, warnings };
+}
+
+/**
+ * Parse a SINGLE-entry prompt-library YAML file (`forge compile`'s `prompts/**\/*.yaml` —
+ * one queue entry per file, a plain mapping rather than a list) into a {@link QueueEntry}.
+ * `label` (typically the file's path relative to the prompts directory) is used in warnings.
+ * Returns `{ entry: null, warnings }` on malformed YAML / a non-mapping / a missing id.
+ */
+export function parseSingleQueueEntryYaml(
+  yamlText: string,
+  label: string
+): { entry: QueueEntry | null; warnings: string[] } {
+  const warnings: string[] = [];
+  let doc: unknown;
+  try {
+    doc = parseYaml(yamlText);
+  } catch (error) {
+    warnings.push(`${label} is not valid YAML (${describe(error)}) — skipped.`);
+    return { entry: null, warnings };
+  }
+  const entry = coerceQueueEntry(doc, label, (m) => warnings.push(m));
+  return { entry, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,6 +1552,7 @@ async function executePrompt(
       branchName,
       failureProbability: prediction.probability,
       wasRewritten,
+      timedOut: run.timedOut,
       promptHash,
       promptExecutionId,
       tokensEstimated: run.tokensEstimated,
@@ -1516,6 +1562,7 @@ async function executePrompt(
     };
   } catch (error) {
     // Defensive: the collaborators never throw, but if one does, fail this prompt (don't crash).
+    // Not a claude-runner timeout (the error happened in FORGE's own orchestration) — timedOut: false.
     const note = `Unexpected error executing prompt ${index} '${entry.id}': ${describe(error)}`;
     ctx.log(`ERROR: ${note}`);
     return {
@@ -1527,6 +1574,7 @@ async function executePrompt(
       branchName: null,
       failureProbability: null,
       wasRewritten: false,
+      timedOut: false,
       promptHash: '',
       promptExecutionId: null,
       tokensEstimated: 0,
@@ -1575,6 +1623,7 @@ async function dryRunPrompt(
     branchName: null,
     failureProbability: probability,
     wasRewritten: false,
+    timedOut: false,
     promptHash,
     promptExecutionId: null,
     tokensEstimated: tokens,
@@ -1693,6 +1742,7 @@ function skippedOutcome(entry: QueueEntry, index: number, note: string): PromptO
     branchName: null,
     failureProbability: null,
     wasRewritten: false,
+    timedOut: false,
     promptHash: '',
     promptExecutionId: null,
     tokensEstimated: 0,

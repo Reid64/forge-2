@@ -1,8 +1,68 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: REBUILD Session 2 of 4 — Design Intelligence — COMPLETE
+## Current Session: REBUILD Session 3 of 4 — Autonomy — COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-05 (Design system pipeline wired end-to-end: Phase 1B → brands.ts → queue skills → Phase 3 injection; cross-project token inheritance added)
+## Last Updated: 2026-07-06 (Prompt-library compile/versioning + generate-prompts + --auto-resume + mandatory re-anchor injection; schema 2.1.0)
+
+---
+
+## REBUILD Session 3 — Autonomy (2026-07-06)
+
+**Objective:** long-run autonomy — a 100+ prompt build must survive multiple Claude Code
+session resets with no human intervention and no context drift.
+
+**Schema version:** `2.0.0` → **`2.1.0`** (`queue_versions` table added; migration guard is now
+a linear idempotent chain rather than nested if/else, healing partial migrations regardless of
+starting version).
+
+**Files created:**
+- `src/cli/compile-command.ts` — `forge compile`: natural-order prompt-file merge, mandatory
+  re-anchor injection every 15 real entries (`REANCHOR_INTERVAL`), id-uniqueness +
+  dangling-dependency validation (fails loudly, writes nothing on violation), summary table
+- `src/cli/generate-prompts-command.ts` — `forge generate-prompts`: LLM plans phases then
+  generates each phase's entries via `providerCallModel('complex_reasoning')`; applies
+  `withUiDesignContext` to UI-producing entries; never auto-compiles (human gate preserved)
+- `src/tools/queue-versioning.ts` — `snapshotQueue`/`listQueueVersions`/`getQueueVersion`/
+  `diffQueueEntries`/`loadQueueEntriesFromFile` (entry-level diffing, not text lines)
+- `src/tools/json-extraction.ts` — `extractJsonObject`/`extractJsonArray` + the JSON-only
+  directives, extracted from Phase 1B's private `extractJson` so `generate-prompts` reuses it
+- `src/engine/auto-resume.ts` — `parseLastCompletedFromStateContent` (tolerant progress-line
+  parser), `computeResumeStartAt` (DB-first, state-file fallback), `isResumableTimeout`,
+  `runWithAutoResume` (the resume loop)
+- `scripts/verify-autonomy.mjs` — 22-assertion verification (compile ordering/re-anchors/
+  validation, snapshot+diff, state parser edge cases)
+- `scripts/diagnostics/{check-db.js,check-db.mjs,audit-db.mjs}` — moved from repo root (repo
+  hygiene; contents untouched)
+
+**Files modified:**
+- `src/learning/database.ts` — `QUEUE_VERSIONING_SCHEMA_SQL`, migration guard refactor, schema
+  2.1.0, `queue_versions` added to `ALL_FORGE_TABLES`
+- `src/engine/queue-generator.ts` — `withUiDesignContext` exported + generalized (works on any
+  `{skills?, governance_refs}`-shaped object, not just the internal `DraftEntry`); `computeStats`
+  exported
+- `src/phases/phase3-executor.ts` — extracted `coerceQueueEntry` (shared by `parseQueueYaml` and
+  the new `parseSingleQueueEntryYaml`, one-entry-per-file); `GOVERNANCE_DOC_NAMES` now exported;
+  new `PromptOutcome.timedOut` field (from `ClaudeRunResult.timedOut`) populated at all 4
+  outcome-construction sites, giving `--auto-resume` a real signal to distinguish a resumable
+  timeout from a genuine Sentinel halt
+- `src/phases/phase1b-architect.ts` — private `extractJson`/`JSON_ONLY_DIRECTIVE` removed,
+  imports the shared `src/tools/json-extraction.ts` instead (behavior unchanged)
+- `src/cli/index.ts` — `runPhase3MaybeAutoResume` helper wired into all 3 of `cmdBuild`'s
+  `runPhase3Executor` call sites; `--auto-resume`/`--resume-wait-minutes`/`--max-resumes` flags
+  on `forge build`; `forge compile`, `forge generate-prompts`, `forge queue-diff` registered
+- `src/cli/health-command.ts` — "Prompt library" section (queue_versions count + latest
+  snapshot); 3 new wiring checks (forge compile, auto-resume, re-anchor injection)
+- `scripts/verify-memory.mjs` — schema-version assertion updated from a hardcoded `2.0.0` to a
+  shape+advancement check (it now correctly reads `2.1.0`)
+
+**Verification:** `npx tsc --noEmit -p .` → 0 errors · `node scripts/verify-autonomy.mjs` →
+22/22 PASS · `forge health` → schema 2.1.0, all 3 new wiring checks WIRED · Session 1/2 verify
+scripts (`verify-memory.mjs`, `verify-design-wiring.mjs`) re-run clean, no regressions ·
+`node --import tsx --test tests/learning-*.test.ts` → 34/35 (1 pre-existing Windows `EBUSY`
+test-cleanup flake, unrelated, same as Sessions 1-2).
+
+**Next action:** Session 4 of 4 — Intelligence & Observability: pattern compounding, Build
+Brain, live observability, cross-build learning verification.
 
 ---
 

@@ -1,10 +1,103 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-07-05 (FORGE 2.0 Rebuild — Session 2: Design Intelligence COMPLETE)
+**Last Updated:** 2026-07-06 (FORGE 2.0 Rebuild — Session 3: Autonomy COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD IN PROGRESS (4-session Memory/Design/Intelligence/Verify plan)
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-2
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-3
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## REBUILD Session 3 — Autonomy (2026-07-06) — COMPLETE
+
+**Objective:** give FORGE true long-run autonomy: a prompt-library workflow (`forge compile`,
+`forge generate-prompts`), automatic session resumption (`--auto-resume`), a mandatory context
+re-anchor every 15 prompts, and prompt-library versioning with diffing — so a 100+ prompt build
+can run across multiple Claude Code session resets without human intervention or context drift.
+
+**Schema version:** `2.0.0` → **`2.1.0`** (new `queue_versions` table; migration guard refactored
+into a linear idempotent chain — 1.0.0→2.0.0 then 2.0.0→2.1.0 — both steps always re-run since
+every `CREATE TABLE/INDEX` is `IF NOT EXISTS`, healing any partially-migrated db).
+
+- **`forge compile`** (`src/cli/compile-command.ts`, new): recursively scans a `prompts/`
+  directory for one-entry-per-file `*.yaml` prompts, sequences them by natural (numeric-aware)
+  directory-then-file prefix order, injects a generated **re-anchor** entry (`reanchor-N`,
+  `prompt_type: test`, depends ONLY on the immediately preceding entry) after every 15 REAL
+  entries — instructing the agent to re-read CLAUDE.md/STATE_OF_THE_BUILD.md/SESSION_STATE.md
+  cold from disk, spot-check the last 3 completed prompts' outputs exist, state where the build
+  stands, and build/fix nothing — then validates the merged set (unique ids, no dangling
+  dependencies, at least one entry) and writes the master `queue.yaml` via the Queue Generator's
+  own `serializeQueue`/`computeStats` (not duplicated). A validation problem prints every issue
+  and exits non-zero WITHOUT writing. On success, snapshots the queue (see below) and prints a
+  summary (total entries, per-type counts, re-anchors injected, longest chain).
+- **Prompt-library versioning** (`src/tools/queue-versioning.ts`, new): every successful compile
+  copies the written queue.yaml to `<project>/.forge/queue-history/queue-<timestamp>-<hash>.yaml`
+  (hash = first 8 hex chars of its SHA-256) and records a `queue_versions` row. New
+  **`forge queue-diff [--project <path>] [--against <hash-or-'previous'>]`**: diffs the CURRENT
+  queue.yaml against a chosen snapshot at the ENTRY level (added / removed / modified — and
+  which fields changed per modified entry: name, prompt_type, description, dependencies,
+  governance_refs, estimated_tokens, skills), not raw text lines.
+- **`forge generate-prompts`** (`src/cli/generate-prompts-command.ts`, new): reads a governance
+  package's `.md` files, calls `providerCallModel('complex_reasoning')` (the same
+  multi-provider-router transport Phase 1B uses) to PLAN the build into ordered phases
+  (schema → auth → api → ui → features → agents → tests → deploy), then makes one generation
+  call PER PHASE for that phase's entries (a JSON array), applying `withUiDesignContext`
+  (Session 2's helper, now exported + generalized) to every UI-producing entry so a
+  design-blind prompt can never even be written. Writes
+  `<out>/<phase-index>-<phase-name>/<NN>-<id>.yaml` per entry. NEVER compiles automatically —
+  Contract 2's human gate is preserved; the operator reviews, then runs `forge compile`. A
+  failed phase writes everything completed so far and reports exactly which phase failed.
+- **Shared JSON recovery** (`src/tools/json-extraction.ts`, new): Phase 1B's 3-strategy
+  model-JSON recovery (`extractJson`) was extracted here as `extractJsonObject`/
+  `extractJsonArray` (object AND array variants) + `JSON_ONLY_DIRECTIVE`/
+  `JSON_ARRAY_ONLY_DIRECTIVE`, so `forge generate-prompts` reuses it instead of a copy-paste;
+  `src/phases/phase1b-architect.ts` now imports it (its private copy removed, zero behavior
+  change).
+- **`--auto-resume`** (`src/engine/auto-resume.ts`, new; wired into `forge build`'s 3
+  `runPhase3Executor` call sites via `runPhase3MaybeAutoResume` in `src/cli/index.ts`): on
+  startup, computes `--start-at` from Build Memory's `prompt_executions` (trusted when any rows
+  exist for the project's most recent build — the higher-fidelity source) else by parsing Phase
+  3's own appended `[FORGE Phase 3] prompt N 'id' (type): COMPLETED` lines out of
+  STATE_OF_THE_BUILD.md/SESSION_STATE.md (falls back to prompt 1 with a logged notice if neither
+  yields anything). Loops: re-fires `runPhase3Executor` after a RESUMABLE claude-runner
+  timeout/exit (new `PromptOutcome.timedOut` field, populated from `ClaudeRunResult.timedOut`)
+  with a `--resume-wait-minutes` (default 5) backoff, up to `--max-resumes` (default 20) cycles
+  — but a genuine Sentinel HALT (`timedOut: false`) stops the loop immediately (Iron Law: never
+  steamroll a real halt). Every cycle appends one line to SESSION_STATE.md.
+- **Repo hygiene:** `check-db.js`, `check-db.mjs`, `audit-db.mjs` moved to `scripts/diagnostics/`.
+- **`forge health`** (`src/cli/health-command.ts`): new "Prompt library" section (total
+  `queue_versions` snapshots + the latest one's project/hash/path); three new wiring checks —
+  `forge compile` registered, `--auto-resume` flag present, re-anchor injection (source contains
+  `REANCHOR_INTERVAL`) — all reporting WIRED; schema now reports `2.1.0`.
+
+**Verification (all green):**
+1. `npx tsc --noEmit -p .` → 0 errors.
+2. `node scripts/verify-autonomy.mjs` → 22/22 assertions PASS: a synthetic 34-file/3-phase
+   prompt library compiles to 36 entries (34 real + 2 re-anchors) in correct natural order, with
+   re-anchors at positions 16/32 depending only on their preceding entry; a duplicate id AND a
+   dangling dependency both correctly fail validation without writing; two snapshots taken
+   around a modification are correctly diffed (added/removed/modified, including which fields
+   changed); the auto-resume state parser extracts the correct index across two documents,
+   ignores FAILED lines, and returns null for empty/unparseable/absent content.
+3. `forge health` → schema `2.1.0`; "forge compile", "auto-resume", and "re-anchor injection"
+   all report WIRED; "Prompt library" section present (0 snapshots — no real project has
+   compiled yet, expected).
+4. `node scripts/verify-memory.mjs` (Session 1) and `node scripts/verify-design-wiring.mjs`
+   (Session 2) re-run clean — no regressions from the shared-file edits this session touched
+   (`queue-generator.ts`, `phase3-executor.ts`, `prompt-assembler.ts` cap logic untouched,
+   `phase1b-architect.ts`). `node --import tsx --test tests/learning-*.test.ts` → 34/35 (the
+   same pre-existing Windows `EBUSY` test-cleanup flake from Sessions 1-2, unrelated).
+
+**Files modified (7) + created (7, incl. 3 moved diagnostics scripts):**
+`src/learning/database.ts`, `src/engine/queue-generator.ts`, `src/phases/phase3-executor.ts`,
+`src/phases/phase1b-architect.ts`, `src/cli/index.ts`, `src/cli/health-command.ts`,
+`scripts/verify-memory.mjs` (schema-version assertion updated) — plus new
+`src/cli/compile-command.ts`, `src/cli/generate-prompts-command.ts`, `src/engine/auto-resume.ts`,
+`src/tools/json-extraction.ts`, `src/tools/queue-versioning.ts`, `scripts/verify-autonomy.mjs`,
+and `scripts/diagnostics/{check-db.js,check-db.mjs,audit-db.mjs}` (moved, untouched).
+
+**Next action:** Session 4 — Intelligence & Observability: pattern compounding, Build Brain,
+live observability, cross-build learning verification.
 
 ---
 

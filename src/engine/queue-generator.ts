@@ -304,16 +304,18 @@ interface DraftEntry {
  * mandates) and `ui-ux-pro-max` (a pointer to the generated DESIGN SYSTEM block being
  * authoritative). See `skills/frontend-design/SKILL.md` and `skills/ui-ux-pro-max/SKILL.md`.
  */
-const UI_DESIGN_SKILLS: readonly string[] = ['frontend-design', 'ui-ux-pro-max'];
+export const UI_DESIGN_SKILLS: readonly string[] = ['frontend-design', 'ui-ux-pro-max'];
 
 /**
- * Apply the UI design context to a UI-producing draft entry: merge in {@link UI_DESIGN_SKILLS}
+ * Apply the UI design context to a UI-producing entry: merge in {@link UI_DESIGN_SKILLS}
  * (no duplicates) and ensure `DESIGN_SYSTEM.md` is in `governance_refs` so Phase 3 injects the
  * project's generated design system into the assembled prompt. Applied ONCE at entry
  * construction (the `ui` shell entry + every `feature`-typed page/component entry) rather than
- * edited inline per call site.
+ * edited inline per call site. Generic over any entry-shaped object (both the internal
+ * `DraftEntry` used here and the public `QueueEntry` `forge generate-prompts` builds satisfy
+ * this — Session 3 — Autonomy reuses it for LLM-authored prompts too).
  */
-function withUiDesignContext(entry: DraftEntry): DraftEntry {
+export function withUiDesignContext<T extends { skills?: string[]; governance_refs: string[] }>(entry: T): T {
   const skills = new Set(entry.skills ?? []);
   for (const s of UI_DESIGN_SKILLS) skills.add(s);
   const governance_refs = entry.governance_refs.includes('DESIGN_SYSTEM.md')
@@ -918,7 +920,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
 // Statistics (incl. longest dependency chain)
 // ---------------------------------------------------------------------------
 
-function computeStats(entries: QueueEntry[]): QueueStats {
+export function computeStats(entries: QueueEntry[]): QueueStats {
   const byType: Record<PromptType, number> = {
     schema: 0,
     auth: 0,

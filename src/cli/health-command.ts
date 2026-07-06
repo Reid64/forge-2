@@ -23,12 +23,14 @@ import chalk from 'chalk';
 
 import {
   getAllTableHealth,
+  getConnection,
   getForgeDbPath,
   getMachineId,
   getSchemaVersion,
   type TableHealth,
 } from '../learning/database.js';
 import { DEFAULT_PYTHON_CANDIDATES, resolveScriptPath } from '../tools/design-system-generator.js';
+import type { QueueVersionRow } from '../tools/queue-versioning.js';
 
 /** Resolve the FORGE install root (this repo's root), independent of the caller's cwd. */
 function resolveForgeRoot(): string {
@@ -106,6 +108,19 @@ function listSkillFolders(forgeRoot: string): SkillFolder[] {
   return [...listSkillFoldersIn(forgeRoot, '.claude/skills'), ...listSkillFoldersIn(forgeRoot, 'skills')];
 }
 
+/** The most recent `queue_versions` row across every project, or `null` if none exist yet. */
+function latestQueueVersion(): QueueVersionRow | null {
+  try {
+    const db = getConnection();
+    const row = db.prepare('SELECT * FROM queue_versions ORDER BY created_at DESC LIMIT 1').get() as
+      | QueueVersionRow
+      | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface WiringStatus {
   capability: string;
   wired: boolean;
@@ -125,6 +140,8 @@ export interface HealthReport {
   };
   skillFolders: SkillFolder[];
   anthropicApiKeyPresent: boolean;
+  /** Total `queue_versions` rows + the most recent snapshot across every project (Session 3 — Autonomy). */
+  promptLibrary: { totalSnapshots: number; latest: QueueVersionRow | null };
   wiring: WiringStatus[];
 }
 
@@ -183,7 +200,25 @@ export async function gatherHealthReport(): Promise<HealthReport> {
       wired: isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'CodebaseRag'),
       detail: 'src/phases/phase3-executor.ts imports CodebaseRag from src/tools/codebase-rag.ts.',
     },
+    {
+      capability: 'forge compile',
+      wired: isReferencedIn(forgeRoot, 'src/cli/index.ts', "command('compile')"),
+      detail: 'src/cli/index.ts registers the `compile` command (src/cli/compile-command.ts).',
+    },
+    {
+      capability: 'auto-resume',
+      wired: isReferencedIn(forgeRoot, 'src/cli/index.ts', '--auto-resume'),
+      detail: 'src/cli/index.ts declares --auto-resume on `forge build`, wired to src/engine/auto-resume.ts.',
+    },
+    {
+      capability: 're-anchor injection',
+      wired: isReferencedIn(forgeRoot, 'src/cli/compile-command.ts', 'REANCHOR_INTERVAL'),
+      detail: 'src/cli/compile-command.ts injects a re-anchor entry every REANCHOR_INTERVAL (15) real prompts.',
+    },
   ];
+
+  const queueVersionsCount = tableRowCount('queue_versions');
+  const promptLibrary = { totalSnapshots: queueVersionsCount, latest: latestQueueVersion() };
 
   return {
     generatedAt: new Date().toISOString(),
@@ -194,6 +229,7 @@ export async function gatherHealthReport(): Promise<HealthReport> {
     uiUxProMax: { scriptPath, found: scriptPath !== null, python },
     skillFolders,
     anthropicApiKeyPresent,
+    promptLibrary,
     wiring,
   };
 }
@@ -236,6 +272,17 @@ export function renderHealthReportMarkdown(report: HealthReport): string {
     for (const s of report.skillFolders) {
       lines.push(`- ${s.name} ${s.hasSkillMd ? '(SKILL.md present)' : '(MISSING SKILL.md)'}`);
     }
+  }
+  lines.push('');
+  lines.push('## Prompt library (Session 3 — Autonomy)');
+  lines.push('');
+  lines.push(`- Snapshots (\`queue_versions\` rows): ${report.promptLibrary.totalSnapshots}`);
+  if (report.promptLibrary.latest) {
+    const l = report.promptLibrary.latest;
+    lines.push(`- Latest: \`${l.project_name}\` — hash \`${l.queue_hash}\`, ${l.entry_count} entries, ${l.created_at}`);
+    lines.push(`  - \`${l.snapshot_path}\``);
+  } else {
+    lines.push('- Latest: (none yet — run `forge compile`)');
   }
   lines.push('');
   lines.push('## Environment');
@@ -291,6 +338,15 @@ function renderHealthReportConsole(report: HealthReport): string {
     for (const s of report.skillFolders) {
       lines.push(`  ${s.name} ${s.hasSkillMd ? chalk.green('✔ SKILL.md') : chalk.red('✖ missing SKILL.md')}`);
     }
+  }
+
+  lines.push(chalk.bold('\nPrompt library'));
+  lines.push(`  snapshots: ${report.promptLibrary.totalSnapshots}`);
+  if (report.promptLibrary.latest) {
+    const l = report.promptLibrary.latest;
+    lines.push(`  latest:    ${l.project_name} — ${l.queue_hash} (${l.entry_count} entries, ${chalk.dim(l.created_at)})`);
+  } else {
+    lines.push(chalk.dim('  latest:    (none yet — run `forge compile`)'));
   }
 
   lines.push(chalk.bold('\nEnvironment'));

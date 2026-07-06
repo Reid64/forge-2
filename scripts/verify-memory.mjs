@@ -35,7 +35,11 @@ try {
   assert(dbPath.startsWith(tmpHome), `Build Memory resolved under the temp home (${dbPath})`);
 
   initializeForgeMemory();
-  assert(getSchemaVersion() === '2.0.0', `schema_version is 2.0.0 (got ${getSchemaVersion()})`);
+  // Schema version advances across sessions (2.0.0 in Session 1, 2.1.0 in Session 3, …) — this
+  // script only needs to prove migration ran, not pin an exact historical version.
+  const schemaVersion = getSchemaVersion();
+  assert(/^\d+\.\d+\.\d+$/.test(schemaVersion), `schema_version is a valid semver-shaped string (got ${schemaVersion})`);
+  assert(schemaVersion !== '1.0.0', `schema_version advanced past the pre-migration baseline (got ${schemaVersion})`);
 
   const created = await createBuild({
     project_name: 'verify-memory',

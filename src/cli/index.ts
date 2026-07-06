@@ -50,13 +50,16 @@ import { runPhase1aPrd } from '../phases/phase1a-prd.js';
 import { runPhase1bArchitect, type ArchitectureDesign } from '../phases/phase1b-architect.js';
 import { runPhase2Governance } from '../phases/phase2-governance.js';
 import { generateQueue, type QueueEntry } from '../engine/queue-generator.js';
-import { runPhase3Executor, type Phase3Result } from '../phases/phase3-executor.js';
+import { runPhase3Executor, type Phase3Options, type Phase3Result } from '../phases/phase3-executor.js';
 import { runPhase5Learner } from '../phases/phase5-learner.js';
 import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
 import { cmdHealth } from './health-command.js';
+import { cmdCompile } from './compile-command.js';
+import { cmdGeneratePrompts } from './generate-prompts-command.js';
+import { diffQueueEntries, getQueueVersion, loadQueueEntriesFromFile } from '../tools/queue-versioning.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -543,10 +546,61 @@ async function parseGovernanceDocs(projectPath: string): Promise<{
 }
 
 /** `forge build <path>` — the full autonomous pipeline (Phase 0 → 5). */
+/**
+ * Run Phase 3 once, or — when `autoResume` is set — drive it through
+ * `runWithAutoResume` (`src/engine/auto-resume.ts`): compute `--start-at` from Build Memory /
+ * state files, run, and re-fire after a claude-runner timeout/exit until the build completes,
+ * a genuine Sentinel halt stops it, or `maxResumes` cycles are spent. `baseOptions` must NOT
+ * set `startAt` when `autoResume` is on — auto-resume always computes it fresh, per cycle
+ * (Session 3 — Autonomy: "on startup with --auto-resume … determine the last COMPLETED prompt
+ * index"); a manually-supplied `--start-at` is honored only for the single non-auto-resume path.
+ */
+async function runPhase3MaybeAutoResume(
+  baseOptions: Omit<Phase3Options, 'startAt'>,
+  manualStartAt: number | undefined,
+  autoResume: boolean,
+  resumeWaitMinutes: number,
+  maxResumes: number
+): Promise<Phase3Result> {
+  if (!autoResume) {
+    return runPhase3Executor(manualStartAt !== undefined ? { ...baseOptions, startAt: manualStartAt } : baseOptions);
+  }
+  const { runWithAutoResume } = await import('../engine/auto-resume.js');
+  const outcome = await runWithAutoResume({
+    projectPath: baseOptions.projectPath,
+    projectName: baseOptions.projectName ?? basename(baseOptions.projectPath),
+    runPhase3: (startAt) => runPhase3Executor({ ...baseOptions, startAt }),
+    resumeWaitMinutes,
+    maxResumes,
+    log: baseOptions.log ?? (() => {}),
+  });
+  if (outcome.cycles > 0) {
+    baseOptions.log?.(
+      `auto-resume: ${outcome.cycles} resume cycle(s) — start indices: ${outcome.startAtHistory.join(', ')}`
+    );
+  }
+  return outcome.finalResult;
+}
+
 async function cmdBuild(
   pathArg: string,
-  opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean; useExistingQueue?: boolean; startAt?: string }
+  opts: {
+    idea?: string;
+    prd?: string;
+    autonomousRecovery?: boolean;
+    dryRun?: boolean;
+    skipSecurityGate?: boolean;
+    skipDesign?: boolean;
+    useExistingQueue?: boolean;
+    startAt?: string;
+    autoResume?: boolean;
+    resumeWaitMinutes?: string;
+    maxResumes?: string;
+  }
 ): Promise<void> {
+  const autoResume = opts.autoResume ?? false;
+  const resumeWaitMinutes = Number.parseInt(opts.resumeWaitMinutes ?? '5', 10);
+  const maxResumes = Number.parseInt(opts.maxResumes ?? '20', 10);
   // --start-at: parse and validate early so bad input exits before Phase 0.
   let startAt: number | undefined;
   if (opts.startAt !== undefined) {
@@ -583,17 +637,22 @@ async function cmdBuild(
 
     const scout = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
     const exec = await withSpinner('Phase 3 — Build Executor', (log) =>
-      runPhase3Executor({
-        projectPath,
-        projectName,
-        queuePath,
-        stackFingerprint: scout.stackFingerprint,
-        toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
-        autonomousRecoveryMode: opts.autonomousRecovery ?? false,
-        dryRun: opts.dryRun ?? false,
+      runPhase3MaybeAutoResume(
+        {
+          projectPath,
+          projectName,
+          queuePath,
+          stackFingerprint: scout.stackFingerprint,
+          toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
+          autonomousRecoveryMode: opts.autonomousRecovery ?? false,
+          dryRun: opts.dryRun ?? false,
+          log,
+        },
         startAt,
-        log,
-      })
+        autoResume,
+        resumeWaitMinutes,
+        maxResumes
+      )
     );
     reportExecution(exec);
 
@@ -662,7 +721,23 @@ async function cmdBuild(
     printWarnings(gov.warnings);
     const q = await withSpinner('Phase 2 - Queue', (log) => generateQueue(projectPath, fd as unknown as ArchitectureDesign, { projectName, log }));
     printWarnings(q.warnings);
-    const exec = await withSpinner('Phase 3 - Build Executor', (log) => runPhase3Executor({ projectPath, projectName, stackFingerprint: sr.stackFingerprint, toolchainManifest: sr.toolchainManifest as unknown as JsonObject, autonomousRecoveryMode: opts.autonomousRecovery ?? false, dryRun: opts.dryRun ?? false, startAt, log }));
+    const exec = await withSpinner('Phase 3 - Build Executor', (log) =>
+      runPhase3MaybeAutoResume(
+        {
+          projectPath,
+          projectName,
+          stackFingerprint: sr.stackFingerprint,
+          toolchainManifest: sr.toolchainManifest as unknown as JsonObject,
+          autonomousRecoveryMode: opts.autonomousRecovery ?? false,
+          dryRun: opts.dryRun ?? false,
+          log,
+        },
+        startAt,
+        autoResume,
+        resumeWaitMinutes,
+        maxResumes
+      )
+    );
     reportExecution(exec);
     return;
   }
@@ -688,16 +763,21 @@ async function cmdBuild(
 
   // Phase 3 — Build Executor (runs Phase 4 Sentinel per-prompt internally).
   const exec = await withSpinner('Phase 3 — Build Executor', (log) =>
-    runPhase3Executor({
-      projectPath,
-      projectName,
-      stackFingerprint: scout.stackFingerprint,
-      toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
-      autonomousRecoveryMode: opts.autonomousRecovery ?? false,
-      dryRun: opts.dryRun ?? false,
+    runPhase3MaybeAutoResume(
+      {
+        projectPath,
+        projectName,
+        stackFingerprint: scout.stackFingerprint,
+        toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
+        autonomousRecoveryMode: opts.autonomousRecovery ?? false,
+        dryRun: opts.dryRun ?? false,
+        log,
+      },
       startAt,
-      log,
-    })
+      autoResume,
+      resumeWaitMinutes,
+      maxResumes
+    )
   );
   reportExecution(exec);
 
@@ -1384,6 +1464,52 @@ async function cmdBrandInherit(
 }
 
 // ---------------------------------------------------------------------------
+// `forge queue-diff` — entry-level diff of the current queue.yaml vs a prompt-library snapshot
+// ---------------------------------------------------------------------------
+
+/** `forge queue-diff [--project <path>] [--against <hash-or-'previous'>]`. */
+async function cmdQueueDiff(opts: { project?: string; against?: string }): Promise<void> {
+  const projectPath = resolveProjectPath(opts.project ?? '.');
+  const projectName = basename(projectPath) || 'project';
+  const currentPath = join(projectPath, 'queue.yaml');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(currentPath)) {
+    fail(`No queue.yaml found at ${currentPath}.`);
+    return;
+  }
+
+  const against = opts.against ?? 'previous';
+  const snapshot = getQueueVersion(projectName, against);
+  if (!snapshot) {
+    fail(`No queue snapshot found for project "${projectName}" (against: "${against}"). Run \`forge compile\` first.`);
+    return;
+  }
+
+  const [current, before] = await Promise.all([
+    loadQueueEntriesFromFile(currentPath),
+    loadQueueEntriesFromFile(snapshot.snapshot_path),
+  ]);
+  const diff = diffQueueEntries(before, current);
+
+  console.log(
+    chalk.bold(`\nQueue diff: current (${current.length} entries) vs snapshot ${snapshot.queue_hash} `) +
+      chalk.dim(`(${snapshot.created_at}, ${before.length} entries)`)
+  );
+
+  console.log(chalk.bold(`\nAdded (${diff.added.length}):`));
+  if (diff.added.length === 0) console.log(chalk.dim('  (none)'));
+  else for (const id of diff.added) console.log(chalk.green(`  + ${id}`));
+
+  console.log(chalk.bold(`\nRemoved (${diff.removed.length}):`));
+  if (diff.removed.length === 0) console.log(chalk.dim('  (none)'));
+  else for (const id of diff.removed) console.log(chalk.red(`  - ${id}`));
+
+  console.log(chalk.bold(`\nModified (${diff.modified.length}):`));
+  if (diff.modified.length === 0) console.log(chalk.dim('  (none)'));
+  else for (const m of diff.modified) console.log(chalk.yellow(`  ~ ${m.id}`) + chalk.dim(`  (${m.changedFields.join(', ')})`));
+}
+
+// ---------------------------------------------------------------------------
 // `forge repair <path>` — repair a broken TypeScript repository
 // ---------------------------------------------------------------------------
 
@@ -1516,8 +1642,30 @@ async function main(): Promise<void> {
     .option('--skip-design', 'skip Phase 1A+1B and use existing governance docs', false)
     .option('--use-existing-queue', 'skip Phase 1 (design) and Phase 2 (governance + queue generation); run Phase 3 directly against the existing queue.yaml', false)
     .option('--start-at <number>', 'skip all prompts before this 1-based index and resume from it')
-    .action((pathArg: string, opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipDesign?: boolean; useExistingQueue?: boolean; skipSecurityGate?: boolean; startAt?: string }) =>
-      cmdBuild(pathArg, opts)
+    .option(
+      '--auto-resume',
+      'resume automatically from Build Memory / SESSION_STATE.md + STATE_OF_THE_BUILD.md after a claude-runner timeout/exit, looping until done, genuinely halted, or --max-resumes is spent',
+      false
+    )
+    .option('--resume-wait-minutes <n>', 'backoff between --auto-resume cycles', '5')
+    .option('--max-resumes <n>', 'cap on --auto-resume cycles', '20')
+    .action(
+      (
+        pathArg: string,
+        opts: {
+          idea?: string;
+          prd?: string;
+          autonomousRecovery?: boolean;
+          dryRun?: boolean;
+          skipDesign?: boolean;
+          useExistingQueue?: boolean;
+          skipSecurityGate?: boolean;
+          startAt?: string;
+          autoResume?: boolean;
+          resumeWaitMinutes?: string;
+          maxResumes?: string;
+        }
+      ) => cmdBuild(pathArg, opts)
     );
 
   program
@@ -1653,6 +1801,30 @@ async function main(): Promise<void> {
     .command('health')
     .description('Diagnose Build Memory, the UI/UX Pro Max skill, and capability wiring; writes FORGE_HEALTH.md')
     .action(() => cmdHealth());
+
+  program
+    .command('compile')
+    .description('Merge a prompts/ directory (one queue entry per file) into one master queue.yaml, with a mandatory context re-anchor every 15 prompts')
+    .option('--prompts-dir <dir>', 'directory to scan for *.yaml prompt files (default <project>/prompts)')
+    .option('--out <file>', 'where to write the merged queue.yaml (default <project>/queue.yaml)')
+    .option('--project <path>', 'target project directory (default cwd)')
+    .action((opts: { promptsDir?: string; out?: string; project?: string }) => cmdCompile(opts));
+
+  program
+    .command('generate-prompts')
+    .description("Generate a prompts/ library from a governance package via the LLM (review it, then run `forge compile`)")
+    .requiredOption('--docs <dir>', 'directory containing the governance package (BLUEPRINT.md, SCHEMA_REGISTRY.md, …)')
+    .option('--out <dir>', 'output directory for the generated prompt library (default <project>/prompts)')
+    .option('--project <path>', 'target project directory (default cwd)')
+    .option('--max-prompts <n>', 'cap on the total number of prompts the plan may generate')
+    .action((opts: { docs?: string; out?: string; project?: string; maxPrompts?: string }) => cmdGeneratePrompts(opts));
+
+  program
+    .command('queue-diff')
+    .description('Diff the current queue.yaml against a prompt-library snapshot at the entry level (added / removed / modified)')
+    .option('--project <path>', 'target project directory (default cwd)')
+    .option('--against <hash-or-previous>', "snapshot to diff against — a queue_hash prefix, or 'previous' (default)", 'previous')
+    .action((opts: { project?: string; against?: string }) => cmdQueueDiff(opts));
 
   program
     .command('brand-inherit')

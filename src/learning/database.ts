@@ -309,6 +309,24 @@ const BUILD_MEMORY_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_type ON scheduled_tasks(task_type, enabled);
 `;
 
+/**
+ * Prompt-library versioning (Session 3 — Autonomy). Every successful `forge compile` snapshots
+ * the written queue.yaml under `<project>/.forge/queue-history/` and records one row here — see
+ * `src/tools/queue-versioning.ts`. Schema bump 2.0.0 -> 2.1.0.
+ */
+const QUEUE_VERSIONING_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS queue_versions (
+      id             TEXT PRIMARY KEY,
+      project_name   TEXT NOT NULL,
+      queue_hash     TEXT NOT NULL,
+      entry_count    INTEGER NOT NULL DEFAULT 0,
+      snapshot_path  TEXT NOT NULL,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_queue_versions_project ON queue_versions(project_name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_queue_versions_hash ON queue_versions(queue_hash);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -324,6 +342,8 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'design_patterns',
   'brand_identities',
   'scheduled_tasks',
+  // Prompt-library versioning (Session 3 — Autonomy)
+  'queue_versions',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -576,20 +596,23 @@ export function initializeForgeMemory(dbPath?: string): void {
     CREATE INDEX IF NOT EXISTS idx_adversary_severity ON adversary_findings(severity);
   `);
 
-  // Schema migration guard: create the Build Memory table family (idempotent —
-  // CREATE TABLE/INDEX IF NOT EXISTS) and bump schema_version to 2.0.0. Existing
-  // learning-engine data (build_outcomes, hook_execution_log, …) is untouched;
-  // this only ADDS the src/memory/ CRUD layer's tables to the same database file.
+  // Schema migration guard: every step's CREATE TABLE/INDEX is idempotent (IF NOT EXISTS), so
+  // they always run in full — this heals a partially-initialized db from an interrupted prior
+  // run — and `schema_version` is simply advanced to the current target once at the end.
+  // Existing data (build_outcomes, hook_execution_log, brand_identities, …) is never touched.
   const versionRow = db
     .prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'")
     .get() as { value: string } | undefined;
-  if (!versionRow || versionRow.value === '1.0.0') {
-    db.exec(BUILD_MEMORY_SCHEMA_SQL);
-    db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', '2.0.0')").run();
-  } else {
-    // Already migrated (or a future version) — still ensure the tables exist
-    // (idempotent) so a partially-initialized db from an interrupted run is healed.
-    db.exec(BUILD_MEMORY_SCHEMA_SQL);
+  const currentVersion = versionRow?.value ?? '1.0.0';
+  const targetVersion = '2.1.0';
+
+  // 1.0.0 -> 2.0.0 (Session 1 — Memory Consolidation): the src/memory/ CRUD layer's tables.
+  db.exec(BUILD_MEMORY_SCHEMA_SQL);
+  // 2.0.0 -> 2.1.0 (Session 3 — Autonomy): prompt-library versioning.
+  db.exec(QUEUE_VERSIONING_SCHEMA_SQL);
+
+  if (currentVersion !== targetVersion) {
+    db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);
   }
 
   // Store machine ID now that table exists

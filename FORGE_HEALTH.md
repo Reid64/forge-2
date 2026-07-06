@@ -1,11 +1,11 @@
 # FORGE 2.0 — Health Report
 
-Generated: 2026-07-06T00:39:50.294Z
+Generated: 2026-07-06T01:23:43.398Z
 
 ## Build Memory
 
 - Database: `C:\Users\manag\.forge\forge_memory.db`
-- Schema version: `2.0.0`
+- Schema version: `2.1.0`
 - Machine ID: `089851cda1351217`
 
 | Table | Exists | Rows | Most recent created_at |
@@ -22,6 +22,7 @@ Generated: 2026-07-06T00:39:50.294Z
 | design_patterns | yes | 0 | — |
 | brand_identities | yes | 0 | — |
 | scheduled_tasks | yes | 0 | — |
+| queue_versions | yes | 0 | — |
 | prompt_scores | yes | 0 | — |
 | fix_patterns | yes | 0 | — |
 | decision_weights | yes | 0 | — |
@@ -53,6 +54,11 @@ Generated: 2026-07-06T00:39:50.294Z
 - skills/six-laws-gate (SKILL.md present)
 - skills/ui-ux-pro-max (SKILL.md present)
 
+## Prompt library (Session 3 — Autonomy)
+
+- Snapshots (`queue_versions` rows): 0
+- Latest: (none yet — run `forge compile`)
+
 ## Environment
 
 - ANTHROPIC_API_KEY: present
@@ -68,3 +74,6 @@ Generated: 2026-07-06T00:39:50.294Z
 | brands storage | WIRED | src/phases/phase1b-architect.ts calls createBrand/updateBrand; brand_identities has 0 row(s). |
 | learning hooks | WIRED | hook_execution_log has 7 row(s). |
 | codebase RAG | WIRED | src/phases/phase3-executor.ts imports CodebaseRag from src/tools/codebase-rag.ts. |
+| forge compile | WIRED | src/cli/index.ts registers the `compile` command (src/cli/compile-command.ts). |
+| auto-resume | WIRED | src/cli/index.ts declares --auto-resume on `forge build`, wired to src/engine/auto-resume.ts. |
+| re-anchor injection | WIRED | src/cli/compile-command.ts injects a re-anchor entry every REANCHOR_INTERVAL (15) real prompts. |
