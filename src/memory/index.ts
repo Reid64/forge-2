@@ -68,9 +68,9 @@ export const BuildMemory = {
   patterns,
   brands,
   scheduledTasks,
-  /** Direct access to the underlying Supabase client (or null in stateless mode). */
+  /** Direct access to the underlying SQLite database handle (or null in stateless mode). */
   getClient,
-  /** Reset the cached client (tests / re-reading env). */
+  /** Reset the cached database handle (tests / re-initializing). */
   resetClient,
 } as const;
 

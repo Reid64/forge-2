@@ -51,7 +51,7 @@ import { scanProjectSecurity } from '../tools/agent-shield.js';
 import { detectSchemaDrift } from '../tools/schema-validator.js';
 import { HookManager } from '../engine/hook-manager.js';
 import { onSessionStart } from '../memory/session-hooks.js';
-import type { BuildRun, SecurityReport, SessionContext } from '../types/index.js';
+import type { SecurityReport, SessionContext } from '../types/index.js';
 
 const execAsync = promisify(exec);
 
@@ -243,13 +243,12 @@ async function pathExists(path: string): Promise<boolean> {
 async function loadCachedConfig(
   machineId: string
 ): Promise<{ registered: boolean; lastBuiltAt: string | null }> {
-  const rows = await runQuery<BuildRun[]>('phase0:loadCachedConfig', async (c) =>
-    c
-      .from('build_runs')
-      .select('*')
-      .eq('machine_id', machineId)
-      .order('created_at', { ascending: false })
-      .limit(1)
+  const rows = await runQuery<Array<{ id: string; created_at: string }>>(
+    'phase0:loadCachedConfig',
+    (db) =>
+      db
+        .prepare('SELECT id, created_at FROM build_runs WHERE machine_id = ? ORDER BY created_at DESC LIMIT 1')
+        .all(machineId) as Array<{ id: string; created_at: string }>
   );
 
   const latest = rows && rows.length > 0 ? rows[0] : undefined;

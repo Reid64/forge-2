@@ -6,7 +6,6 @@
  * lifecycle events (HookEvent in src/types/index.ts).
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   BuildRun,
   ErrorPattern,
@@ -22,7 +21,7 @@ import {
   updateOccurrenceCount,
 } from './errors.js';
 import { findApplicableInsights, createInsight } from './insights.js';
-import { logMemoryWarning, nowIso } from './client.js';
+import { logMemoryWarning, nowIso, toJsonText, type MemoryDb } from './client.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -123,21 +122,30 @@ function extractContextSnapshot(context: string): ContextSnapshot {
  */
 export async function onSessionStart(
   projectPath: string,
-  memoryClient: SupabaseClient
+  memoryClient: MemoryDb
 ): Promise<SessionContext> {
-  const { data: buildsData, error: buildsError } = await memoryClient
-    .from('build_runs')
-    .select('*')
-    .eq('project_path', projectPath)
-    .in('status', ['completed', 'failed'])
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  if (buildsError) {
-    logMemoryWarning('onSessionStart.lastBuild', buildsError);
+  let lastBuildRun: BuildRun | null = null;
+  try {
+    const row = memoryClient
+      .prepare(
+        `SELECT * FROM build_runs WHERE project_path = ? AND status IN ('completed', 'failed')
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(projectPath) as Record<string, unknown> | undefined;
+    if (row) {
+      lastBuildRun = {
+        ...row,
+        stack_fingerprint: JSON.parse((row.stack_fingerprint as string) ?? '{}'),
+        toolchain_manifest: JSON.parse((row.toolchain_manifest as string) ?? '{}'),
+        autonomous_recovery_mode: row.autonomous_recovery_mode === 1,
+        parallel_prompts_used: row.parallel_prompts_used === 1,
+        dry_run: row.dry_run === 1,
+      } as unknown as BuildRun;
+    }
+  } catch (error) {
+    logMemoryWarning('onSessionStart.lastBuild', error);
   }
 
-  const lastBuildRun = (buildsData as BuildRun[] | null)?.[0] ?? null;
   const activeErrorPatterns = (await getAutoResolvable()) ?? [];
   const applicableInsights = (await findApplicableInsights()) ?? [];
   const promptInjection = buildPromptInjection(
@@ -156,7 +164,7 @@ export async function onSessionStart(
  */
 export async function onSessionEnd(
   projectPath: string,
-  _memoryClient: SupabaseClient,
+  _memoryClient: MemoryDb,
   session: SessionMetrics
 ): Promise<void> {
   const endedAt = nowIso();
@@ -207,33 +215,23 @@ export async function onSessionEnd(
  */
 export async function onPreCompact(
   currentContext: string,
-  memoryClient: SupabaseClient
+  memoryClient: MemoryDb
 ): Promise<string> {
   const snapshot = extractContextSnapshot(currentContext);
   const snapshotAt = nowIso();
 
-  const { data: runningData, error: findError } = await memoryClient
-    .from('build_runs')
-    .select('id')
-    .eq('status', 'running')
-    .order('started_at', { ascending: false })
-    .limit(1);
+  try {
+    const running = memoryClient
+      .prepare("SELECT id FROM build_runs WHERE status = 'running' ORDER BY started_at DESC LIMIT 1")
+      .get() as { id: string } | undefined;
 
-  if (findError) {
-    logMemoryWarning('onPreCompact.findRunning', findError);
-  }
-
-  const buildId = (runningData as Array<{ id: string }> | null)?.[0]?.id;
-
-  if (buildId) {
-    const { error: saveError } = await memoryClient
-      .from('build_runs')
-      .update({ session_snapshots: { ...snapshot, saved_at: snapshotAt } })
-      .eq('id', buildId);
-
-    if (saveError) {
-      logMemoryWarning('onPreCompact.saveSnapshot', saveError);
+    if (running) {
+      memoryClient
+        .prepare('UPDATE build_runs SET session_snapshots = ? WHERE id = ?')
+        .run(toJsonText({ ...snapshot, saved_at: snapshotAt }), running.id);
     }
+  } catch (error) {
+    logMemoryWarning('onPreCompact.saveSnapshot', error);
   }
 
   return [

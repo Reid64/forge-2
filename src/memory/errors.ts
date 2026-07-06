@@ -1,15 +1,23 @@
 /**
  * FORGE 2.0 — Build Memory: error_patterns CRUD.
  *
- * Generalized error patterns extracted across all builds. See SCHEMA_REGISTRY.md ›
- * error_patterns and BEHAVIORAL_CONTRACTS.md Contract 15 (Error Pattern
- * Generalization).
+ * Generalized error patterns extracted across all builds. See
+ * src/learning/database.ts › BUILD_MEMORY_SCHEMA_SQL › error_patterns and
+ * BEHAVIORAL_CONTRACTS.md Contract 15 (Error Pattern Generalization).
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
-
 import type { ErrorCategory, ErrorPattern } from '../types/index.js';
-import { logMemoryWarning, nowIso, runQuery } from './client.js';
+import {
+  fromJsonText,
+  fromSqliteBool,
+  logMemoryWarning,
+  newId,
+  nowIso,
+  runQuery,
+  toJsonText,
+  toSqliteBool,
+  type MemoryDb,
+} from './client.js';
 
 const TABLE = 'error_patterns';
 
@@ -31,13 +39,89 @@ export type NewErrorPattern = Pick<
     >
   >;
 
+interface ErrorPatternRow {
+  id: string;
+  error_signature: string;
+  error_category: string;
+  error_message_sample: string;
+  occurrence_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  first_seen_project: string;
+  stack_fingerprints: string;
+  trigger_phase: string | null;
+  trigger_prompt_pattern: string | null;
+  resolution_id: string | null;
+  prevention_rule: string | null;
+  success_rate: number;
+  auto_resolve_eligible: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToErrorPattern(row: ErrorPatternRow): ErrorPattern {
+  return {
+    id: row.id,
+    error_signature: row.error_signature,
+    error_category: row.error_category as ErrorCategory,
+    error_message_sample: row.error_message_sample,
+    occurrence_count: row.occurrence_count,
+    first_seen_at: row.first_seen_at,
+    last_seen_at: row.last_seen_at,
+    first_seen_project: row.first_seen_project,
+    stack_fingerprints: fromJsonText(row.stack_fingerprints, []),
+    trigger_phase: row.trigger_phase,
+    trigger_prompt_pattern: row.trigger_prompt_pattern,
+    resolution_id: row.resolution_id,
+    prevention_rule: row.prevention_rule,
+    success_rate: row.success_rate,
+    auto_resolve_eligible: fromSqliteBool(row.auto_resolve_eligible),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 /** Insert a new error_pattern row. Returns the created row, or null. */
 export function createErrorPattern(
   input: NewErrorPattern
 ): Promise<ErrorPattern | null> {
-  return runQuery<ErrorPattern>('createErrorPattern', async (c) =>
-    c.from(TABLE).insert(input).select().single()
-  );
+  return runQuery<ErrorPattern>(TABLE + '.createErrorPattern', (db) => {
+    const id = newId();
+    const ts = nowIso();
+    db.prepare(
+      `INSERT INTO error_patterns (
+        id, error_signature, error_category, error_message_sample, occurrence_count,
+        first_seen_at, last_seen_at, first_seen_project, stack_fingerprints, trigger_phase,
+        trigger_prompt_pattern, resolution_id, prevention_rule, success_rate,
+        auto_resolve_eligible, created_at, updated_at
+      ) VALUES (
+        @id, @error_signature, @error_category, @error_message_sample, @occurrence_count,
+        @first_seen_at, @last_seen_at, @first_seen_project, @stack_fingerprints, @trigger_phase,
+        @trigger_prompt_pattern, @resolution_id, @prevention_rule, @success_rate,
+        @auto_resolve_eligible, @created_at, @updated_at
+      )`
+    ).run({
+      id,
+      error_signature: input.error_signature,
+      error_category: input.error_category,
+      error_message_sample: input.error_message_sample,
+      occurrence_count: input.occurrence_count ?? 1,
+      first_seen_at: input.first_seen_at ?? ts,
+      last_seen_at: input.last_seen_at ?? ts,
+      first_seen_project: input.first_seen_project,
+      stack_fingerprints: toJsonText(input.stack_fingerprints ?? []),
+      trigger_phase: input.trigger_phase ?? null,
+      trigger_prompt_pattern: input.trigger_prompt_pattern ?? null,
+      resolution_id: input.resolution_id ?? null,
+      prevention_rule: input.prevention_rule ?? null,
+      success_rate: input.success_rate ?? 0,
+      auto_resolve_eligible: toSqliteBool(input.auto_resolve_eligible ?? false),
+      created_at: ts,
+      updated_at: ts,
+    });
+    const row = db.prepare('SELECT * FROM error_patterns WHERE id = ?').get(id) as ErrorPatternRow;
+    return rowToErrorPattern(row);
+  });
 }
 
 /**
@@ -48,9 +132,12 @@ export function createErrorPattern(
 export function findMatchingPattern(
   errorSignature: string
 ): Promise<ErrorPattern | null> {
-  return runQuery<ErrorPattern>('findMatchingPattern', async (c) =>
-    c.from(TABLE).select('*').eq('error_signature', errorSignature).maybeSingle()
-  );
+  return runQuery<ErrorPattern>(TABLE + '.findMatchingPattern', (db) => {
+    const row = db
+      .prepare('SELECT * FROM error_patterns WHERE error_signature = ?')
+      .get(errorSignature) as ErrorPatternRow | undefined;
+    return row ? rowToErrorPattern(row) : null;
+  });
 }
 
 /**
@@ -62,44 +149,38 @@ export function findMatchingPattern(
 export async function updateOccurrenceCount(
   id: string
 ): Promise<ErrorPattern | null> {
-  const current = await runQuery<ErrorPattern>(
-    'updateOccurrenceCount.read',
-    async (c) => c.from(TABLE).select('*').eq('id', id).maybeSingle()
-  );
-  if (!current) return null;
-
-  return runQuery<ErrorPattern>('updateOccurrenceCount.write', async (c) =>
-    c
-      .from(TABLE)
-      .update({
-        occurrence_count: current.occurrence_count + 1,
-        last_seen_at: nowIso(),
-        updated_at: nowIso(),
-      })
-      .eq('id', id)
-      .select()
-      .single()
-  );
+  return runQuery<ErrorPattern>(TABLE + '.updateOccurrenceCount', (db) => {
+    const current = db.prepare('SELECT * FROM error_patterns WHERE id = ?').get(id) as
+      | ErrorPatternRow
+      | undefined;
+    if (!current) return null;
+    const ts = nowIso();
+    db.prepare(
+      'UPDATE error_patterns SET occurrence_count = ?, last_seen_at = ?, updated_at = ? WHERE id = ?'
+    ).run(current.occurrence_count + 1, ts, ts, id);
+    const row = db.prepare('SELECT * FROM error_patterns WHERE id = ?').get(id) as ErrorPatternRow;
+    return rowToErrorPattern(row);
+  });
 }
 
 /**
  * List error patterns whose `trigger_prompt_pattern` matches a prompt type (e.g.
  * 'schema', 'auth', 'ui', 'api'), most-frequent first. Used by the prompt-assembler
  * (s5-p01) to inject prevention warnings into a prompt and by the failure-predictor
- * (s5-p02). Stack filtering (against `stack_fingerprints`) is left to the caller —
- * jsonb-array containment is awkward in PostgREST and the candidate set is small.
+ * (s5-p02). Stack filtering (against `stack_fingerprints`) is left to the caller.
  * Returns null on failure.
  */
 export function findPatternsByPromptType(
   promptPattern: string
 ): Promise<ErrorPattern[] | null> {
-  return runQuery<ErrorPattern[]>('findPatternsByPromptType', async (c) =>
-    c
-      .from(TABLE)
-      .select('*')
-      .eq('trigger_prompt_pattern', promptPattern)
-      .order('occurrence_count', { ascending: false })
-  );
+  return runQuery<ErrorPattern[]>(TABLE + '.findPatternsByPromptType', (db) => {
+    const rows = db
+      .prepare(
+        'SELECT * FROM error_patterns WHERE trigger_prompt_pattern = ? ORDER BY occurrence_count DESC'
+      )
+      .all(promptPattern) as ErrorPatternRow[];
+    return rows.map(rowToErrorPattern);
+  });
 }
 
 /**
@@ -107,13 +188,22 @@ export function findPatternsByPromptType(
  * highest success_rate first. Returns null on failure.
  */
 export function getAutoResolvable(): Promise<ErrorPattern[] | null> {
-  return runQuery<ErrorPattern[]>('getAutoResolvable', async (c) =>
-    c
-      .from(TABLE)
-      .select('*')
-      .eq('auto_resolve_eligible', true)
-      .order('success_rate', { ascending: false })
-  );
+  return runQuery<ErrorPattern[]>(TABLE + '.getAutoResolvable', (db) => {
+    const rows = db
+      .prepare('SELECT * FROM error_patterns WHERE auto_resolve_eligible = 1 ORDER BY success_rate DESC')
+      .all() as ErrorPatternRow[];
+    return rows.map(rowToErrorPattern);
+  });
+}
+
+/** List every error pattern, most-frequent first. Returns null on failure. */
+export function listAllPatterns(): Promise<ErrorPattern[] | null> {
+  return runQuery<ErrorPattern[]>(TABLE + '.listAllPatterns', (db) => {
+    const rows = db
+      .prepare('SELECT * FROM error_patterns ORDER BY occurrence_count DESC')
+      .all() as ErrorPatternRow[];
+    return rows.map(rowToErrorPattern);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -154,26 +244,25 @@ export interface ErrorRecord {
  */
 export async function matchError(
   errorText: string,
-  client: SupabaseClient
+  client: MemoryDb
 ): Promise<ErrorMatch | null> {
   try {
-    const snippet = errorText.slice(0, 50).replace(/[%_]/g, '\\$&');
-    const { data, error } = await client
-      .from(TABLE)
-      .select('*')
-      .or(
-        `error_message_sample.ilike.%${snippet}%,error_signature.ilike.%${snippet}%`
+    const snippet = `%${errorText.slice(0, 50)}%`;
+    const rows = client
+      .prepare(
+        `SELECT * FROM error_patterns
+         WHERE error_message_sample LIKE ? OR error_signature LIKE ?
+         ORDER BY occurrence_count DESC LIMIT 10`
       )
-      .order('occurrence_count', { ascending: false })
-      .limit(10);
+      .all(snippet, snippet) as ErrorPatternRow[];
 
-    if (error || !data || (data as ErrorPattern[]).length === 0) return null;
+    if (rows.length === 0) return null;
 
     const target = errorText.toLowerCase();
-    let best: ErrorPattern | null = null;
+    let best: ErrorPatternRow | null = null;
     let bestScore = 0;
 
-    for (const row of data as ErrorPattern[]) {
+    for (const row of rows) {
       const sample = row.error_message_sample.toLowerCase();
       const score = sample
         .split(/\W+/)
@@ -186,10 +275,11 @@ export async function matchError(
 
     if (!best) return null;
 
+    const pattern = rowToErrorPattern(best);
     return {
-      pattern: best,
-      fix: best.prevention_rule,
-      flagForGovernance: best.occurrence_count >= 3,
+      pattern,
+      fix: pattern.prevention_rule,
+      flagForGovernance: pattern.occurrence_count >= 3,
     };
   } catch (err) {
     logMemoryWarning('matchError', err);
@@ -204,43 +294,41 @@ export async function matchError(
  */
 export async function recordError(
   error: ErrorRecord,
-  client: SupabaseClient
+  client: MemoryDb
 ): Promise<void> {
   try {
-    const { data: existing, error: fetchErr } = await client
-      .from(TABLE)
-      .select('*')
-      .eq('error_signature', error.error_signature)
-      .maybeSingle();
+    const existing = client
+      .prepare('SELECT * FROM error_patterns WHERE error_signature = ?')
+      .get(error.error_signature) as ErrorPatternRow | undefined;
 
-    if (fetchErr) {
-      logMemoryWarning('recordError.fetch', fetchErr);
-      return;
-    }
-
+    const ts = nowIso();
     if (existing) {
-      const { error: updateErr } = await client
-        .from(TABLE)
-        .update({
-          occurrence_count: (existing as ErrorPattern).occurrence_count + 1,
-          last_seen_at: nowIso(),
-          updated_at: nowIso(),
-        })
-        .eq('id', (existing as ErrorPattern).id);
-
-      if (updateErr) logMemoryWarning('recordError.update', updateErr);
+      client
+        .prepare('UPDATE error_patterns SET occurrence_count = ?, last_seen_at = ?, updated_at = ? WHERE id = ?')
+        .run(existing.occurrence_count + 1, ts, ts, existing.id);
     } else {
-      const { error: insertErr } = await client.from(TABLE).insert({
-        ...error,
-        occurrence_count: 1,
-        first_seen_at: nowIso(),
-        last_seen_at: nowIso(),
-        stack_fingerprints: [],
-        success_rate: 0,
-        auto_resolve_eligible: false,
-      });
-
-      if (insertErr) logMemoryWarning('recordError.insert', insertErr);
+      client
+        .prepare(
+          `INSERT INTO error_patterns (
+            id, error_signature, error_category, error_message_sample, occurrence_count,
+            first_seen_at, last_seen_at, first_seen_project, stack_fingerprints, trigger_phase,
+            trigger_prompt_pattern, success_rate, auto_resolve_eligible, created_at, updated_at
+          ) VALUES (
+            @id, @error_signature, @error_category, @error_message_sample, 1,
+            @ts, @ts, @first_seen_project, '[]', @trigger_phase,
+            @trigger_prompt_pattern, 0, 0, @ts, @ts
+          )`
+        )
+        .run({
+          id: newId(),
+          error_signature: error.error_signature,
+          error_category: error.error_category,
+          error_message_sample: error.error_message_sample,
+          first_seen_project: error.first_seen_project,
+          trigger_phase: error.trigger_phase ?? null,
+          trigger_prompt_pattern: error.trigger_prompt_pattern ?? null,
+          ts,
+        });
     }
   } catch (err) {
     logMemoryWarning('recordError', err);
@@ -254,15 +342,12 @@ export async function recordError(
 export async function recordFix(
   errorId: string,
   fix: string,
-  client: SupabaseClient
+  client: MemoryDb
 ): Promise<void> {
   try {
-    const { error } = await client
-      .from(TABLE)
-      .update({ prevention_rule: fix, updated_at: nowIso() })
-      .eq('id', errorId);
-
-    if (error) logMemoryWarning('recordFix', error);
+    client
+      .prepare('UPDATE error_patterns SET prevention_rule = ?, updated_at = ? WHERE id = ?')
+      .run(fix, nowIso(), errorId);
   } catch (err) {
     logMemoryWarning('recordFix', err);
   }
@@ -275,21 +360,13 @@ export async function recordFix(
  */
 export async function getRecurringErrors(
   threshold: number,
-  client: SupabaseClient
+  client: MemoryDb
 ): Promise<ErrorPattern[]> {
   try {
-    const { data, error } = await client
-      .from(TABLE)
-      .select('*')
-      .gte('occurrence_count', threshold)
-      .order('occurrence_count', { ascending: false });
-
-    if (error) {
-      logMemoryWarning('getRecurringErrors', error);
-      return [];
-    }
-
-    return (data as ErrorPattern[]) ?? [];
+    const rows = client
+      .prepare('SELECT * FROM error_patterns WHERE occurrence_count >= ? ORDER BY occurrence_count DESC')
+      .all(threshold) as ErrorPatternRow[];
+    return rows.map(rowToErrorPattern);
   } catch (err) {
     logMemoryWarning('getRecurringErrors', err);
     return [];

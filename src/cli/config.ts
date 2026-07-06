@@ -25,15 +25,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { z, validateConfigFile } from '../tools/schema-validator.js';
+import { getClient } from '../memory/client.js';
 
 /** The resolved FORGE env/runtime configuration the CLI commands consume. */
 export interface EnvConfig {
-  /** Self-hosted Supabase URL (Build Memory backend). */
-  supabaseUrl: string | null;
-  /** Supabase anon key (present for completeness; FORGE uses the service key). */
-  supabaseAnonKey: string | null;
-  /** Supabase service key — what the Build Memory client authenticates with. */
-  supabaseServiceKey: string | null;
   /** Anthropic API key (Phase 1A/1B generation + agent creation). */
   anthropicApiKey: string | null;
   /** Per-machine id for multi-machine build coordination (Contract 4/20). */
@@ -42,7 +37,7 @@ export interface EnvConfig {
   dataDir: string;
   /** Backup-drive directory (BLUEPRINT default `E:\forge-backups`). */
   backupDir: string;
-  /** True once Build Memory is configured (URL + service key present). */
+  /** True once Build Memory (SQLite, `~/.forge/forge_memory.db`) is reachable. */
   buildMemoryEnabled: boolean;
   /** Absolute path of the `.env` file that was loaded, or null if none was found. */
   envFilePath: string | null;
@@ -57,14 +52,11 @@ const DEFAULT_BACKUP_DIR = 'E:\\forge-backups';
 /**
  * Shape contract for the resolved configuration, used to validate it on load
  * (integration point 2 — config files validated with clear, path-pointed messages).
- * Deliberately tolerant of FORGE's degrade-don't-halt stance: the Supabase and
- * Anthropic credentials are `.nullable()` (stateless mode is a valid configuration),
- * but when `supabaseUrl` IS present it must be a well-formed URL, and the always-
- * resolved fields (machineId, dataDir, backupDir) must be non-empty.
+ * Deliberately tolerant of FORGE's degrade-don't-halt stance: the Anthropic
+ * credential is `.nullable()` (stateless mode is a valid configuration), but the
+ * always-resolved fields (machineId, dataDir, backupDir) must be non-empty.
  */
 const EnvConfigShapeSchema = z.object({
-  supabaseUrl: z.string().url('FORGE_SUPABASE_URL must be a valid URL').nullable(),
-  supabaseServiceKey: z.string().min(1).nullable(),
   anthropicApiKey: z.string().min(1).nullable(),
   machineId: z.string().min(1),
   dataDir: z.string().min(1),
@@ -185,19 +177,14 @@ export function loadConfig(projectPath?: string): EnvConfig | ForgeConfig {
   }
 
   // 3. Snapshot the config. ---------------------------------------------------
-  const supabaseUrl = envValue('FORGE_SUPABASE_URL');
-  const supabaseServiceKey = envValue('FORGE_SUPABASE_SERVICE_KEY');
   const anthropicApiKey = envValue('ANTHROPIC_API_KEY');
 
   const config: EnvConfig = {
-    supabaseUrl,
-    supabaseAnonKey: envValue('FORGE_SUPABASE_ANON_KEY'),
-    supabaseServiceKey,
     anthropicApiKey,
     machineId,
     dataDir: envValue('FORGE_DATA_DIR') ?? DEFAULT_DATA_DIR,
     backupDir: envValue('FORGE_BACKUP_DIR') ?? DEFAULT_BACKUP_DIR,
-    buildMemoryEnabled: supabaseUrl !== null && supabaseServiceKey !== null,
+    buildMemoryEnabled: getClient() !== null,
     envFilePath,
     warnings,
   };
@@ -236,10 +223,8 @@ export function describeConfig(config: EnvConfig): string {
   return [
     `env file:        ${config.envFilePath ?? '(none)'}`,
     `machine id:      ${config.machineId}`,
-    `Supabase URL:    ${config.supabaseUrl ?? '—'}`,
-    `service key:     ${mask(config.supabaseServiceKey)}`,
     `anthropic key:   ${mask(config.anthropicApiKey)}`,
-    `Build Memory:    ${config.buildMemoryEnabled ? 'enabled' : 'disabled (stateless mode)'}`,
+    `Build Memory:    ${config.buildMemoryEnabled ? 'enabled (SQLite, ~/.forge/forge_memory.db)' : 'disabled (stateless mode)'}`,
     `data dir:        ${config.dataDir}`,
     `backup dir:      ${config.backupDir}`,
   ].join('\n');
@@ -251,7 +236,7 @@ export function describeConfig(config: EnvConfig): string {
 
 export interface ForgeConfig {
   version: string;
-  build: { model: string; maxRetries: number; maxPromptsPerRun: number; parallelism: number; timeoutMinutes: number };
+  build: { model: string; maxRetries: number; parallelism: number; timeoutMinutes: number };
   sentinel: { ring1OnEveryPrompt: boolean; ring2EveryNthPrompt: number; ring3OnRunEnd: boolean; eslintConfig: string; coverageThreshold: number };
   learning: { dbPath: string; syncEnabled: boolean; syncMasterPath: string | null; adversarialReview: boolean; selfModification: boolean };
   deploy: { provider: string; canaryEnabled: boolean; rollbackOnFailure: boolean; healthCheckPath: string };
@@ -260,7 +245,7 @@ export interface ForgeConfig {
 
 export const DEFAULT_FORGE_CONFIG: ForgeConfig = {
   version: '2.0',
-  build: { model: 'claude-sonnet-4-6', maxRetries: 3, maxPromptsPerRun: 45, parallelism: 1, timeoutMinutes: 15 },
+  build: { model: 'claude-sonnet-4-6', maxRetries: 3, parallelism: 1, timeoutMinutes: 15 },
   sentinel: { ring1OnEveryPrompt: true, ring2EveryNthPrompt: 10, ring3OnRunEnd: true, eslintConfig: 'next/core-web-vitals', coverageThreshold: 60 },
   learning: { dbPath: '~/.forge/forge_memory.db', syncEnabled: false, syncMasterPath: null, adversarialReview: true, selfModification: true },
   deploy: { provider: 'vercel', canaryEnabled: true, rollbackOnFailure: true, healthCheckPath: '/api/health' },

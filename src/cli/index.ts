@@ -56,10 +56,12 @@ import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } fr
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
+import { cmdHealth } from './health-command.js';
 
-import { BuildMemory, runQuery } from '../memory/index.js';
+import { BuildMemory } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
 import { getLogger } from '../tools/forge-logger.js';
+import { getForgeDbPath, getSchemaVersion, initializeForgeMemory } from '../learning/database.js';
 import {
   createTaskScheduler,
   getSchedulerDashboard,
@@ -67,7 +69,6 @@ import {
 } from '../tools/task-scheduler.js';
 import type {
   BuildRun,
-  ErrorPattern,
   JsonObject,
   PromptExecution,
   RepairConfig,
@@ -545,8 +546,6 @@ async function cmdBuild(
   pathArg: string,
   opts: { idea?: string; prd?: string; autonomousRecovery?: boolean; dryRun?: boolean; skipSecurityGate?: boolean; skipDesign?: boolean; useExistingQueue?: boolean; startAt?: string }
 ): Promise<void> {
-  try { (await import('../learning/database.js')).initializeForgeMemory(); } catch { /* learning is non-critical */ }
-
   // --start-at: parse and validate early so bad input exits before Phase 0.
   let startAt: number | undefined;
   if (opts.startAt !== undefined) {
@@ -826,7 +825,7 @@ async function runReplay(
 async function cmdStatus(buildId: string | undefined, config: EnvConfig): Promise<void> {
   if (!config.buildMemoryEnabled) {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no build history is available.'));
-    console.log(chalk.dim('Configure FORGE_SUPABASE_URL + FORGE_SUPABASE_SERVICE_KEY in .env to enable it.'));
+    console.log(chalk.dim('Run `forge health` to diagnose why ~/.forge/forge_memory.db is unreachable.'));
     return;
   }
 
@@ -908,9 +907,7 @@ async function cmdPatterns(config: EnvConfig): Promise<void> {
     console.log(chalk.yellow('\nBuild Memory is disabled (stateless mode) — no error patterns available.'));
     return;
   }
-  const patterns = await runQuery<ErrorPattern[]>('cli:patterns', async (c) =>
-    c.from('error_patterns').select('*').order('occurrence_count', { ascending: false })
-  );
+  const patterns = await BuildMemory.errors.listAllPatterns();
 
   if (!patterns || patterns.length === 0) {
     console.log(chalk.yellow('\nNo error patterns recorded yet.'));
@@ -1386,7 +1383,30 @@ async function cmdRepair(
 // CLI wiring
 // ---------------------------------------------------------------------------
 
+/**
+ * Initialize Build Memory before any command executes (Session 1 — Memory
+ * Consolidation). Silent stateless operation is no longer possible: success and
+ * failure are both logged loudly, never swallowed.
+ */
+function initBuildMemoryOrWarn(): void {
+  try {
+    initializeForgeMemory();
+    console.log(chalk.dim(`Build Memory: SQLite ready at ${getForgeDbPath()} (schema ${getSchemaVersion()})`));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red.bold('\n⚠ BUILD MEMORY UNAVAILABLE — FORGE is running STATELESS this session.'));
+    console.error(chalk.red(`  Reason: ${detail}`));
+    console.error(
+      chalk.red(
+        '  No build history, error patterns, brands, or learning will persist until this is resolved.\n' +
+          '  Run `forge health` after fixing disk/permission issues to confirm recovery.'
+      )
+    );
+  }
+}
+
 async function main(): Promise<void> {
+  initBuildMemoryOrWarn();
   const config = loadConfig();
   const program = new Command();
 
@@ -1542,6 +1562,11 @@ async function main(): Promise<void> {
       printHeader();
       console.log('\n' + describeConfig(config));
     });
+
+  program
+    .command('health')
+    .description('Diagnose Build Memory, the UI/UX Pro Max skill, and capability wiring; writes FORGE_HEALTH.md')
+    .action(() => cmdHealth());
 
   program
     .command('retrofit')

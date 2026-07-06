@@ -297,9 +297,13 @@ async function handleMemoryCleanup(ctx: TaskHandlerContext): Promise<TaskRunOutc
     return { result: 'skipped', detail: 'Build Memory unavailable (stateless mode) — nothing to clean' };
   }
   const cutoffIso = new Date(ctx.now().getTime() - retentionDays * DAY_MS).toISOString();
-  const deleted = await runQuery<Array<{ id: string }>>('scheduler:memory_cleanup', async (c) =>
-    c.from('production_telemetry').delete().lt('captured_at', cutoffIso).select('id')
-  );
+  const deleted = await runQuery<Array<{ id: string }>>('scheduler:memory_cleanup', (db) => {
+    const rows = db
+      .prepare('SELECT id FROM production_telemetry WHERE captured_at < ?')
+      .all(cutoffIso) as Array<{ id: string }>;
+    db.prepare('DELETE FROM production_telemetry WHERE captured_at < ?').run(cutoffIso);
+    return rows;
+  });
   if (deleted === null) {
     return { result: 'failure', detail: 'telemetry cleanup query failed (see memory warnings)' };
   }
@@ -342,8 +346,10 @@ async function handleHealthCheck(ctx: TaskHandlerContext): Promise<TaskRunOutcom
   }
   const windowHours = metaNumber(ctx.task.metadata, 'windowHours', 24);
   const sinceIso = new Date(ctx.now().getTime() - windowHours * HOUR_MS).toISOString();
-  const critical = await runQuery<Array<{ id: string }>>('scheduler:health_check', async (c) =>
-    c.from('production_telemetry').select('id').eq('severity', 'critical').gte('captured_at', sinceIso)
+  const critical = await runQuery<Array<{ id: string }>>('scheduler:health_check', (db) =>
+    db
+      .prepare("SELECT id FROM production_telemetry WHERE severity = 'critical' AND captured_at >= ?")
+      .all(sinceIso) as Array<{ id: string }>
   );
   if (critical === null) {
     return { result: 'failure', detail: 'health-probe query failed (see memory warnings)' };

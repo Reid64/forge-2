@@ -49,7 +49,7 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { MemoryDb } from '../memory/client.js';
 import {
   extractInstincts,
   extractSkills,
@@ -184,11 +184,11 @@ export interface Phase5Options {
   /** Create the synthesis cross_project_insight. Default `BuildMemory.insights.createInsight`. */
   createInsight?: (input: NewCrossProjectInsight) => Promise<CrossProjectInsight | null>;
   /** Run instinct extraction. Default {@link extractInstincts}. */
-  runInstinctExtractor?: (buildRunId: string, client: SupabaseClient) => Promise<Instinct[]>;
+  runInstinctExtractor?: (buildRunId: string, client: MemoryDb) => Promise<Instinct[]>;
   /** Run session-end hook to persist metrics. Default {@link onSessionEnd}. */
   runSessionEndHook?: (
     path: string,
-    client: SupabaseClient,
+    client: MemoryDb,
     metrics: SessionMetrics
   ) => Promise<void>;
   /** Extract skills from workarounds and write SKILL.md files. Default {@link extractSkills}. */

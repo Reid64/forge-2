@@ -17,9 +17,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Instinct, JsonObject } from '../types/index.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
+import type { MemoryDb } from '../memory/client.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 import { normalizeErrorSignature, categorizeError } from '../phases/phase4-sentinel.js';
@@ -71,23 +71,21 @@ function keywords(text: string): string[] {
  */
 export async function extractInstincts(
   buildRunId: string,
-  memoryClient: SupabaseClient,
+  memoryClient: MemoryDb,
 ): Promise<Instinct[]> {
   // 1. Load the build run (project name + stack fingerprint).
   let projectName = 'unknown';
   let stackFingerprint: JsonObject = {};
   try {
-    const { data } = await memoryClient
-      .from('build_runs')
-      .select('project_name, stack_fingerprint')
-      .eq('id', buildRunId)
-      .maybeSingle();
-    if (!data) {
+    const row = memoryClient
+      .prepare('SELECT project_name, stack_fingerprint FROM build_runs WHERE id = ?')
+      .get(buildRunId) as { project_name: string; stack_fingerprint: string } | undefined;
+    if (!row) {
       log(`WARNING: build ${buildRunId} not found — skipping instinct extraction`);
       return [];
     }
-    projectName = (data.project_name as string | null) ?? 'unknown';
-    stackFingerprint = (data.stack_fingerprint as JsonObject | null) ?? {};
+    projectName = row.project_name ?? 'unknown';
+    stackFingerprint = row.stack_fingerprint ? (JSON.parse(row.stack_fingerprint) as JsonObject) : {};
   } catch {
     log(`WARNING: could not load build ${buildRunId} — skipping instinct extraction`);
     return [];
@@ -100,11 +98,9 @@ export async function extractInstincts(
     status: string;
   }> = [];
   try {
-    const { data } = await memoryClient
-      .from('prompt_executions')
-      .select('error_output, resolution_applied, status')
-      .eq('build_run_id', buildRunId);
-    executions = (data ?? []) as typeof executions;
+    executions = memoryClient
+      .prepare('SELECT error_output, resolution_applied, status FROM prompt_executions WHERE build_run_id = ?')
+      .all(buildRunId) as typeof executions;
   } catch {
     log(`WARNING: could not load prompt_executions for ${buildRunId}`);
     return [];
@@ -176,7 +172,8 @@ export async function extractInstincts(
     evidence: toJson({ instincts }),
   };
   try {
-    await memoryClient.from('cross_project_insights').insert(insight);
+    const created = await BuildMemory.insights.createInsight(insight);
+    if (!created) throw new Error('createInsight returned null');
     log(`persisted instinct insight for build ${buildRunId}`);
   } catch {
     log(`WARNING: could not persist instincts for ${buildRunId} (stateless mode)`);

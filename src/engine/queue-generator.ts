@@ -1079,6 +1079,12 @@ export async function generateQueue(
     `queue complete — ${stats.totalPrompts} prompt(s), ${stats.parallelGroups} parallel group(s), ` +
       `longest chain ${stats.longestChain}. HALT for Gate 3 (human approval required).`
   );
+  if (stats.totalPrompts > 45) {
+    log(
+      `queue has ${stats.totalPrompts} prompts — long runs recommended with \`forge resume <build-id>\` ` +
+        'if the build is interrupted (queue size is not capped; every prompt above executes in order).'
+    );
+  }
 
   return { projectName, queuePath, entries, yaml, stats, warnings, gate, generatedAt };
 }

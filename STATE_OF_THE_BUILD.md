@@ -1,10 +1,118 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-06-30 (Post-final — `--use-existing-queue` flag added)
-**Build Status:** COMPLETE
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions
+**Last Updated:** 2026-07-05 (FORGE 2.0 Rebuild — Session 1: Memory Consolidation COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD IN PROGRESS (4-session Memory/Design/Intelligence/Verify plan)
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Session 1
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## REBUILD Session 1 — Memory Consolidation (2026-07-05) — COMPLETE
+
+**Diagnosed problem:** `src/memory/client.ts` wrapped a Supabase client requiring
+`FORGE_SUPABASE_URL` / `FORGE_SUPABASE_SERVICE_KEY`, which were never set — every
+`BuildMemory.*` call returned `null` on every build ever run. Meanwhile
+`src/learning/database.ts` had a working, unrelated SQLite schema
+(`initializeForgeMemory`) that was never called at CLI startup. Two disconnected,
+effectively-dead memory systems.
+
+**Fix:** Build Memory now runs entirely on `better-sqlite3`, sharing the same
+`~/.forge/forge_memory.db` file and connection cache as the learning engine.
+
+- `src/memory/client.ts` — rewritten: `getClient()` returns a `better-sqlite3`
+  `Database` (or `null`), backed by `getConnection()`/`initializeForgeMemory()`
+  from `src/learning/database.ts`. `runQuery`, `logMemoryWarning`, `nowIso`
+  signatures preserved; added `newId`, `toJsonText`/`fromJsonText`,
+  `toSqliteBool`/`fromSqliteBool` helpers.
+- All 13 CRUD modules in `src/memory/` (`builds`, `prompts`, `errors`, `brands`,
+  `insights`, `patterns`, `resolutions`, `agents`, `governance`, `profiles`,
+  `scheduled-tasks`, `session-hooks`, `telemetry`) rewritten to prepared SQLite
+  statements. Every exported function name/signature unchanged — call sites
+  across the codebase needed zero changes except where they held a raw
+  `SupabaseClient` type for the Build Memory connection itself
+  (`src/memory/errors.ts`'s `matchError`/`recordError`/`recordFix`/
+  `getRecurringErrors`, `src/memory/session-hooks.ts`'s `onSessionStart`/
+  `onSessionEnd`/`onPreCompact`, `src/analysis/instinct-extractor.ts`'s
+  `extractInstincts`, and `src/phases/phase5-learner.ts`'s injectable
+  collaborator types) — those now type as `MemoryDb` (`src/memory/client.ts`).
+- `src/learning/database.ts` — `initializeForgeMemory()` now also creates the 12
+  Build Memory tables (`build_runs`, `prompt_executions`, `error_patterns`,
+  `resolutions`, `governance_versions`, `self_created_agents`,
+  `cross_project_insights`, `production_telemetry`, `stack_profiles`,
+  `design_patterns`, `brand_identities`, `scheduled_tasks`) in the SAME database
+  file as the pre-existing learning-engine tables, with indexes on the columns
+  the CRUD modules filter by. Migration guard: `schema_version` bumped from
+  `1.0.0` to **`2.0.0`**; existing `build_outcomes`/`hook_execution_log`/etc. data
+  is untouched (verified live: `forge health` against the real
+  `~/.forge/forge_memory.db` shows `build_outcomes` = 14 rows,
+  `hook_execution_log` = 7 rows, both with their original `created_at` values,
+  after the migration ran). Added `getSchemaVersion()`, `getAllTableHealth()`,
+  `ALL_FORGE_TABLES` for the health command.
+- `src/cli/index.ts` — `initBuildMemoryOrWarn()` runs at the top of `main()`,
+  before any command: logs `Build Memory: SQLite ready at <path> (schema 2.0.0)`
+  on success, or a loud multi-line stateless-mode warning on failure. Silent
+  stateless operation is no longer possible. Removed the now-redundant
+  `initializeForgeMemory()` call inside `cmdBuild`.
+- `src/cli/config.ts` — `EnvConfig` no longer carries `supabaseUrl` /
+  `supabaseAnonKey` / `supabaseServiceKey`; `buildMemoryEnabled` is now computed
+  from `getClient() !== null` (a live SQLite reachability check) instead of env
+  var presence.
+- **45-prompt cap removed:** the only real "cap" was a dead
+  `ForgeConfig.build.maxPromptsPerRun = 45` field (never read/enforced anywhere)
+  — removed. The composer's `promptsPerRun` (default 45, in `queue-writer.ts` /
+  `composer/index.ts` / the `compose` CLI command) is chunking into multiple
+  run-*files*, not a truncating cap — every prompt is still written and
+  executed, just split across sequential queue.yaml files; left as-is. The
+  primary build pipeline (`src/engine/queue-generator.ts`) never had a cap; it
+  now logs a non-blocking advisory (`queue has N prompts — long runs
+  recommended with 'forge resume <build-id>' …`) when `totalPrompts > 45`
+  instead of doing nothing.
+- **New `forge health` command** (`src/cli/health-command.ts`): reports, from
+  live data, the Build Memory db path + schema version + per-table row counts
+  and most-recent `created_at` for all 25 tables, the machine id, whether the
+  UI/UX Pro Max skill's `search.py` resolves and a Python interpreter responds,
+  every `.claude/skills/*` folder + whether it has a `SKILL.md`,
+  `ANTHROPIC_API_KEY` presence (never the value), and a WIRED/NEVER-INVOKED
+  status per capability (design-system generation, skill injection, brands
+  storage, learning hooks, codebase RAG) derived by reading the actual phase
+  source files for the calls that would invoke them, or checking the relevant
+  table's row count. Writes the same report to `FORGE_HEALTH.md` at the FORGE
+  root on every run.
+- **Dependency cleanup:** `@supabase/supabase-js` imports removed from every
+  file in `src/memory/`. The package stays in `package.json` — six unrelated
+  files (`src/tools/schema-extractor.ts`, `migration-safety.ts`,
+  `doc-generator.ts`, `src/analysis/six-laws-verifier.ts`,
+  `src/phases/phase1c-ingest.ts`, `src/tools/project-autopsy.ts`) still use it
+  legitimately for introspecting a TARGET PROJECT's own Supabase database — a
+  different concern from FORGE's own Build Memory.
+
+**Verification (all green):**
+1. `npx tsc --noEmit -p .` → 0 errors.
+2. `node scripts/verify-memory.mjs` → `initializeForgeMemory()` +
+   `createBuild`/`getBuild`/`updateBuild` roundtrip against a disposable
+   `USERPROFILE`/`HOME`-redirected db — 12/12 assertions PASS.
+3. `forge health` → reports all 25 tables (12 Build Memory + 13 learning-engine)
+   with live row counts; confirms pre-existing learning-engine data survived the
+   migration untouched.
+4. `node --import tsx --test tests/learning-*.test.ts` → 34/35 pass; the one
+   failure is a pre-existing Windows-only `EBUSY` file-lock race in
+   `learning-sync.test.ts`'s `after()` cleanup hook (rmSync racing an open
+   better-sqlite3 WAL handle) — unrelated to this session's changes (that test
+   file and `src/learning/sync.ts` were not touched).
+
+**Files modified (23) + created (3):**
+`src/memory/client.ts` (rewritten), `src/memory/{builds,prompts,errors,brands,
+insights,patterns,resolutions,agents,governance,profiles,scheduled-tasks,
+session-hooks,telemetry}.ts` (rewritten), `src/memory/index.ts` (comment only),
+`src/learning/database.ts` (+schema), `src/cli/index.ts`, `src/cli/config.ts`,
+`src/cli/health-command.ts` (new), `src/engine/queue-generator.ts`,
+`src/analysis/instinct-extractor.ts`, `src/phases/phase5-learner.ts`,
+`src/phases/phase0-scout.ts`, `src/tools/task-scheduler.ts`,
+`scripts/verify-memory.mjs` (new).
+
+**Next action:** Session 2 — Design Intelligence wiring (per the 4-session
+rebuild plan: Foundation & Memory → Design Intelligence → … → Verify).
 
 ---
 
@@ -128,6 +236,16 @@ Governance audit, RUN6-HANDOFF.md, commissioned Run 9.
   - Delta: 1315 chars, vs. `skills/rls-company-scoping/SKILL.md` trimmed size of 1309 bytes (+ the `\n\n---\n\n` separator ≈ 5 chars) — matches almost exactly.
 - **Result: CONFIRMED — skill injection works.** (Note: an earlier-cited baseline figure of "2688 chars" for this entry did not match what this environment actually produces without the skill — 1774 chars was the real measured baseline — so the live A/B re-test above is the basis for this PASS, not that number.)
 - Also confirmed `--use-existing-queue` does not regenerate governance docs: all files under `forge-test/governance/` retained their pre-run mtimes (12:57–12:59) after the dry-run executed at 13:32, proving Phase 1/2 were genuinely skipped, not just not-logged.
+
+**Prompt caching investigation (2026-06-30) — NOT APPLICABLE, architectural limitation, not implemented:**
+
+Investigated whether Anthropic prompt caching (`cache_control` ephemeral breakpoints) could be added to reduce the per-token cost of re-injecting the same SKILL.md content across multiple queue.yaml prompts / builds. Finding: **prompt caching is unavailable at the FORGE level given the current architecture, and no workaround was implemented.**
+
+- **Architecture confirmed by reading the code, not assumed:** `src/engine/claude-runner.ts` spawns the **Claude Code CLI as a subprocess** — `claude -p --dangerously-skip-permissions` (see `CLAUDE_COMMAND`/`CLAUDE_ARGS`, lines 39-41) — with the assembled prompt piped via stdin (`stdin.write(prompt, 'utf8')`, line 256) and stdout/stderr captured. There is **no direct Anthropic API call anywhere in FORGE** — no `fetch`/`@anthropic-ai/sdk` call to `api.anthropic.com`. `claude-runner.ts` even explicitly deletes `ANTHROPIC_API_KEY` from the child's env (line 135, comment: "Strip ANTHROPIC_API_KEY so claude -p uses Max subscription, not paid API") — confirming FORGE intentionally routes through Claude Code's CLI/Max-subscription auth path, not the metered Messages API.
+- **Why caching can't be added here:** `cache_control` is a field on the Messages API request body (`system`/`tools`/`messages` content blocks). FORGE never constructs that request body — the `claude` CLI does, internally, as its own process. FORGE's only interface to it is stdin text in, stdout text out, on a **brand-new subprocess for every single queue.yaml prompt** (no `--resume`/`--continue`/session-id flag is passed — see `CLAUDE_ARGS`). There is no flag on `claude -p` that exposes cache-control placement to the caller, and even if Claude Code applies its own internal caching to its own fixed system prompt/tool definitions, that is invisible to and uncontrollable by FORGE, and does not cover the SKILL.md content FORGE prepends (that text rides inside the piped-in prompt, i.e. inside Claude Code's user turn, not a stable system-prompt prefix FORGE can mark cacheable).
+- **Stripped `ANTHROPIC_API_KEY` makes this doubly inapplicable:** because `claude -p` is forced onto Max-subscription OAuth auth (not API-key billing), the run isn't metered per-token at the Messages API price table where cache-write/cache-read discounts apply — it draws against the subscription's rate-limited usage allowance instead. Even on a hypothetical future CLI flag for cache control, "token/cost savings" would not translate the same way under subscription billing as it does for direct API callers.
+- **No workaround implemented.** Re-sending the same SKILL.md text on every `claude -p` invocation is simply paid (or rate-limited) again each time — there is nothing FORGE can do to mark it cacheable from outside the subprocess boundary. Per the investigation brief: do not implement a workaround that doesn't actually save tokens, so none was added.
+- **Known limitation, stated explicitly:** Skill reuse across multiple queue.yaml entries or multiple builds in the same session currently has **zero caching benefit** — each prompt's skill content is billed/consumed at full cost on every `claude -p` call. This is a structural consequence of the CLI-subprocess architecture (Contract 5), not a missing feature that can be bolted on without changing that architecture (e.g. switching Phase 3 execution to direct Messages API calls, which is a larger architectural change out of scope for this investigation).
 
 ---
 

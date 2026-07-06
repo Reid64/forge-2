@@ -86,6 +86,260 @@ export function getMachineId(dbPath?: string): string {
   return cachedMachineId;
 }
 
+/**
+ * Build Memory tables (`src/memory/` CRUD layer — build_runs, error_patterns, …),
+ * unified into the same database file as the learning-engine tables above.
+ * Column shapes mirror `src/types/index.ts` exactly: uuid/text -> TEXT, int ->
+ * INTEGER, numeric -> REAL, boolean -> INTEGER (0/1), timestamptz -> TEXT (ISO
+ * 8601), jsonb -> TEXT (JSON.stringify'd; parsed on read by the CRUD modules).
+ */
+const BUILD_MEMORY_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS build_runs (
+      id                        TEXT PRIMARY KEY,
+      project_name              TEXT NOT NULL,
+      project_path               TEXT NOT NULL,
+      stack_fingerprint          TEXT NOT NULL DEFAULT '{}',
+      status                     TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed','halted')),
+      started_at                 TEXT,
+      completed_at                TEXT,
+      total_prompts               INTEGER NOT NULL DEFAULT 0,
+      completed_prompts           INTEGER NOT NULL DEFAULT 0,
+      failed_prompts              INTEGER NOT NULL DEFAULT 0,
+      total_errors                INTEGER NOT NULL DEFAULT 0,
+      total_tokens                 INTEGER NOT NULL DEFAULT 0,
+      total_cost_usd               REAL NOT NULL DEFAULT 0,
+      machine_id                   TEXT NOT NULL,
+      toolchain_manifest           TEXT NOT NULL DEFAULT '{}',
+      governance_hash              TEXT,
+      sentinel_interventions        INTEGER NOT NULL DEFAULT 0,
+      autonomous_recovery_mode      INTEGER NOT NULL DEFAULT 0,
+      parallel_prompts_used         INTEGER NOT NULL DEFAULT 0,
+      dry_run                      INTEGER NOT NULL DEFAULT 0,
+      session_snapshots             TEXT,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_build_runs_project ON build_runs(project_name);
+    CREATE INDEX IF NOT EXISTS idx_build_runs_status ON build_runs(status);
+    CREATE INDEX IF NOT EXISTS idx_build_runs_created ON build_runs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS prompt_executions (
+      id                        TEXT PRIMARY KEY,
+      build_run_id               TEXT NOT NULL,
+      prompt_index                INTEGER NOT NULL,
+      prompt_name                 TEXT NOT NULL,
+      prompt_hash                 TEXT NOT NULL,
+      prompt_content               TEXT NOT NULL,
+      status                     TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','skipped')),
+      started_at                 TEXT,
+      completed_at                TEXT,
+      tokens_input                 INTEGER NOT NULL DEFAULT 0,
+      tokens_output                INTEGER NOT NULL DEFAULT 0,
+      cost_usd                    REAL NOT NULL DEFAULT 0,
+      error_output                 TEXT,
+      resolution_applied            TEXT,
+      was_rewritten                INTEGER NOT NULL DEFAULT 0,
+      original_prompt_hash          TEXT,
+      rewrite_reason                TEXT,
+      failure_prediction_score      REAL,
+      branch_name                  TEXT,
+      sentinel_passed              INTEGER,
+      sentinel_details              TEXT,
+      files_created                TEXT NOT NULL DEFAULT '[]',
+      files_modified                TEXT NOT NULL DEFAULT '[]',
+      files_deleted                 TEXT NOT NULL DEFAULT '[]',
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_prompt_executions_build ON prompt_executions(build_run_id, prompt_index);
+
+    CREATE TABLE IF NOT EXISTS error_patterns (
+      id                        TEXT PRIMARY KEY,
+      error_signature             TEXT NOT NULL,
+      error_category               TEXT NOT NULL CHECK(error_category IN ('type_error','build_failure','runtime','schema','auth','dependency','config')),
+      error_message_sample          TEXT NOT NULL,
+      occurrence_count             INTEGER NOT NULL DEFAULT 1,
+      first_seen_at                TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+      first_seen_project            TEXT NOT NULL,
+      stack_fingerprints            TEXT NOT NULL DEFAULT '[]',
+      trigger_phase                 TEXT,
+      trigger_prompt_pattern         TEXT,
+      resolution_id                 TEXT,
+      prevention_rule                TEXT,
+      success_rate                 REAL NOT NULL DEFAULT 0,
+      auto_resolve_eligible          INTEGER NOT NULL DEFAULT 0,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_error_patterns_signature ON error_patterns(error_signature);
+    CREATE INDEX IF NOT EXISTS idx_error_patterns_prompt_type ON error_patterns(trigger_prompt_pattern);
+    CREATE INDEX IF NOT EXISTS idx_error_patterns_occurrence ON error_patterns(occurrence_count DESC);
+
+    CREATE TABLE IF NOT EXISTS resolutions (
+      id                        TEXT PRIMARY KEY,
+      error_pattern_id             TEXT NOT NULL,
+      resolution_type               TEXT NOT NULL CHECK(resolution_type IN ('prompt_rewrite','config_change','dependency_fix','code_patch','manual')),
+      resolution_description        TEXT NOT NULL,
+      resolution_steps              TEXT NOT NULL DEFAULT '[]',
+      times_applied                 INTEGER NOT NULL DEFAULT 0,
+      times_succeeded               INTEGER NOT NULL DEFAULT 0,
+      times_failed                  INTEGER NOT NULL DEFAULT 0,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_resolutions_error_pattern ON resolutions(error_pattern_id);
+
+    CREATE TABLE IF NOT EXISTS governance_versions (
+      id                        TEXT PRIMARY KEY,
+      template_name                TEXT NOT NULL,
+      version_number                INTEGER NOT NULL,
+      content_hash                 TEXT NOT NULL,
+      content_snapshot              TEXT NOT NULL,
+      changes_description           TEXT,
+      change_source                 TEXT NOT NULL CHECK(change_source IN ('manual','recursive_learner','error_prevention')),
+      effectiveness_score           REAL,
+      builds_used_in                INTEGER NOT NULL DEFAULT 0,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_versions_template_version ON governance_versions(template_name, version_number);
+
+    CREATE TABLE IF NOT EXISTS self_created_agents (
+      id                        TEXT PRIMARY KEY,
+      name                       TEXT NOT NULL,
+      purpose                    TEXT NOT NULL,
+      trigger_conditions            TEXT NOT NULL DEFAULT '{}',
+      input_contract                TEXT NOT NULL DEFAULT '{}',
+      output_contract               TEXT NOT NULL DEFAULT '{}',
+      implementation_code           TEXT NOT NULL,
+      source_pattern_description     TEXT NOT NULL,
+      test_results                 TEXT NOT NULL DEFAULT '{}',
+      status                     TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed','approved','active','deprecated')),
+      approved_at                  TEXT,
+      builds_used_in                INTEGER NOT NULL DEFAULT 0,
+      effectiveness_score           REAL,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_self_created_agents_status ON self_created_agents(status);
+
+    CREATE TABLE IF NOT EXISTS cross_project_insights (
+      id                        TEXT PRIMARY KEY,
+      insight_type                 TEXT NOT NULL CHECK(insight_type IN ('pattern','prevention','optimization','template_change')),
+      source_project                TEXT NOT NULL,
+      source_build_id               TEXT,
+      applicable_fingerprints        TEXT NOT NULL DEFAULT '[]',
+      description                  TEXT NOT NULL,
+      evidence                    TEXT NOT NULL DEFAULT '{}',
+      applied_count                 INTEGER NOT NULL DEFAULT 0,
+      effectiveness_score           REAL,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_cross_project_insights_project ON cross_project_insights(source_project, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS production_telemetry (
+      id                        TEXT PRIMARY KEY,
+      project_name                 TEXT NOT NULL,
+      build_run_id                 TEXT,
+      event_type                   TEXT NOT NULL CHECK(event_type IN ('error','performance','usage','feedback')),
+      event_data                   TEXT NOT NULL DEFAULT '{}',
+      severity                    TEXT CHECK(severity IN ('critical','warning','info') OR severity IS NULL),
+      captured_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+      fed_back_to_build              TEXT,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_production_telemetry_project ON production_telemetry(project_name, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_production_telemetry_severity ON production_telemetry(severity, captured_at DESC);
+
+    CREATE TABLE IF NOT EXISTS stack_profiles (
+      id                        TEXT PRIMARY KEY,
+      name                       TEXT NOT NULL,
+      description                  TEXT NOT NULL,
+      stack_definition               TEXT NOT NULL DEFAULT '{}',
+      toolchain_requirements          TEXT NOT NULL DEFAULT '{}',
+      governance_template_set         TEXT NOT NULL,
+      sentinel_checks               TEXT NOT NULL DEFAULT '{}',
+      build_commands                TEXT NOT NULL DEFAULT '{}',
+      builds_completed              INTEGER NOT NULL DEFAULT 0,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_stack_profiles_name ON stack_profiles(name);
+
+    CREATE TABLE IF NOT EXISTS design_patterns (
+      id                        TEXT PRIMARY KEY,
+      pattern_type                 TEXT NOT NULL CHECK(pattern_type IN ('ui_component','auth_flow','schema_pattern','api_pattern')),
+      name                       TEXT NOT NULL,
+      description                  TEXT NOT NULL,
+      source_project                TEXT NOT NULL,
+      specification                 TEXT NOT NULL DEFAULT '{}',
+      usage_count                  INTEGER NOT NULL DEFAULT 0,
+      effectiveness_score           REAL,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_patterns_type ON design_patterns(pattern_type, usage_count DESC);
+
+    CREATE TABLE IF NOT EXISTS brand_identities (
+      id                        TEXT PRIMARY KEY,
+      project_name                 TEXT NOT NULL,
+      brand_name                   TEXT NOT NULL,
+      design_tokens                 TEXT NOT NULL DEFAULT '{}',
+      component_styles              TEXT NOT NULL DEFAULT '{}',
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_brand_identities_project ON brand_identities(project_name);
+
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      id                        TEXT PRIMARY KEY,
+      name                       TEXT NOT NULL,
+      description                  TEXT,
+      task_type                    TEXT NOT NULL CHECK(task_type IN ('research_agent','memory_cleanup','log_rotation','health_check','deadline_scan','quota_reset')),
+      cron_expression                TEXT NOT NULL,
+      enabled                     INTEGER NOT NULL DEFAULT 1,
+      machine_id                   TEXT,
+      metadata                    TEXT NOT NULL DEFAULT '{}',
+      last_run_at                  TEXT,
+      next_run_at                  TEXT,
+      last_result                  TEXT CHECK(last_result IN ('success','failure','skipped') OR last_result IS NULL),
+      last_error                   TEXT,
+      last_duration_ms               INTEGER,
+      run_count                    INTEGER NOT NULL DEFAULT 0,
+      failure_count                 INTEGER NOT NULL DEFAULT 0,
+      created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_tasks_name ON scheduled_tasks(name);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_type ON scheduled_tasks(task_type, enabled);
+`;
+
+/** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
+export const ALL_FORGE_TABLES: readonly string[] = [
+  // Build Memory (src/memory/ CRUD layer)
+  'build_runs',
+  'prompt_executions',
+  'error_patterns',
+  'resolutions',
+  'governance_versions',
+  'self_created_agents',
+  'cross_project_insights',
+  'production_telemetry',
+  'stack_profiles',
+  'design_patterns',
+  'brand_identities',
+  'scheduled_tasks',
+  // Learning engine (pre-existing, untouched)
+  'prompt_scores',
+  'fix_patterns',
+  'decision_weights',
+  'governance_rules',
+  'pending_evolutions',
+  'build_outcomes',
+  'skill_library',
+  'reconcile_decisions',
+  'scan_reports',
+  'hook_execution_log',
+  'compact_snapshots',
+  'build_fingerprints',
+  'adversary_findings',
+];
+
 export function initializeForgeMemory(dbPath?: string): void {
   const db = getConnection(dbPath);
 
@@ -322,7 +576,71 @@ export function initializeForgeMemory(dbPath?: string): void {
     CREATE INDEX IF NOT EXISTS idx_adversary_severity ON adversary_findings(severity);
   `);
 
+  // Schema migration guard: create the Build Memory table family (idempotent —
+  // CREATE TABLE/INDEX IF NOT EXISTS) and bump schema_version to 2.0.0. Existing
+  // learning-engine data (build_outcomes, hook_execution_log, …) is untouched;
+  // this only ADDS the src/memory/ CRUD layer's tables to the same database file.
+  const versionRow = db
+    .prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'")
+    .get() as { value: string } | undefined;
+  if (!versionRow || versionRow.value === '1.0.0') {
+    db.exec(BUILD_MEMORY_SCHEMA_SQL);
+    db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', '2.0.0')").run();
+  } else {
+    // Already migrated (or a future version) — still ensure the tables exist
+    // (idempotent) so a partially-initialized db from an interrupted run is healed.
+    db.exec(BUILD_MEMORY_SCHEMA_SQL);
+  }
+
   // Store machine ID now that table exists
   const machineId = getMachineId(dbPath);
   db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('machine_id', ?)").run(machineId);
+}
+
+/** Read the current `schema_version` from `forge_meta` (assumes the db is initialized). */
+export function getSchemaVersion(dbPath?: string): string {
+  const db = getConnection(dbPath);
+  const row = db.prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'").get() as
+    | { value: string }
+    | undefined;
+  return row?.value ?? 'unknown';
+}
+
+/** Per-table diagnostic row for `forge health`. */
+export interface TableHealth {
+  table: string;
+  exists: boolean;
+  rowCount: number;
+  mostRecentCreatedAt: string | null;
+}
+
+/**
+ * Report row counts + most recent `created_at` for every table in {@link ALL_FORGE_TABLES}.
+ * A table that does not exist (e.g. a stale db from an interrupted migration) is reported
+ * with `exists: false` rather than throwing.
+ */
+export function getAllTableHealth(dbPath?: string): TableHealth[] {
+  const db = getConnection(dbPath);
+  const existing = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
+      (r) => r.name
+    )
+  );
+
+  return ALL_FORGE_TABLES.map((table) => {
+    if (!existing.has(table)) {
+      return { table, exists: false, rowCount: 0, mostRecentCreatedAt: null };
+    }
+    const countRow = db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number };
+    let mostRecentCreatedAt: string | null = null;
+    try {
+      const recentRow = db.prepare(`SELECT created_at FROM "${table}" ORDER BY created_at DESC LIMIT 1`).get() as
+        | { created_at: string }
+        | undefined;
+      mostRecentCreatedAt = recentRow?.created_at ?? null;
+    } catch {
+      // Table has no created_at column — leave null.
+    }
+    return { table, exists: true, rowCount: countRow.n, mostRecentCreatedAt };
+  });
 }
