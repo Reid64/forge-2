@@ -28,6 +28,10 @@ const { runPhase3Executor } = await import('../dist/phases/phase3-executor.js');
 const { ensureGitRepo } = await import('../dist/phases/phase0-scout.js');
 const { looksLikeProjectPath } = await import('../dist/tools/path-heuristics.js');
 const { determineInfraMode } = await import('../dist/phases/phase1b-architect.js');
+const { resolveAcceptBlockers, checkAdversaryBlockers } = await import('../dist/cli/adversary-gate.js');
+const { computeResumeStartAt } = await import('../dist/engine/auto-resume.js');
+const { queueShortHash } = await import('../dist/tools/queue-versioning.js');
+const { BuildMemory } = await import('../dist/memory/index.js');
 
 let failed = false;
 function assert(cond, message) {
@@ -270,6 +274,150 @@ initializeForgeMemory();
 
   if (savedEnv.NEXT_PUBLIC_SUPABASE_URL !== undefined) process.env.NEXT_PUBLIC_SUPABASE_URL = savedEnv.NEXT_PUBLIC_SUPABASE_URL;
   if (savedEnv.SUPABASE_SERVICE_ROLE_KEY !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = savedEnv.SUPABASE_SERVICE_ROLE_KEY;
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (7) Session 5.1 hotfix: --auto-approve-gates must NOT bypass adversary BLOCKERs;
+//     only --accept-blockers does.
+// ---------------------------------------------------------------------------
+
+{
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-flags-'));
+
+  const blockerReview = {
+    phase: 'ARCHITECT_GOVERNANCE',
+    findings: [
+      {
+        severity: 'BLOCKER',
+        vector: 'SECURITY',
+        specificIssue: 'RLS policy missing on a user-data table',
+        evidence: 'table `invoices` has no row-level-security policy',
+        recommendedFix: 'add a company-scoped RLS policy',
+      },
+    ],
+    blockers: [
+      {
+        severity: 'BLOCKER',
+        vector: 'SECURITY',
+        specificIssue: 'RLS policy missing on a user-data table',
+        evidence: 'table `invoices` has no row-level-security policy',
+        recommendedFix: 'add a company-scoped RLS policy',
+      },
+    ],
+    significant: [],
+    minor: [],
+    canProceed: false,
+    reviewedAt: new Date(0).toISOString(),
+    tokensUsed: 0,
+  };
+
+  // (a) --auto-approve-gates alone, WITHOUT --accept-blockers, must NOT override the BLOCKER halt.
+  const optsAutoApproveOnly = { autoApproveGates: true, acceptBlockers: false };
+  const resolvedA = resolveAcceptBlockers(optsAutoApproveOnly);
+  assert(resolvedA === false, 'resolveAcceptBlockers: --auto-approve-gates alone does NOT set acceptBlockers');
+  const haltedA = await checkAdversaryBlockers(projectPath, 'PHASE_A', blockerReview, resolvedA);
+  assert(haltedA === false, '--auto-approve-gates without --accept-blockers -> BLOCKER halts (checkAdversaryBlockers returns false)');
+
+  // (b) --accept-blockers overrides the halt regardless of --auto-approve-gates.
+  const optsAcceptBlockers = { autoApproveGates: false, acceptBlockers: true };
+  const resolvedB = resolveAcceptBlockers(optsAcceptBlockers);
+  assert(resolvedB === true, 'resolveAcceptBlockers: --accept-blockers sets acceptBlockers true');
+  const proceededB = await checkAdversaryBlockers(projectPath, 'PHASE_B', blockerReview, resolvedB);
+  assert(proceededB === true, '--accept-blockers -> BLOCKER override proceeds (checkAdversaryBlockers returns true)');
+
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (8)/(9) Session 5.1 hotfix: auto-resume validates the resume source belongs to the
+//         CURRENT queue.yaml, and clamps an out-of-range computed start index to 1
+//         instead of letting Phase 3 fail with zero prompts executed.
+// ---------------------------------------------------------------------------
+
+function makeQueueYaml(count, prefix) {
+  return Array.from(
+    { length: count },
+    (_, i) => `- id: ${prefix}${i + 1}\n  name: ${prefix}${i + 1}\n  prompt_type: feature\n  dependencies: []\n`
+  ).join('');
+}
+
+{
+  // (8) A stale Build Memory record (queue_hash from an OLD, larger queue) against a
+  //     wiped-and-regenerated (shorter) queue.yaml must be treated as a fresh build.
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-resume-hash-'));
+  mkdirSync(join(projectPath, 'governance'), { recursive: true });
+  const projectName = 'hardening-resume-hash-project';
+
+  const oldQueueYaml = makeQueueYaml(20, 'p');
+  const oldHash = queueShortHash(oldQueueYaml);
+  const build = await BuildMemory.builds.createBuild({
+    project_name: projectName,
+    project_path: projectPath,
+    machine_id: 'hardening-verify-machine',
+    status: 'halted',
+    total_prompts: 20,
+    queue_hash: oldHash,
+  });
+  for (let i = 1; i <= 15; i++) {
+    await BuildMemory.prompts.createPromptExecution({
+      build_run_id: build.id,
+      prompt_index: i,
+      prompt_name: `P${i}`,
+      prompt_hash: 'x',
+      prompt_content: 'x',
+      status: 'completed',
+    });
+  }
+
+  // The project directory was wiped and rebuilt with a fresh, SHORTER 14-prompt queue.
+  const freshQueueYaml = makeQueueYaml(14, 'q');
+  writeFileSync(join(projectPath, 'queue.yaml'), freshQueueYaml, 'utf8');
+
+  const hashMessages = [];
+  const hashStartAt = await computeResumeStartAt(projectPath, projectName, { log: (m) => hashMessages.push(m) });
+  assert(hashStartAt === 1, `computeResumeStartAt: mismatched queue hash (stale Build Memory vs regenerated queue.yaml) -> starts at 1 (got ${hashStartAt})`);
+  assert(hashMessages.some((m) => m.includes('FRESH build')), 'computeResumeStartAt logs a loud notice when the queue hash does not match');
+
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+{
+  // (9) Even with a MATCHING queue hash, a computed start index beyond the current queue's
+  //     length must clamp to 1 rather than fail the build with zero prompts executed.
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-resume-clamp-'));
+  mkdirSync(join(projectPath, 'governance'), { recursive: true });
+  const projectName = 'hardening-resume-clamp-project';
+
+  const queueYaml = makeQueueYaml(14, 'q');
+  const hash = queueShortHash(queueYaml);
+  writeFileSync(join(projectPath, 'queue.yaml'), queueYaml, 'utf8');
+
+  const build = await BuildMemory.builds.createBuild({
+    project_name: projectName,
+    project_path: projectPath,
+    machine_id: 'hardening-verify-machine',
+    status: 'halted',
+    total_prompts: 14,
+    queue_hash: hash,
+  });
+  // Corrupt/stale record: 19 prompts marked completed even though the CURRENT queue only has 14.
+  for (let i = 1; i <= 19; i++) {
+    await BuildMemory.prompts.createPromptExecution({
+      build_run_id: build.id,
+      prompt_index: i,
+      prompt_name: `Q${i}`,
+      prompt_hash: 'x',
+      prompt_content: 'x',
+      status: 'completed',
+    });
+  }
+
+  const clampMessages = [];
+  const clampStartAt = await computeResumeStartAt(projectPath, projectName, { log: (m) => clampMessages.push(m) });
+  assert(clampStartAt === 1, `computeResumeStartAt: computed start index (20) exceeds the 14-prompt queue -> clamps to 1 (got ${clampStartAt})`);
+  assert(clampMessages.some((m) => m.includes('Clamping')), 'computeResumeStartAt logs loudly when clamping an out-of-range start index');
+
   rmSync(projectPath, { recursive: true, force: true });
 }
 

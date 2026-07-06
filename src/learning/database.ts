@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '2.2.0';
+export const CURRENT_SCHEMA_VERSION = '2.2.1';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -623,6 +623,15 @@ export function initializeForgeMemory(dbPath?: string): void {
   // live db with data; guarded because SQLite errors if the column already exists.
   try {
     db.exec('ALTER TABLE prompt_executions ADD COLUMN duration_ms INTEGER');
+  } catch {
+    /* column already present — idempotent across repeated init calls */
+  }
+  // 2.2.0 -> 2.2.1 (Session 5.1 hotfix): persist the queue.yaml short hash on build_runs at
+  // Phase 3 start, so a resumed build can confirm it belongs to the SAME queue rather than
+  // trusting stale Build Memory / state-file markers against a wiped-and-regenerated project
+  // (`src/engine/auto-resume.ts` › computeResumeStartAt).
+  try {
+    db.exec('ALTER TABLE build_runs ADD COLUMN queue_hash TEXT');
   } catch {
     /* column already present — idempotent across repeated init calls */
   }

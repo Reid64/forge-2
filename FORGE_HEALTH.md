@@ -1,30 +1,30 @@
 # FORGE 2.0 — Health Report
 
-Generated: 2026-07-06T19:51:16.649Z
+Generated: 2026-07-06T20:53:28.911Z
 
 ## Build Memory
 
 - Database: `C:\Users\manag\.forge\forge_memory.db`
-- Schema version: `2.2.0`
+- Schema version: `2.2.1`
 - Machine ID: `089851cda1351217`
 
 | Table | Exists | Rows | Most recent created_at |
 |---|---|---|---|
 | build_runs | yes | 12 | 2026-07-06 16:45:25 |
 | prompt_executions | yes | 28 | 2026-07-06 18:16:25 |
-| error_patterns | yes | 0 | — |
+| error_patterns | yes | 6 | 2026-07-06T20:16:03.987Z |
 | resolutions | yes | 0 | — |
-| governance_versions | yes | 11 | 2026-07-06T18:23:46.559Z |
+| governance_versions | yes | 19 | 2026-07-06T20:16:12.333Z |
 | self_created_agents | yes | 1 | 2026-07-06T18:23:50.675Z |
 | cross_project_insights | yes | 4 | 2026-07-06T18:23:50.676Z |
-| production_telemetry | yes | 13 | 2026-07-06T16:45:25.778Z |
+| production_telemetry | yes | 15 | 2026-07-06T20:16:12.103Z |
 | stack_profiles | yes | 0 | — |
 | design_patterns | yes | 0 | — |
 | brand_identities | yes | 1 | 2026-07-06T02:31:21.944Z |
 | scheduled_tasks | yes | 0 | — |
 | queue_versions | yes | 0 | — |
 | prompt_scores | yes | 34 | 2026-07-06T18:23:45.267Z |
-| fix_patterns | yes | 0 | — |
+| fix_patterns | yes | 6 | 2026-07-06T20:16:04.002Z |
 | decision_weights | yes | 0 | — |
 | governance_rules | yes | 0 | — |
 | pending_evolutions | yes | 0 | — |
@@ -63,8 +63,8 @@ Generated: 2026-07-06T19:51:16.649Z
 
 | Table | Rows | Last write |
 |---|---|---|
-| error_patterns | 0 | — |
-| fix_patterns | 0 | — |
+| error_patterns | 6 | 2026-07-06T20:16:03.987Z |
+| fix_patterns | 6 | 2026-07-06T20:16:04.002Z |
 | governance_rules | 0 | — |
 | cross_project_insights | 4 | 2026-07-06T18:23:50.676Z |
 | prompt_scores | 34 | 2026-07-06T18:23:45.267Z |

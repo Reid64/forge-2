@@ -78,6 +78,7 @@ import { load as parseYaml } from 'js-yaml';
 
 import type { ContextInjection, PromptType, QueueEntry } from '../engine/queue-generator.js';
 import { analyzeSchedule, type ScheduleAnalysis } from '../engine/parallel-scheduler.js';
+import { queueShortHash } from '../tools/queue-versioning.js';
 import { predictFailure, REWRITE_THRESHOLD, type FailurePrediction } from '../engine/failure-predictor.js';
 import { rewritePrompt } from '../engine/prompt-rewriter.js';
 import {
@@ -866,6 +867,12 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // 1. Resolve the queue (supplied entries, else parse queue.yaml).
   let entries: QueueEntry[] = options.entries ?? [];
+  // Session 5.1 hotfix: hash of the queue.yaml this build actually ran against, persisted on the
+  // build_run below so a later --auto-resume can confirm it's resuming against the SAME queue
+  // (`src/engine/auto-resume.ts` › computeResumeStartAt). Only set when a real queue.yaml was
+  // read from disk — a caller supplying `options.entries` directly (tests, in-memory queues) has
+  // no on-disk file for a resume to compare against, so it stays null.
+  let queueHashForBuild: string | null = null;
   if (options.entries === undefined) {
     const queuePath = options.queuePath ?? join(projectPath, 'queue.yaml');
     let yamlText: string | null = null;
@@ -879,6 +886,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       const parsed = parseQueueYaml(yamlText);
       entries = parsed.entries;
       warnings.push(...parsed.warnings);
+      queueHashForBuild = queueShortHash(yamlText);
     }
   }
 
@@ -937,6 +945,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       stack_fingerprint: fingerprintToJson(options.stackFingerprint),
       toolchain_manifest: toolchainManifest,
       governance_hash: options.governanceHash ?? null,
+      queue_hash: queueHashForBuild,
       autonomous_recovery_mode: options.autonomousRecoveryMode ?? false,
       dry_run: dryRun,
       parallel_prompts_used: false,

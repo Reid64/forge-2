@@ -55,7 +55,7 @@ import { runPhase5Learner } from '../phases/phase5-learner.js';
 import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
 import type { AdversaryResult } from '../analysis/adversarial-review.js';
-import { checkAdversaryBlockers as checkAdversaryBlockersCore } from './adversary-gate.js';
+import { checkAdversaryBlockers as checkAdversaryBlockersCore, resolveAcceptBlockers } from './adversary-gate.js';
 import { looksLikeProjectPath } from '../tools/path-heuristics.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
@@ -644,10 +644,11 @@ async function cmdBuild(
   }
 ): Promise<void> {
   const autoResume = opts.autoResume ?? false;
-  // Session 5 finding #2/#3: adversary-review blockers are a SEPARATE concern from Contract 14
-  // self-heal (--autonomous-recovery). Either --accept-blockers or --auto-approve-gates bypasses
-  // the blocker halt; --autonomous-recovery alone does NOT.
-  opts = { ...opts, acceptBlockers: (opts.acceptBlockers ?? false) || (opts.autoApproveGates ?? false) };
+  // Session 5 finding #2/#3 (and the Session 5.1 hotfix): adversary-review BLOCKERs are a SEPARATE
+  // concern from both Contract 14 self-heal (--autonomous-recovery) and the human-gate bypass
+  // (--auto-approve-gates). Only --accept-blockers, passed explicitly, overrides a BLOCKER halt —
+  // see resolveAcceptBlockers() for why --auto-approve-gates must NOT also flow into this.
+  opts = { ...opts, acceptBlockers: resolveAcceptBlockers(opts) };
   const resumeWaitMinutes = Number.parseInt(opts.resumeWaitMinutes ?? '5', 10);
   const maxResumes = Number.parseInt(opts.maxResumes ?? '20', 10);
   // --start-at: parse and validate early so bad input exits before Phase 0.
@@ -1708,7 +1709,7 @@ async function main(): Promise<void> {
     .option('--prd <path>', 'use an existing PRD file instead of generating one')
     .option(
       '--autonomous-recovery',
-      'enable Autonomous Recovery Mode (Contract 14) — self-heals Sentinel FAILURES during Phase 3 by re-running prompts. Does NOT bypass adversary-review blockers or approval gates; use --auto-approve-gates for that.',
+      'enable Autonomous Recovery Mode (Contract 14) — self-heals Sentinel FAILURES during Phase 3 by re-running prompts. Does NOT bypass adversary-review BLOCKER findings (use --accept-blockers) or approval gates (use --auto-approve-gates) — those are separate, explicit overrides.',
       false
     )
     .option('--dry-run', 'simulate the build (plan + cost, no execution)', false)
@@ -1724,12 +1725,12 @@ async function main(): Promise<void> {
     .option('--max-resumes <n>', 'cap on --auto-resume cycles', '20')
     .option(
       '--accept-blockers',
-      'proceed past adversarial-review BLOCKER findings (Phase 1A/1B) instead of halting (writes state/halt-reason.md). Explicit override — separate from --autonomous-recovery.',
+      'the ONLY override for adversarial-review BLOCKER findings (Phase 1A/1B): proceed instead of halting (writes state/halt-reason.md). Separate from --autonomous-recovery and --auto-approve-gates — neither of those bypasses a BLOCKER halt.',
       false
     )
     .option(
       '--auto-approve-gates',
-      'gate-bypass flag: also proceeds past adversarial-review BLOCKER findings (same effect as --accept-blockers, offered under the gate-bypass name). Both --autonomous-recovery AND this flag are needed to reproduce the old "self-heal + blockers ignored" behavior.',
+      'acknowledge the three human-approval gates (Contract 2) without pausing for review. FORGE already proceeds past these gates automatically in autonomous mode (they render as banners, never a real pause) — this flag exists for explicit, logged acknowledgment. Does NOT bypass adversarial-review BLOCKER findings; use --accept-blockers for that.',
       false
     )
     .action(

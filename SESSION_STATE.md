@@ -1,9 +1,53 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Session 5 — Field Hardening — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE
+## Current Session: Session 5.1 — Field Hardening Hotfix — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-06 (all 16 dialtest findings fixed and verified; schema 2.1.0 -> 2.2.0)
+## Last Updated: 2026-07-06 (2 defects found live during the Session 5 dialtest RE-RUN fixed and verified; schema 2.2.0 -> 2.2.1)
+
+---
+
+## Session 5.1 — Field Hardening Hotfix (2026-07-06) — COMPLETE
+
+**Objective:** fix two real defects found live during the Session 5 dialtest RE-RUN — a flag-
+conflation bug that let adversarial BLOCKERs through despite Session 5's fix, and a stale-resume
+bug that made `--auto-resume` fail a build outright against a freshly regenerated queue.
+
+**Schema version:** `2.2.0` -> **`2.2.1`** (`build_runs.queue_hash` column added via a guarded
+`ALTER TABLE ... ADD COLUMN` — same idempotent pattern as `duration_ms` in Session 5).
+
+**Defects fixed:**
+1. **`--auto-approve-gates` silently re-conflated into `--accept-blockers`.** `cmdBuild`
+   (`src/cli/index.ts`) computed `acceptBlockers` as `(opts.acceptBlockers ?? false) ||
+   (opts.autoApproveGates ?? false)` — a live run passing `--auto-approve-gates` WITHOUT
+   `--accept-blockers` had 3 SECURITY/DATA BLOCKERs proceed anyway. Fixed: deleted the OR, added
+   `resolveAcceptBlockers(opts)` (`src/cli/adversary-gate.ts`, pure + testable in isolation since
+   `src/cli/index.ts` runs `main()` at import). `--accept-blockers` is now the ONLY BLOCKER
+   override; `--auto-approve-gates` only acknowledges the (already non-blocking) human gates.
+2. **A wiped project + stale Build Memory produced `--start-at` 20 against a fresh 14-prompt
+   queue** — the build exited having executed zero prompts. Fixed in
+   `computeResumeStartAt` (`src/engine/auto-resume.ts`): (a) every `build_runs` row now records
+   the queue.yaml hash it ran against (`queueShortHash`, reused from
+   `src/tools/queue-versioning.ts`, persisted via new `build_runs.queue_hash`); no hash on record
+   or a hash mismatch vs. the CURRENT queue.yaml on disk = FRESH build, `--start-at` 1, logged
+   loudly; (b) even with a matching hash, a computed start index exceeding the current queue's
+   prompt count clamps to 1 (logged loudly) instead of letting Phase 3 fail the build. Manual
+   `--start-at` (human-typed, on the CLI) is unchanged — still fails loudly on an out-of-range value.
+
+**Files modified:** `src/cli/adversary-gate.ts`, `src/cli/index.ts`, `src/learning/database.ts`
+(schema 2.2.1), `src/types/index.ts`, `src/tools/schema-validator.ts`, `src/memory/builds.ts`,
+`src/phases/phase3-executor.ts`, `src/engine/auto-resume.ts`, `scripts/verify-hardening.mjs` (4
+new checks).
+
+**Verification:** `pnpm tsc --noEmit` -> 0 errors * `pnpm run build` -> success * `pnpm test` ->
+35/35 PASS * `scripts/verify-hardening.mjs` -> all PASS (incl. 4 new checks: auto-approve-gates
+alone does not bypass a BLOCKER, accept-blockers does, mismatched queue hash -> start-at 1,
+out-of-range start index -> clamp to 1) * `verify-memory.mjs`/`verify-design-wiring.mjs`/
+`verify-autonomy.mjs`/`verify-compounding.mjs` -> all still green * `forge health` -> schema 2.2.1,
+17/17 wiring checks WIRED.
+
+**Next action:** dialtest re-run (attempt 3) on the hardened FORGE — confirm both hotfixed defects
+no longer reproduce, then proceed to Session 6 (retrofit verification) once clean.
 
 ---
 

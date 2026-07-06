@@ -42,6 +42,7 @@ interface BuildRunRow {
   machine_id: string;
   toolchain_manifest: string;
   governance_hash: string | null;
+  queue_hash: string | null;
   sentinel_interventions: number;
   autonomous_recovery_mode: number;
   parallel_prompts_used: number;
@@ -67,6 +68,7 @@ function rowToBuildRun(row: BuildRunRow): BuildRun {
     machine_id: row.machine_id,
     toolchain_manifest: fromJsonText(row.toolchain_manifest, {}),
     governance_hash: row.governance_hash,
+    queue_hash: row.queue_hash,
     sentinel_interventions: row.sentinel_interventions,
     autonomous_recovery_mode: fromSqliteBool(row.autonomous_recovery_mode),
     parallel_prompts_used: fromSqliteBool(row.parallel_prompts_used),
@@ -83,12 +85,12 @@ export function createBuild(input: NewBuildRun): Promise<BuildRun | null> {
       `INSERT INTO build_runs (
         id, project_name, project_path, stack_fingerprint, status, started_at, completed_at,
         total_prompts, completed_prompts, failed_prompts, total_errors, total_tokens, total_cost_usd,
-        machine_id, toolchain_manifest, governance_hash, sentinel_interventions,
+        machine_id, toolchain_manifest, governance_hash, queue_hash, sentinel_interventions,
         autonomous_recovery_mode, parallel_prompts_used, dry_run
       ) VALUES (
         @id, @project_name, @project_path, @stack_fingerprint, @status, @started_at, @completed_at,
         @total_prompts, @completed_prompts, @failed_prompts, @total_errors, @total_tokens, @total_cost_usd,
-        @machine_id, @toolchain_manifest, @governance_hash, @sentinel_interventions,
+        @machine_id, @toolchain_manifest, @governance_hash, @queue_hash, @sentinel_interventions,
         @autonomous_recovery_mode, @parallel_prompts_used, @dry_run
       )`
     ).run({
@@ -108,6 +110,7 @@ export function createBuild(input: NewBuildRun): Promise<BuildRun | null> {
       machine_id: input.machine_id,
       toolchain_manifest: toJsonText(input.toolchain_manifest ?? {}),
       governance_hash: input.governance_hash ?? null,
+      queue_hash: input.queue_hash ?? null,
       sentinel_interventions: input.sentinel_interventions ?? 0,
       autonomous_recovery_mode: toSqliteBool(input.autonomous_recovery_mode ?? false),
       parallel_prompts_used: toSqliteBool(input.parallel_prompts_used ?? false),

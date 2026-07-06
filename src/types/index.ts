@@ -51,6 +51,8 @@ export interface BuildRun {
   machine_id: string;
   toolchain_manifest: JsonObject;
   governance_hash: string | null;
+  /** Short (8-char) sha256 hash of the queue.yaml this build ran against (Session 5.1 hotfix). */
+  queue_hash: string | null;
   sentinel_interventions: number;
   autonomous_recovery_mode: boolean;
   parallel_prompts_used: boolean;

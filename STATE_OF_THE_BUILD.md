@@ -1,10 +1,92 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-07-06 (Session 5: Field Hardening COMPLETE — all 16 dialtest findings fixed and verified)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening (ALL COMPLETE)
+**Last Updated:** 2026-07-06 (Session 5.1: Field Hardening Hotfix COMPLETE — 2 defects found live during the Session 5 dialtest RE-RUN fixed and verified)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix (ALL COMPLETE)
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## Session 5.1 — Field Hardening Hotfix (2026-07-06) — COMPLETE
+
+**Objective:** fix two real defects found live during the Session 5 dialtest RE-RUN (the second
+real-build attempt, run to confirm Session 5's hardening actually holds) — a flag-conflation bug
+that let adversarial BLOCKERs through despite the Session 5 fix, and a stale-resume bug that made
+`--auto-resume` fail a build outright against a freshly regenerated queue.
+
+**Schema version:** `2.2.0` → **`2.2.1`** (`build_runs.queue_hash` column added via a guarded
+`ALTER TABLE … ADD COLUMN`, same idempotent pattern as `duration_ms` in Session 5 — safe against a
+live db with data, no CHECK-constraint change, no table rebuild).
+
+**Defect 1 — `--auto-approve-gates` silently re-conflated into `--accept-blockers`, FIXED.**
+Session 5 built `checkAdversaryBlockers`/`adversary-gate.ts` correctly (any BLOCKER halts unless
+`acceptBlockers` is explicitly true) — but `cmdBuild` in `src/cli/index.ts` computed that boolean as
+`(opts.acceptBlockers ?? false) || (opts.autoApproveGates ?? false)`, silently re-introducing the
+exact conflation Session 5's own finding #2 fix note warned against. A live dialtest run passed
+`--auto-approve-gates` WITHOUT `--accept-blockers` and watched 3 SECURITY/DATA BLOCKERs get waved
+through with a logged "proceeding (--accept-blockers)" message the operator never asked for. Fixed
+by deleting the OR entirely and extracting `resolveAcceptBlockers(opts)` (new, in
+`src/cli/adversary-gate.ts`) — a pure one-line function that returns `opts.acceptBlockers ?? false`
+and nothing else, callable in isolation from a verify script (importing `src/cli/index.ts` itself
+runs `main()` unconditionally, so the resolution logic could not be extracted into `cmdBuild`
+itself and stay testable). `--auto-approve-gates`'s help text now states plainly that it
+acknowledges the three human-approval gates (Contract 2 — which already never pause execution in
+autonomous mode; they render as banners only) and does NOT touch the BLOCKER halt. `--accept-blockers`
+is now the ONLY override for a BLOCKER halt, full stop.
+
+**Defect 2 — a wiped project + stale Build Memory produced an out-of-range `--start-at`, FIXED.**
+A test scenario wiped a project's working directory (simulating a from-scratch rebuild) while
+Build Memory still held records from the PRIOR, larger build. `--auto-resume`'s
+`computeResumeStartAt` (`src/engine/auto-resume.ts`) trusted the old build's last-completed index
+(20) with no way to know the regenerated `queue.yaml` now only had 14 prompts — Phase 3's own
+`--start-at` validation then correctly refused to run (`--start-at 20 exceeds the total number of
+prompts (14)`), but the net effect was a build that exited having executed ZERO prompts, silently
+from the operator's point of view (no crash, no explanation of WHY nothing ran). Fixed at the
+source, in `computeResumeStartAt` itself, two ways:
+1. **Queue-identity check.** Every `build_runs` row now records the short (8-char sha256, reusing
+   `queueShortHash` from `src/tools/queue-versioning.ts` — Session 3's existing prompt-library
+   hashing, not reimplemented) hash of the `queue.yaml` that build actually executed against
+   (`src/phases/phase3-executor.ts`, computed when the queue is read from disk, persisted via the
+   new `build_runs.queue_hash` column). Before trusting ANY resume source, `computeResumeStartAt`
+   reads the CURRENT `queue.yaml` on disk, hashes it, and compares against the most recent build's
+   recorded `queue_hash`. No stored hash (a pre-hardening build) OR a hash mismatch is now treated
+   as a FRESH build — `--start-at` 1, logged loudly — never a resume against a queue that no longer
+   exists.
+2. **Range clamp.** Even when the hash matches, if the computed start index still exceeds the
+   CURRENT queue's prompt count (a corrupted/stale record), `computeResumeStartAt` clamps to 1 and
+   logs loudly rather than handing Phase 3 an out-of-range `--start-at` that fails the build with
+   zero prompts executed. Phase 3's own manual `--start-at` validation (a human explicitly typing a
+   bad index on the CLI) is UNCHANGED and still fails loudly — this clamp is specific to the
+   auto-resume computation, which must never fail a build over its own stale bookkeeping.
+
+**Files created:** none (both fixes extend existing Session 3/5 modules).
+
+**Files modified:** `src/cli/adversary-gate.ts` (`resolveAcceptBlockers`, new), `src/cli/index.ts`
+(deleted the OR-conflation, uses `resolveAcceptBlockers`, updated help text for
+`--accept-blockers`/`--auto-approve-gates`/`--autonomous-recovery`), `src/learning/database.ts`
+(schema 2.2.1, `build_runs.queue_hash` column), `src/types/index.ts` +
+`src/tools/schema-validator.ts` + `src/memory/builds.ts` (`queue_hash` field plumbed through the
+BuildRun type/schema/CRUD), `src/phases/phase3-executor.ts` (computes + persists `queue_hash` at
+build start), `src/engine/auto-resume.ts` (`computeResumeStartAt` rewritten: queue-identity check
++ range clamp, `getDbLastCompleted` now takes a build id instead of re-querying by project name),
+`scripts/verify-hardening.mjs` (4 new checks: `--auto-approve-gates` alone does not bypass a
+BLOCKER halt, `--accept-blockers` does, a mismatched queue hash forces `--start-at` 1, an
+out-of-range computed start index clamps to 1).
+
+**Verification (all green):**
+1. `pnpm tsc --noEmit` → 0 errors.
+2. `pnpm run build` → success.
+3. `pnpm test` (learning suite) → 35/35 PASS, no regressions.
+4. `node scripts/verify-hardening.mjs` → **all assertions PASS**, including the 4 new checks above.
+5. `node scripts/verify-memory.mjs` / `verify-design-wiring.mjs` / `verify-autonomy.mjs` /
+   `verify-compounding.mjs` → all still green, no regressions (schema_version now correctly reads
+   2.2.1).
+6. `forge health` → schema 2.2.1, all 17 wiring checks report WIRED.
+
+**Next action:** dialtest re-run (attempt 3) on the hardened FORGE — confirm both hotfixed defects
+no longer reproduce under a real `claude` subprocess/Sentinel/git run, then proceed to Session 6
+(retrofit verification against a real target project) once attempt 3 is clean.
 
 ---
 

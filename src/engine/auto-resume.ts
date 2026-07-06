@@ -16,8 +16,10 @@
 import { appendFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { Phase3Result } from '../phases/phase3-executor.js';
+import { parseQueueYaml, type Phase3Result } from '../phases/phase3-executor.js';
+import { queueShortHash } from '../tools/queue-versioning.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
+import type { BuildRun } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // State-file parsing (pure — no I/O; the exported wrapper below does the reading)
@@ -63,17 +65,24 @@ async function readTextSafe(path: string): Promise<string | null> {
   }
 }
 
-/**
- * Query Build Memory for the last COMPLETED prompt index of a project's most recent build.
- * Returns `null` when Build Memory is unreachable, no build exists for the project, or it has
- * no completed prompts — the caller then falls back to the state-file parse (Contract 4).
- */
-async function getDbLastCompleted(projectName: string): Promise<number | null> {
+/** Fetch the most recent build_run for a project. Returns `null` on any failure or absence. */
+async function getMostRecentBuild(projectName: string): Promise<BuildRun | null> {
   try {
     const builds = await BuildMemory.builds.getBuildsByProject(projectName);
-    const mostRecent = builds && builds.length > 0 ? builds[0] : null;
-    if (!mostRecent) return null;
-    const prompts = await BuildMemory.prompts.getPromptsByBuild(mostRecent.id);
+    return builds && builds.length > 0 ? (builds[0] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Query Build Memory for the last COMPLETED prompt index of a specific build. Returns `null` when
+ * Build Memory is unreachable or the build has no completed prompts — the caller then falls back
+ * to the state-file parse (Contract 4).
+ */
+async function getDbLastCompleted(buildId: string): Promise<number | null> {
+  try {
+    const prompts = await BuildMemory.prompts.getPromptsByBuild(buildId);
     if (!prompts || prompts.length === 0) return null;
     const completedIndices = prompts.filter((p) => p.status === 'completed').map((p) => p.prompt_index);
     return completedIndices.length > 0 ? Math.max(...completedIndices) : null;
@@ -82,27 +91,26 @@ async function getDbLastCompleted(projectName: string): Promise<number | null> {
   }
 }
 
-/**
- * Compute the 1-based prompt index a resumed build should `--start-at` (i.e. last completed + 1).
- * Trusts Build Memory's `prompt_executions` (the higher-fidelity source) when any rows exist for
- * the project's most recent build; otherwise falls back to parsing
- * `<projectPath>/<governanceDirName>/{STATE_OF_THE_BUILD.md,SESSION_STATE.md}`. When neither
- * source yields a completed-prompt marker, returns 1 (start from the top) and logs a notice.
- */
-export async function computeResumeStartAt(
-  projectPath: string,
-  projectName: string,
-  options: { governanceDirName?: string; log?: (message: string) => void } = {}
-): Promise<number> {
-  const log = options.log ?? (() => {});
-  const governanceDir = join(projectPath, options.governanceDirName ?? 'governance');
-
-  const dbLast = await getDbLastCompleted(projectName);
-  if (dbLast !== null) {
-    log(`auto-resume: Build Memory reports last completed prompt ${dbLast} for "${projectName}" (higher-fidelity source)`);
-    return dbLast + 1;
+/** Read + hash the queue.yaml currently on disk at `projectPath`. `null` if absent/unreadable/unparseable. */
+async function readCurrentQueueState(
+  projectPath: string
+): Promise<{ hash: string; entryCount: number } | null> {
+  const text = await readTextSafe(join(projectPath, 'queue.yaml'));
+  if (text === null) return null;
+  try {
+    const { entries } = parseQueueYaml(text);
+    return { hash: queueShortHash(text), entryCount: entries.length };
+  } catch {
+    return null;
   }
+}
 
+/** Fall back to parsing `STATE_OF_THE_BUILD.md` / `SESSION_STATE.md` for the last completed prompt. */
+async function computeStartAtFromStateFiles(
+  governanceDir: string,
+  projectName: string,
+  log: (message: string) => void
+): Promise<number> {
   const [stateOfBuild, sessionState] = await Promise.all([
     readTextSafe(join(governanceDir, 'STATE_OF_THE_BUILD.md')),
     readTextSafe(join(governanceDir, 'SESSION_STATE.md')),
@@ -116,6 +124,72 @@ export async function computeResumeStartAt(
   }
   log(`auto-resume: state files report last completed prompt ${lastCompleted} for "${projectName}"`);
   return lastCompleted + 1;
+}
+
+/**
+ * Compute the 1-based prompt index a resumed build should `--start-at` (i.e. last completed + 1).
+ *
+ * Session 5.1 hotfix: before trusting ANY resume source, confirms it belongs to the queue.yaml
+ * that is actually on disk right now. A wiped project directory + surviving Build Memory used to
+ * produce a `--start-at` computed against the OLD (larger) queue, which then exceeded the length
+ * of a freshly regenerated (shorter) queue and made Phase 3 exit having executed zero prompts. Now:
+ *   - no queue.yaml on disk yet, or the last recorded build has no `queue_hash` on file (a
+ *     pre-hardening build), or its `queue_hash` does not match the current queue.yaml — this is
+ *     treated as a FRESH build (`--start-at` 1), never a resume, and it is logged loudly.
+ *   - otherwise, trusts Build Memory's `prompt_executions` (the higher-fidelity source) when rows
+ *     exist for the matching build, else falls back to parsing
+ *     `<projectPath>/<governanceDirName>/{STATE_OF_THE_BUILD.md,SESSION_STATE.md}`.
+ *   - finally, clamps: if the computed index exceeds the current queue's prompt count, that is
+ *     itself a sign the resume source is stale — clamp to 1 and log loudly rather than handing
+ *     Phase 3 an out-of-range `--start-at` that would fail the build with zero prompts executed.
+ */
+export async function computeResumeStartAt(
+  projectPath: string,
+  projectName: string,
+  options: { governanceDirName?: string; log?: (message: string) => void } = {}
+): Promise<number> {
+  const log = options.log ?? (() => {});
+  const governanceDir = join(projectPath, options.governanceDirName ?? 'governance');
+
+  const queueState = await readCurrentQueueState(projectPath);
+  const mostRecentBuild = await getMostRecentBuild(projectName);
+
+  if (mostRecentBuild && queueState) {
+    if (!mostRecentBuild.queue_hash) {
+      log(
+        `auto-resume: the last recorded build for "${projectName}" has no queue hash on record ` +
+          '(pre-hardening build) — cannot confirm it matches the current queue.yaml. Treating this as a FRESH build, starting at prompt 1.'
+      );
+      return 1;
+    }
+    if (mostRecentBuild.queue_hash !== queueState.hash) {
+      log(
+        `auto-resume: queue.yaml has changed since the last recorded build for "${projectName}" ` +
+          `(recorded hash ${mostRecentBuild.queue_hash}, current hash ${queueState.hash}) — ` +
+          'treating this as a FRESH build, starting at prompt 1.'
+      );
+      return 1;
+    }
+  }
+
+  let startAt: number;
+  const dbLast = mostRecentBuild ? await getDbLastCompleted(mostRecentBuild.id) : null;
+  if (dbLast !== null) {
+    log(`auto-resume: Build Memory reports last completed prompt ${dbLast} for "${projectName}" (higher-fidelity source)`);
+    startAt = dbLast + 1;
+  } else {
+    startAt = await computeStartAtFromStateFiles(governanceDir, projectName, log);
+  }
+
+  if (queueState && startAt > queueState.entryCount) {
+    log(
+      `auto-resume: computed start index ${startAt} exceeds the current queue's ${queueState.entryCount} prompt(s) ` +
+        '— this resume source is stale. Clamping to prompt 1 (fresh build) rather than failing the build.'
+    );
+    return 1;
+  }
+
+  return startAt;
 }
 
 // ---------------------------------------------------------------------------

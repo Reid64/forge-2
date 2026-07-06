@@ -37,6 +37,23 @@ const defaultWriteHaltReport = (path: string, content: string): Promise<void> =>
  * proceed (no blockers, or `acceptBlockers` overrode them) and `false` when it must halt. Never
  * throws — a Build Memory / filesystem failure degrades to a warning, never blocks the decision.
  */
+/**
+ * Resolve the effective `acceptBlockers` boolean handed to {@link checkAdversaryBlockers} from the
+ * `forge build` CLI options (Session 5.1 hotfix).
+ *
+ * `--auto-approve-gates` bypasses ONLY the three human-approval gates (Contract 2 — which never
+ * actually pause execution in autonomous mode; see `gateBanner()` in `src/cli/index.ts`). It must
+ * NOT also silence adversarial-review BLOCKER findings — `--accept-blockers` is the ONLY override
+ * for those. A live dialtest run passed `--auto-approve-gates` without `--accept-blockers` and had
+ * 3 SECURITY/DATA BLOCKERs proceed anyway, logging "proceeding (--accept-blockers)" — traced to
+ * the two flags being OR'd together. Extracted as a pure function (rather than inlined in
+ * `cmdBuild`) so it is directly testable: `src/cli/index.ts` runs `main()` at module load and
+ * cannot be imported in isolation.
+ */
+export function resolveAcceptBlockers(opts: { acceptBlockers?: boolean; autoApproveGates?: boolean }): boolean {
+  return opts.acceptBlockers ?? false;
+}
+
 export async function checkAdversaryBlockers(
   projectPath: string,
   phaseLabel: string,
