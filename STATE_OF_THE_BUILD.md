@@ -1,10 +1,102 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-07-06 (Session 5.1: Field Hardening Hotfix COMPLETE — 2 defects found live during the Session 5 dialtest RE-RUN fixed and verified)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix (ALL COMPLETE)
+**Last Updated:** 2026-07-06 (Session 5.2: Vacuous-Build Defect COMPLETE — the dialtest build that "passed" 15/15 prompts while writing zero files was root-caused and fixed)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix (ALL COMPLETE)
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## Session 5.2 — Vacuous-Build Defect (2026-07-06) — COMPLETE
+
+**Objective:** diagnose from real evidence, then fix, the defect observed in dialtest build
+`0c380094-82ae-4880-adec-55457deefc2b` (Session 5.1's dialtest RE-RUN — the "attempt 3" the prior
+session's Next Action called for): 15/15 prompts reported "Sentinel passed," including the
+dependency check ("package.json vs TOOLCHAIN.md"), yet the target project directory contained only
+`.forge/`, `governance/`, `state/` — no package.json, no app code, nothing the 15 agents supposedly
+built. Diagnosis found **three independent, compounding root causes**, all reproduced directly
+(not inferred) before any code was touched:
+
+**Root cause A — claude never ran (`src/engine/claude-runner.ts`).** Session 5's `detached: true`
+fix (silent-parent-death protection) combined with `shell: true` (required on Windows to invoke the
+`claude.cmd` npm shim) is broken on Windows: the shell-wrapped spawn exits ~2 seconds later with
+code 1 and completely empty stdout/stderr — claude never actually starts. Reproduced 100% of the
+time (5/5 failures with `shell:true + detached:true`; 2/2 successes bypassing shell via a direct
+`claude.exe` spawn). This exactly matches the dialtest log: every one of the 15 prompts logged
+`claude exited 1` within ~1.5s of branch checkout — far too fast for any real work.
+
+**Root cause B — Sentinel validated the WRONG project (`src/phases/phase4-sentinel.ts`).**
+`defaultRunCommand` ran the mandatory TypeScript/Build checks via `exec(cmd, { shell: 'powershell.exe' })`
+with no `-NoProfile` — so Windows PowerShell loaded the operator's `$PROFILE` script, which
+unconditionally `Set-Location`s to an unrelated, real, working project. Sentinel's tsc/build gates
+were silently grading THAT project's build, not dialtest's — a guaranteed PASS regardless of what
+(if anything) claude did. Reproduced directly: `Get-Location` under the old invocation reported the
+wrong directory; adding `-NoProfile -NonInteractive` fixed it, and tsc/build then correctly FAILED
+against the truly-empty dialtest directory.
+
+**Root cause C — Sentinel/executor never forced a fail on a plain (non-timeout) claude failure.**
+`forceFailOnTimeout` (Session 5 finding #14) only overrides a Sentinel PASS when `run.timedOut` —
+a non-timeout exit (exactly what root cause A produced) fell through with no equivalent guard, and
+the prompt-decomposer's `finalSentinel` capture had the identical gap. Combined with root cause B
+(and the dependency check's pre-existing "package.json absent → SKIP" default), a Sentinel that
+never really evaluated the target project still reported PASS on every prompt.
+
+**Fixes (all four tasks from the session brief):**
+1. **Spawn fix.** `claude-runner.ts` now resolves the real `claude.exe` (sibling of the `.cmd` shim,
+   standard npm-global layout `<shimDir>/node_modules/@anthropic-ai/claude-code/bin/claude.exe`) via
+   `where claude`, and spawns it directly with `shell: false` — proven safe to combine with
+   `detached: true`. Falls back to the shell-wrapped shim WITHOUT `detached` (logged loudly as
+   degraded) only when the standard layout can't be found. An exit-0 run with completely empty
+   stdout is now ALSO treated as a failure (`claude -p` always prints a final response in print
+   mode; empty output proves nothing happened).
+2. **Sentinel fix.** `defaultRunCommand` now invokes `powershell.exe -NoProfile -NonInteractive
+   -Command "..."` via the default shell, so the user's PowerShell profile can never hijack `cwd`
+   again. The dependency check now FAILS loudly (not skip) when package.json is absent (the
+   absent-target law). A new mandatory `file_delta` check records the project's file count
+   (excluding `.forge`/`.git`/`node_modules`) before and after every prompt; a non-exempt prompt
+   (anything but `test`/`deploy`) with zero delta FAILS with "no work product."
+3. **Executor fix.** `forceFailOnClaudeFailure` (new, alongside `forceFailOnTimeout`) forces a
+   Sentinel PASS to FAIL whenever the claude run itself didn't succeed (bad exit code, spawn error,
+   or empty stdout), applied on every code path including the timeout-retry branch.
+4. **Project-boundary guard.** The assembled prompt now states the absolute project root and
+   instructs claude that all file operations must stay confined to it (`prompt-assembler.ts`). The
+   executor best-effort scans claude's own stdout for absolute paths outside the project root
+   (`findOutOfBoundsPaths`) and forces the run to fail on a hit.
+
+**End-to-end proof (real `claude` invocation, not a stand-in):** `runClaude` against a fresh scratch
+directory asked claude to write a probe file — resolved to the direct `claude.exe`, ran a realistic
+~15s (vs. the broken ~2s), exit 0, non-empty stdout, and the file landed in the pinned directory
+with the exact expected content.
+
+**Files modified:** `src/engine/claude-runner.ts` (Windows shim resolution, empty-stdout-is-failure),
+`src/phases/phase4-sentinel.ts` (`-NoProfile` PowerShell invocation, `file_delta` check + `evaluateFileDelta`/
+`defaultCountProjectFiles`, dependency-check absent-target fix), `src/phases/phase3-executor.ts`
+(`forceFailOnClaudeFailure`, pre-prompt file-count snapshot wired into `sentinelOptionsFor`,
+`findOutOfBoundsPaths` project-boundary scan, `projectPath` passed to the assembler),
+`src/engine/prompt-assembler.ts` (project-root preamble), `src/cli/health-command.ts` (2 new wiring
+checks: spawn-cwd pinning, file-delta law), `scripts/verify-hardening.mjs` (4 new check groups: real
+cwd-pinned spawn + empty-stdout-is-failure, file-delta law incl. exempt types, dependency
+absent-target, project-boundary scan).
+
+**Verification (all green):**
+1. `pnpm tsc --noEmit` → 0 errors.
+2. `pnpm run build` → success.
+3. `pnpm test` (learning suite) → 35/35 PASS, no regressions.
+4. `node --import tsx --test tests/sentinel.test.ts tests/executor.test.ts tests/engine.test.ts
+   tests/prompt-decomposer.test.ts` → 66/76 pass; the 10 failures are PRE-EXISTING (confirmed
+   byte-identical via `git stash` before any Session 5.2 edit — model-router fixture drift + one
+   sentinel test-double gap, unrelated to this session's changes, out of scope).
+5. `node scripts/verify-hardening.mjs` → **all assertions PASS**, including the 4 new Session 5.2
+   check groups.
+6. `node scripts/verify-memory.mjs` / `verify-design-wiring.mjs` / `verify-autonomy.mjs` /
+   `verify-compounding.mjs` → all still green, no regressions.
+7. `forge health` → schema unchanged at 2.2.1 (no DB schema change this session), **19/19** wiring
+   checks report WIRED (2 new: spawn-cwd pinning, file-delta law).
+
+**Next action:** dialtest attempt 4 (the redo) — re-run the SAME dialtest scenario against the
+Session-5.2-fixed build and confirm real files land, Sentinel evaluates the correct project, and a
+genuinely empty/failed prompt now halts the build instead of reporting a vacuous PASS.
 
 ---
 

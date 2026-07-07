@@ -32,6 +32,9 @@ const { resolveAcceptBlockers, checkAdversaryBlockers } = await import('../dist/
 const { computeResumeStartAt } = await import('../dist/engine/auto-resume.js');
 const { queueShortHash } = await import('../dist/tools/queue-versioning.js');
 const { BuildMemory } = await import('../dist/memory/index.js');
+const { runClaude } = await import('../dist/engine/claude-runner.js');
+const { runSentinel, defaultCountProjectFiles } = await import('../dist/phases/phase4-sentinel.js');
+const { findOutOfBoundsPaths } = await import('../dist/phases/phase3-executor.js');
 
 let failed = false;
 function assert(cond, message) {
@@ -419,6 +422,168 @@ function makeQueueYaml(count, prefix) {
   assert(clampMessages.some((m) => m.includes('Clamping')), 'computeResumeStartAt logs loudly when clamping an out-of-range start index');
 
   rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (10) Session 5.2 Task 1: claude-runner pins the spawned process's cwd to the target
+//      directory, and combining `detached: true` with a real (non-shim) executable + shell:false
+//      is safe — a real file write from the spawned process lands IN that directory, and an
+//      exit-0-but-empty-stdout run is treated as FAILED (the vacuous-build root cause: the old
+//      shell+detached spawn on Windows exited fast with empty output but wasn't caught as a
+//      failure by anything downstream).
+// ---------------------------------------------------------------------------
+
+{
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-spawn-cwd-'));
+  const messages = [];
+  const result = await runClaude('unused prompt text', {
+    cwd: projectPath,
+    command: process.execPath,
+    args: ['-e', "require('fs').writeFileSync('probe.txt', 'hello from spawn'); console.log('done')"],
+    shell: false,
+    log: (m) => messages.push(m),
+  });
+  assert(result.success === true, `runClaude: a spawn with cwd pinned to the temp dir succeeds (exit ${result.exitCode}, stderr: ${result.stderr.slice(0, 200)})`);
+  assert(existsSync(join(projectPath, 'probe.txt')), 'runClaude: the spawned process wrote its file INTO the pinned cwd, not somewhere else');
+  assert(
+    readFileSync(join(projectPath, 'probe.txt'), 'utf8') === 'hello from spawn',
+    'runClaude: the file written by the spawned process has the expected content'
+  );
+
+  const emptyStdoutResult = await runClaude('unused', {
+    cwd: projectPath,
+    command: process.execPath,
+    args: ['-e', 'process.exit(0)'],
+    shell: false,
+    log: () => {},
+  });
+  assert(
+    emptyStdoutResult.exitCode === 0 && emptyStdoutResult.success === false,
+    `runClaude: exit 0 with completely empty stdout is treated as FAILED, not completed (got success=${emptyStdoutResult.success})`
+  );
+
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (11) Session 5.2 Task 2a: the file-delta law — a non-exempt prompt (anything but test/deploy)
+//      that leaves the project's file count unchanged FAILS Sentinel with 'no work product',
+//      exempt prompt types pass regardless, and a real file addition passes with a positive delta.
+// ---------------------------------------------------------------------------
+
+{
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-filedelta-'));
+  mkdirSync(join(projectPath, 'governance'), { recursive: true });
+  writeFileSync(join(projectPath, 'existing.txt'), 'unchanged', 'utf8');
+
+  const okCmd = async () => ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
+  const before = await defaultCountProjectFiles(projectPath);
+
+  const zeroDeltaResult = await runSentinel({
+    projectPath,
+    runCommand: okCmd,
+    getFileChanges: async () => [],
+    stopOnFirstFailure: false,
+    packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
+    baselineDependencies: [],
+    promptType: 'feature',
+    fileCountBefore: before,
+  });
+  const fileDelta = zeroDeltaResult.checks.find((c) => c.name === 'file_delta');
+  assert(fileDelta && !fileDelta.passed && !fileDelta.skipped, "file_delta: a non-exempt ('feature') prompt with zero file delta FAILS");
+  assert(fileDelta && /no work product/.test(fileDelta.detail), "file_delta failure reason includes 'no work product'");
+  assert(zeroDeltaResult.passed === false, 'runSentinel: overall result FAILS when file_delta fails');
+
+  const exemptResult = await runSentinel({
+    projectPath,
+    runCommand: okCmd,
+    getFileChanges: async () => [],
+    stopOnFirstFailure: false,
+    packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
+    baselineDependencies: [],
+    promptType: 'test',
+    fileCountBefore: before,
+  });
+  const fileDeltaExempt = exemptResult.checks.find((c) => c.name === 'file_delta');
+  assert(fileDeltaExempt && fileDeltaExempt.passed, "file_delta: a 'test'-type prompt is exempt from the delta requirement");
+
+  writeFileSync(join(projectPath, 'new-file.txt'), 'real work happened', 'utf8');
+  const realWorkResult = await runSentinel({
+    projectPath,
+    runCommand: okCmd,
+    getFileChanges: async () => [],
+    stopOnFirstFailure: false,
+    packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
+    baselineDependencies: [],
+    promptType: 'feature',
+    fileCountBefore: before,
+  });
+  const fileDeltaReal = realWorkResult.checks.find((c) => c.name === 'file_delta');
+  assert(fileDeltaReal && fileDeltaReal.passed, 'file_delta: a real added file produces a positive delta and PASSES');
+
+  const noBeforeResult = await runSentinel({
+    projectPath,
+    runCommand: okCmd,
+    getFileChanges: async () => [],
+    stopOnFirstFailure: false,
+    packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
+    baselineDependencies: [],
+    promptType: 'feature',
+    // fileCountBefore intentionally omitted
+  });
+  const fileDeltaSkipped = noBeforeResult.checks.find((c) => c.name === 'file_delta');
+  assert(fileDeltaSkipped && fileDeltaSkipped.skipped, 'file_delta: SKIPPED (never a false failure) when no before-count is supplied');
+
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (12) Session 5.2 Task 2b: absent-target law — a dependency check with NO package.json on
+//      disk (and none injected) FAILS loudly; it must never silently skip to a pass. This was
+//      the exact observed defect: 15/15 prompts "Sentinel passed" against a directory with no
+//      package.json at all.
+// ---------------------------------------------------------------------------
+
+{
+  const projectPath = mkdtempSync(join(tmpdir(), 'forge-hardening-nopkg-'));
+  mkdirSync(join(projectPath, 'governance'), { recursive: true });
+  const okCmd = async () => ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
+
+  const result = await runSentinel({
+    projectPath,
+    runCommand: okCmd,
+    getFileChanges: async () => [],
+    stopOnFirstFailure: false,
+    // packageJsonContent intentionally omitted, and no package.json written to disk.
+  });
+  const dep = result.checks.find((c) => c.name === 'dependencies');
+  assert(dep && !dep.passed && !dep.skipped, 'dependencies: an absent package.json FAILS loudly, never skips to a pass');
+  assert(result.passed === false, 'runSentinel: overall result FAILS when package.json is absent (absent-target law)');
+
+  rmSync(projectPath, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// (13) Session 5.2 Task 3: project-boundary guard — findOutOfBoundsPaths flags an absolute path
+//      outside the project root and ignores paths inside it / URLs.
+// ---------------------------------------------------------------------------
+
+{
+  const projectPath = 'C:\\Users\\demo\\Documents\\my-project';
+  const insideOnly = findOutOfBoundsPaths(
+    `Wrote C:\\Users\\demo\\Documents\\my-project\\src\\index.ts and updated https://example.com/docs.png`,
+    projectPath
+  );
+  assert(insideOnly.length === 0, 'findOutOfBoundsPaths: a path inside the project root + a URL are NOT flagged');
+
+  const withViolation = findOutOfBoundsPaths(
+    `Wrote C:\\Users\\demo\\Documents\\my-project\\src\\index.ts and also C:\\Windows\\System32\\evil.dll`,
+    projectPath
+  );
+  assert(
+    withViolation.some((p) => p.toLowerCase().includes('system32')),
+    'findOutOfBoundsPaths: a path OUTSIDE the project root is flagged'
+  );
 }
 
 // ---------------------------------------------------------------------------

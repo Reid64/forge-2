@@ -108,6 +108,7 @@ import {
   runSentinel,
   runAutonomousRecovery,
   toPreviousSentinelStatus,
+  defaultCountProjectFiles,
   type SentinelResult,
   type SentinelOptions,
   type AutoRecoveryResult,
@@ -398,6 +399,7 @@ export interface Phase3Options {
     stackFingerprint?: StackFingerprint | null;
     previousSentinel?: PreviousSentinelStatus | null;
     relevantFilesBlock?: string;
+    projectPath?: string;
   }) => Promise<AssembledPrompt>;
   /** Override the prompt rewrite. Default: {@link rewritePrompt}. */
   rewriteImpl?: (input: {
@@ -554,6 +556,64 @@ function forceFailOnTimeout(
     passed: false,
     diagnosticReport: `${timeoutNote}\n\n--- Sentinel's checks (informational only — not authoritative given the timeout) ---\n${sentinel.diagnosticReport}`,
   };
+}
+
+/**
+ * Force a Sentinel PASS to read as a FAILURE whenever the claude run itself did not succeed and it
+ * wasn't a timeout ({@link forceFailOnTimeout} already handles that case with its own message).
+ * Session 5.2 root cause: a claude run that exits non-zero, never spawns, or (per claude-runner's
+ * updated contract) exits 0 with completely empty stdout produced NO real work — yet Sentinel could
+ * still report PASS (validating a stale/wrong/empty project). A prompt whose own execution didn't
+ * succeed must NEVER be allowed to merge on the back of a Sentinel PASS, no matter what Sentinel's
+ * checks found. A no-op when Sentinel already failed for its own reason, or when the run succeeded.
+ */
+function forceFailOnClaudeFailure(
+  sentinel: SentinelResult,
+  run: ClaudeRunResult,
+  entry: QueueEntry,
+  log: (message: string) => void,
+  index: number
+): SentinelResult {
+  if (!sentinel.passed) return sentinel;
+  if (run.success || run.timedOut) return sentinel;
+  const note =
+    `claude did not complete prompt type ${entry.prompt_type} (exit ${run.exitCode ?? 'null'}` +
+    `${run.stdout.trim() === '' ? ', empty stdout' : ''}) — Sentinel reported PASS, but a run that ` +
+    'did not succeed proves nothing about whether the work happened.';
+  log(`prompt ${index} '${entry.id}': ${note}`);
+  return {
+    ...sentinel,
+    passed: false,
+    diagnosticReport: `${note}\n\n--- Sentinel's checks (informational only — not authoritative given the failed run) ---\n${sentinel.diagnosticReport}`,
+  };
+}
+
+/**
+ * Best-effort project-boundary scan (Session 5.2 Task 3): claude's print-mode stdout is prose, not
+ * a structured tool-call log, so this is a heuristic net over the ONE signal the runner exposes
+ * today — it is NOT a guarantee every out-of-bounds write is caught. Flags absolute-looking paths
+ * (Windows `C:\...` or POSIX `/...`, with a file extension to cut noise) that fall outside
+ * `projectPath`; excludes URLs. A hit marks the prompt failed (Task 3: "violations log loudly and
+ * mark the prompt failed").
+ */
+const OUT_OF_BOUNDS_PATH_PATTERN = /(?<![A-Za-z:])[A-Za-z]:[\\/][^\s"'`)]+|(?<![:/])\/[^\s"'`)]{2,}/g;
+
+export function findOutOfBoundsPaths(stdout: string, projectPath: string): string[] {
+  if (!stdout) return [];
+  const normalizedRoot = projectPath.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+  const found = new Set<string>();
+  // Strip whole URLs FIRST — otherwise the POSIX-path alternative can match a URL's path segment
+  // (e.g. the `/docs.png` inside `https://example.com/docs.png`) as a false positive, since that
+  // slash isn't preceded by `:` or `/` and so isn't caught by the pattern's own lookbehind.
+  const withoutUrls = stdout.replace(/\b\w+:\/\/\S+/g, ' ');
+  const matches = withoutUrls.match(OUT_OF_BOUNDS_PATH_PATTERN) ?? [];
+  for (const raw of matches) {
+    if (!/\.[a-zA-Z0-9]{1,10}$/.test(raw)) continue; // only path-shaped tokens (has an extension)
+    const normalized = raw.replace(/\\/g, '/').toLowerCase();
+    if (normalized.startsWith(normalizedRoot)) continue;
+    found.add(raw);
+  }
+  return [...found];
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,6 +1456,7 @@ interface LoopContext {
     stackFingerprint?: StackFingerprint | null;
     previousSentinel?: PreviousSentinelStatus | null;
     relevantFilesBlock?: string;
+    projectPath?: string;
   }) => Promise<AssembledPrompt>;
   /** The Codebase RAG index (Contract 7 extension), or null in a dry run / when degraded. */
   rag: CodebaseRag | null;
@@ -1450,11 +1511,18 @@ interface LoopContext {
 }
 
 /** Build the Sentinel options for this build (shared by the main run + recovery re-runs). */
-function sentinelOptionsFor(ctx: LoopContext, schemaPromptsHaveRun: boolean): SentinelOptions {
+function sentinelOptionsFor(
+  ctx: LoopContext,
+  schemaPromptsHaveRun: boolean,
+  promptType: PromptType,
+  fileCountBefore: number
+): SentinelOptions {
   return {
     projectPath: ctx.projectPath,
     governanceDirName: ctx.governanceDirName,
     schemaPromptsHaveRun,
+    promptType,
+    fileCountBefore,
   };
 }
 
@@ -1507,12 +1575,15 @@ async function executePrompt(
     const relevantFilesBlock = ctx.rag ? ctx.rag.contextBlock(entry.description).block : '';
 
     // c/d. Assemble (Contract 7), then rewrite if the predictor flags high risk (Contract 9).
+    // `projectPath` (Session 5.2 Task 3 — project-boundary guard) states the absolute root so the
+    // assembled prompt tells claude explicitly where all file operations must stay confined.
     const assembled = await ctx.assembleImpl({
       entry,
       governanceDocs: ctx.governanceDocs,
       stackFingerprint: ctx.stackFingerprint,
       previousSentinel,
       relevantFilesBlock,
+      projectPath: ctx.projectPath,
     });
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'assembled' });
     let promptText = assembled.prompt;
@@ -1584,9 +1655,25 @@ async function executePrompt(
       failureProbability: prediction.probability,
     });
 
+    // Session 5.2 Task 2a (file-delta law): snapshot the project's file count NOW, immediately
+    // before claude runs, so Sentinel can tell a real work product from a void afterward. Guarded
+    // — a count that fails to compute degrades to "not evaluated" inside Sentinel, never a false
+    // failure or a false pass.
+    let fileCountBefore = 0;
+    try {
+      fileCountBefore = await defaultCountProjectFiles(ctx.projectPath);
+    } catch (error) {
+      log(`prompt ${index} '${entry.id}': pre-prompt file count failed (${describe(error)}) — file-delta law degraded to skip for this prompt`);
+    }
+
     // The Sentinel options are built first because a DECOMPOSED prompt runs the Sentinel BETWEEN its
     // atomic sub-steps — the same options drive those inter-step checks and the final gate.
-    const sentinelOptions = sentinelOptionsFor(ctx, schemaPromptsHaveRun || entry.prompt_type === 'schema');
+    const sentinelOptions = sentinelOptionsFor(
+      ctx,
+      schemaPromptsHaveRun || entry.prompt_type === 'schema',
+      entry.prompt_type,
+      fileCountBefore
+    );
 
     // f. Execute via the claude-runner, then commit the work to the feature branch.
     //
@@ -1639,6 +1726,19 @@ async function executePrompt(
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
     }
 
+    // Session 5.2 Task 3: project-boundary guard — best-effort scan of claude's own stdout for
+    // absolute paths outside the project root. A violation forces this run to read as failed,
+    // which then cascades through forceFailOnClaudeFailure below exactly like any other failure.
+    const outOfBounds = findOutOfBoundsPaths(run.stdout, ctx.projectPath);
+    if (outOfBounds.length > 0) {
+      log(
+        `prompt ${index} '${entry.id}': PROJECT-BOUNDARY VIOLATION — claude's output references ` +
+          `path(s) outside the project root (${ctx.projectPath}): ${outOfBounds.slice(0, 5).join(', ')}` +
+          `${outOfBounds.length > 5 ? ` (+${outOfBounds.length - 5} more)` : ''}`
+      );
+      run = { ...run, success: false };
+    }
+
     // Session 5 finding #14: a claude TIMEOUT is a failure regardless of what Sentinel finds —
     // Sentinel only proves the code that exists doesn't obviously break, not that the prompt's
     // work actually happened. A "silent" timeout (Sentinel reports PASS on a timed-out run) is
@@ -1646,6 +1746,10 @@ async function executePrompt(
     // write-loop, the merge/recovery decision, the returned PromptOutcome) sees one consistent,
     // honest outcome instead of a misleading green.
     if (run.timedOut) sentinel = forceFailOnTimeout(sentinel, timeoutMs, entry, log, index);
+    // Session 5.2: any other claude failure (bad exit code, spawn error, empty stdout, or the
+    // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure —
+    // never let a prompt whose own execution didn't succeed merge on the back of a Sentinel PASS.
+    sentinel = forceFailOnClaudeFailure(sentinel, run, entry, log, index);
 
     // One automatic retry at 2x the budget before failing outright (autonomous recovery only) —
     // a single timeout is often just an undersized budget for THIS prompt, not a real defect.
@@ -1668,6 +1772,7 @@ async function executePrompt(
       }
       let retrySentinel = await ctx.runSentinelImpl(sentinelOptions);
       if (retryRun.timedOut) retrySentinel = forceFailOnTimeout(retrySentinel, retryTimeoutMs, entry, log, index);
+      retrySentinel = forceFailOnClaudeFailure(retrySentinel, retryRun, entry, log, index);
       run = retryRun;
       sentinel = retrySentinel;
       log(

@@ -1,9 +1,62 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Session 5.1 — Field Hardening Hotfix — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE
+## Current Session: Session 5.2 — Vacuous-Build Defect — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-06 (2 defects found live during the Session 5 dialtest RE-RUN fixed and verified; schema 2.2.0 -> 2.2.1)
+## Last Updated: 2026-07-06 (dialtest "15/15 passed, zero files written" defect root-caused to 3 compounding bugs and fixed; schema unchanged at 2.2.1)
+
+---
+
+## Session 5.2 — Vacuous-Build Defect (2026-07-06) — COMPLETE
+
+**Objective:** diagnose from real evidence (Iron Law: no fix before root cause), then fix, why
+dialtest build `0c380094-82ae-4880-adec-55457deefc2b` reported "Sentinel passed" on 15/15 prompts
+while the project directory never gained a single file.
+
+**Root causes found (all reproduced directly before touching code):**
+1. **claude never ran.** `src/engine/claude-runner.ts`'s Session 5 `detached: true` fix, combined
+   with the `shell: true` Windows needs to invoke the `claude.cmd` npm shim, silently breaks on
+   Windows — the spawn exits ~2s later with code 1 and empty stdout/stderr. Matches the dialtest
+   log exactly (every prompt: `claude exited 1` within ~1.5s).
+2. **Sentinel validated the WRONG project.** `phase4-sentinel.ts`'s `defaultRunCommand` ran
+   tsc/build checks via `exec(cmd, { shell: 'powershell.exe' })` with no `-NoProfile` — the
+   operator's PowerShell `$PROFILE` unconditionally `Set-Location`s elsewhere, so Sentinel's
+   mandatory build gates were grading a different, real, working project the whole time.
+3. **No force-fail on a plain (non-timeout) claude failure.** `forceFailOnTimeout` only fires on
+   `run.timedOut`; a bad exit code fell through with no equivalent guard, in both the executor and
+   the prompt-decomposer's `finalSentinel` capture.
+
+**Fixes:**
+1. `claude-runner.ts` resolves the real `claude.exe` directly (bypassing the shell/shim) and spawns
+   it with `shell: false` — proven safe with `detached: true`. An exit-0-but-empty-stdout run is now
+   also treated as failed.
+2. `phase4-sentinel.ts`'s `defaultRunCommand` invokes `powershell.exe -NoProfile -NonInteractive
+   -Command "..."` so the profile can never hijack `cwd` again. New mandatory `file_delta` check:
+   a non-exempt prompt (not `test`/`deploy`) with zero file-count delta FAILS ("no work product").
+   The dependency check now FAILS (not skips) when package.json is absent.
+3. `phase3-executor.ts`'s new `forceFailOnClaudeFailure` forces a Sentinel PASS to FAIL whenever the
+   claude run itself didn't succeed, on every code path (incl. the timeout-retry branch).
+4. Project-boundary guard: the assembled prompt states the absolute project root
+   (`prompt-assembler.ts`); the executor best-effort scans claude's stdout for out-of-bounds paths
+   (`findOutOfBoundsPaths`) and fails the run on a hit.
+
+**Proof:** a real (non-stand-in) `claude -p` invocation through the fixed `runClaude` against a
+fresh scratch dir resolved to the direct `claude.exe`, ran ~15s (vs. the broken ~2s), exit 0,
+non-empty stdout, and wrote its file into the pinned cwd with the exact expected content.
+
+**Files modified:** `src/engine/claude-runner.ts`, `src/phases/phase4-sentinel.ts`,
+`src/phases/phase3-executor.ts`, `src/engine/prompt-assembler.ts`, `src/cli/health-command.ts` (2
+new wiring checks), `scripts/verify-hardening.mjs` (4 new check groups).
+
+**Verification:** `pnpm tsc --noEmit` -> 0 errors * `pnpm run build` -> success * `pnpm test` ->
+35/35 PASS * targeted suite (sentinel/executor/engine/prompt-decomposer) -> 66/76 pass, the 10
+failures confirmed PRE-EXISTING via `git stash` (unrelated model-router fixture drift) *
+`scripts/verify-hardening.mjs` -> all PASS incl. 4 new Session 5.2 check groups *
+`verify-memory.mjs`/`verify-design-wiring.mjs`/`verify-autonomy.mjs`/`verify-compounding.mjs` -> all
+still green * `forge health` -> schema unchanged 2.2.1, **19/19** wiring checks WIRED.
+
+**Next action:** dialtest attempt 4 (the redo) — confirm real files land, Sentinel evaluates the
+correct project, and a genuinely failed prompt halts the build instead of a vacuous PASS.
 
 ---
 

@@ -256,6 +256,18 @@ export async function gatherHealthReport(): Promise<HealthReport> {
       wired: isReferencedIn(forgeRoot, 'src/phases/phase0-scout.ts', 'ensureGitRepo'),
       detail: 'src/phases/phase0-scout.ts runs git init + an initial commit when the target project has no .git (Contract 10/11/12 never silently no-op on a greenfield project).',
     },
+    {
+      capability: 'spawn-cwd pinning (Windows shim resolution)',
+      wired: isReferencedIn(forgeRoot, 'src/engine/claude-runner.ts', 'resolveWindowsClaudeExecutable'),
+      detail: 'src/engine/claude-runner.ts resolves the real claude.exe directly on Windows and never combines shell:true with detached:true (Session 5.2 — that combination silently broke every claude invocation).',
+    },
+    {
+      capability: 'file-delta law',
+      wired:
+        isReferencedIn(forgeRoot, 'src/phases/phase4-sentinel.ts', 'evaluateFileDelta') &&
+        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'defaultCountProjectFiles'),
+      detail: 'src/phases/phase4-sentinel.ts FAILs a non-exempt prompt with zero file-count delta ("no work product"); src/phases/phase3-executor.ts snapshots the before-count on every prompt (Session 5.2).',
+    },
   ];
 
   const queueVersionsCount = tableRowCount('queue_versions');

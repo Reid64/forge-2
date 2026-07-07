@@ -1,6 +1,6 @@
 # FORGE 2.0 — Health Report
 
-Generated: 2026-07-06T20:53:28.911Z
+Generated: 2026-07-07T02:21:47.376Z
 
 ## Build Memory
 
@@ -10,29 +10,29 @@ Generated: 2026-07-06T20:53:28.911Z
 
 | Table | Exists | Rows | Most recent created_at |
 |---|---|---|---|
-| build_runs | yes | 12 | 2026-07-06 16:45:25 |
-| prompt_executions | yes | 28 | 2026-07-06 18:16:25 |
-| error_patterns | yes | 6 | 2026-07-06T20:16:03.987Z |
-| resolutions | yes | 0 | — |
-| governance_versions | yes | 19 | 2026-07-06T20:16:12.333Z |
+| build_runs | yes | 13 | 2026-07-06 22:59:38 |
+| prompt_executions | yes | 43 | 2026-07-06 23:19:16 |
+| error_patterns | yes | 15 | 2026-07-07T02:02:12.363Z |
+| resolutions | yes | 1 | 2026-07-07T02:02:12.663Z |
+| governance_versions | yes | 31 | 2026-07-06T23:19:54.245Z |
 | self_created_agents | yes | 1 | 2026-07-06T18:23:50.675Z |
-| cross_project_insights | yes | 4 | 2026-07-06T18:23:50.676Z |
-| production_telemetry | yes | 15 | 2026-07-06T20:16:12.103Z |
+| cross_project_insights | yes | 18 | 2026-07-07T02:02:21.382Z |
+| production_telemetry | yes | 18 | 2026-07-06T22:59:38.390Z |
 | stack_profiles | yes | 0 | — |
 | design_patterns | yes | 0 | — |
 | brand_identities | yes | 1 | 2026-07-06T02:31:21.944Z |
 | scheduled_tasks | yes | 0 | — |
 | queue_versions | yes | 0 | — |
-| prompt_scores | yes | 34 | 2026-07-06T18:23:45.267Z |
-| fix_patterns | yes | 6 | 2026-07-06T20:16:04.002Z |
+| prompt_scores | yes | 112 | 2026-07-07T02:02:39.182Z |
+| fix_patterns | yes | 16 | 2026-07-07T02:02:12.365Z |
 | decision_weights | yes | 0 | — |
-| governance_rules | yes | 0 | — |
-| pending_evolutions | yes | 0 | — |
-| build_outcomes | yes | 27 | 2026-07-06T18:23:45.351Z |
+| governance_rules | yes | 1 | 2026-07-07T02:02:21.364Z |
+| pending_evolutions | yes | 18 | 2026-07-07T02:02:39.412Z |
+| build_outcomes | yes | 77 | 2026-07-07T02:02:39.226Z |
 | skill_library | yes | 0 | — |
 | reconcile_decisions | yes | 0 | — |
 | scan_reports | yes | 0 | — |
-| hook_execution_log | yes | 19 | 2026-07-06 16:45:25 |
+| hook_execution_log | yes | 44 | 2026-07-07 02:02:39 |
 | compact_snapshots | yes | 0 | — |
 | build_fingerprints | yes | 0 | — |
 | adversary_findings | yes | 0 | — |
@@ -63,11 +63,11 @@ Generated: 2026-07-06T20:53:28.911Z
 
 | Table | Rows | Last write |
 |---|---|---|
-| error_patterns | 6 | 2026-07-06T20:16:03.987Z |
-| fix_patterns | 6 | 2026-07-06T20:16:04.002Z |
-| governance_rules | 0 | — |
-| cross_project_insights | 4 | 2026-07-06T18:23:50.676Z |
-| prompt_scores | 34 | 2026-07-06T18:23:45.267Z |
+| error_patterns | 15 | 2026-07-07T02:02:12.363Z |
+| fix_patterns | 16 | 2026-07-07T02:02:12.365Z |
+| governance_rules | 1 | 2026-07-07T02:02:21.364Z |
+| cross_project_insights | 18 | 2026-07-07T02:02:21.382Z |
+| prompt_scores | 112 | 2026-07-07T02:02:39.182Z |
 
 ## Environment
 
@@ -82,7 +82,7 @@ Generated: 2026-07-06T20:53:28.911Z
 | ui skill declarations | WIRED | src/engine/queue-generator.ts declares skills: [frontend-design, ui-ux-pro-max] on every UI-producing entry. |
 | design-doc injection | WIRED | src/phases/phase3-executor.ts GOVERNANCE_DOC_NAMES includes DESIGN_SYSTEM.md. |
 | brands storage | WIRED | src/phases/phase1b-architect.ts calls createBrand/updateBrand; brand_identities has 1 row(s). |
-| learning hooks | WIRED | hook_execution_log has 19 row(s). |
+| learning hooks | WIRED | hook_execution_log has 44 row(s). |
 | codebase RAG | WIRED | src/phases/phase3-executor.ts imports CodebaseRag from src/tools/codebase-rag.ts. |
 | forge compile | WIRED | src/cli/index.ts registers the `compile` command (src/cli/compile-command.ts). |
 | auto-resume | WIRED | src/cli/index.ts declares --auto-resume on `forge build`, wired to src/engine/auto-resume.ts. |
@@ -94,3 +94,5 @@ Generated: 2026-07-06T20:53:28.911Z
 | design-model pinning | WIRED | src/engine/provider-router.ts pins DEFAULT_ROUTES.complex_reasoning to ['anthropic'] only (Phase 1A/1B/adversarial review never route to a non-Claude provider). |
 | death forensics | WIRED | src/phases/phase3-executor.ts installs process-death handlers (src/tools/death-forensics.ts) and checks for a stale forge_running.lock at startup. |
 | git-init on greenfield | WIRED | src/phases/phase0-scout.ts runs git init + an initial commit when the target project has no .git (Contract 10/11/12 never silently no-op on a greenfield project). |
+| spawn-cwd pinning (Windows shim resolution) | WIRED | src/engine/claude-runner.ts resolves the real claude.exe directly on Windows and never combines shell:true with detached:true (Session 5.2 — that combination silently broke every claude invocation). |
+| file-delta law | WIRED | src/phases/phase4-sentinel.ts FAILs a non-exempt prompt with zero file-count delta ("no work product"); src/phases/phase3-executor.ts snapshots the before-count on every prompt (Session 5.2). |

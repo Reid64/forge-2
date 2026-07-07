@@ -132,6 +132,12 @@ export interface AssembleInput {
    * codebase). Optional — the assembler degrades to the four original sources without it.
    */
   relevantFilesBlock?: string;
+  /**
+   * Absolute path of the target project root (Session 5.2 Task 3 — project-boundary guard). When
+   * supplied, a preamble states it explicitly and instructs claude that every file operation for
+   * this task must stay confined to it. Optional so existing callers/tests are unaffected.
+   */
+  projectPath?: string;
 }
 
 /** Options for {@link assemblePrompt}. */
@@ -461,13 +467,24 @@ export async function assemblePrompt(
   const fetchWarnings = options.fetchWarnings ?? defaultFetchWarnings;
   const { entry } = input;
 
+  // 0. Project-boundary preamble (Session 5.2 Task 3) — states the absolute root explicitly, first,
+  //    before any other instruction, so claude never has to infer where it's allowed to write.
+  const sections: string[] = [];
+  if (input.projectPath) {
+    sections.push(
+      `## Project root (absolute)\n\n\`${input.projectPath}\`\n\n` +
+        'Every file read, write, edit, and delete for this task MUST occur inside this directory. ' +
+        'Never create, modify, or remove files anywhere else on the filesystem.'
+    );
+  }
+
   // 1. Task description (from the queue entry).
-  const sections: string[] = [
+  sections.push(
     `# FORGE build task: ${entry.name}\n\n` +
       `Prompt type: ${entry.prompt_type}. Execute the task below completely and to ` +
       `production quality — no placeholders, no mock data, real API calls to real tables.`,
-    `## Task\n\n${entry.description.trim()}`,
-  ];
+    `## Task\n\n${entry.description.trim()}`
+  );
 
   // 2. Relevant governance excerpts.
   const governance = buildGovernanceSection(input);

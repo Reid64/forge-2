@@ -27,7 +27,9 @@
  * `prompt_executions` as an estimate; precise accounting comes from elsewhere if needed.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
 
@@ -105,6 +107,60 @@ function defaultEstimateTokens(prompt: string, stdout: string): number {
 }
 
 // ---------------------------------------------------------------------------
+// Session 5.2 — Windows shim resolution (root cause of the vacuous-build defect)
+// ---------------------------------------------------------------------------
+
+/**
+ * Memoized result of {@link resolveWindowsClaudeExecutable}. `undefined` = not yet attempted,
+ * `null` = attempted and failed to resolve (fall back to the shell-wrapped shim every time).
+ */
+let cachedWindowsClaudeExe: string | null | undefined;
+
+/**
+ * On Windows, `claude` resolves via PATH to a `.cmd` npm shim (`claude.cmd`), which can only be
+ * spawned by routing through a shell (`shell: true` → `cmd.exe /d /s /c "claude ..."`). Session 5
+ * added `detached: true` to isolate a crashing child from the FORGE parent (finding #13 — ~8
+ * silent FORGE deaths). On Windows the COMBINATION of `shell: true` + `detached: true` is broken:
+ * reproduced 100% of the time in Session 5.2 forensics — cmd.exe launches the `.cmd` shim, the
+ * shim's nested exec of the real `claude.exe` never actually runs, and the whole chain exits
+ * ~2 seconds later with code 1 and completely empty stdout/stderr. This was the root cause of
+ * every "claude exited 1" in the observed dialtest build: claude never ran, on any of the 15
+ * prompts.
+ *
+ * The fix is to bypass the shell entirely: resolve the REAL `claude.exe` binary (a sibling of the
+ * `.cmd` shim, at the standard npm-global install layout
+ * `<shimDir>/node_modules/@anthropic-ai/claude-code/bin/claude.exe`) via `where claude`, and spawn
+ * it directly with `shell: false` — proven safe to combine with `detached: true` (Session 5.2
+ * repro: 2/2 direct-exe spawns succeeded with real output; 2/2 shell+detached spawns failed
+ * silently). Returns `null` when the shim can't be located or the standard install layout isn't
+ * present (e.g. a non-npm install) — callers then fall back to the shell-wrapped spawn WITHOUT
+ * `detached` (see {@link runClaude}), since shell+detached is proven unsafe and must never be used
+ * together on Windows.
+ */
+function resolveWindowsClaudeExecutable(command: string): string | null {
+  if (cachedWindowsClaudeExe !== undefined) return cachedWindowsClaudeExe;
+  cachedWindowsClaudeExe = null;
+  try {
+    const where = execFileSync('where', [command], { encoding: 'utf8', windowsHide: true });
+    const candidates = where
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l !== '');
+    for (const candidate of candidates) {
+      if (!candidate.toLowerCase().endsWith('.cmd')) continue;
+      const exe = join(dirname(candidate), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+      if (existsSync(exe)) {
+        cachedWindowsClaudeExe = exe;
+        break;
+      }
+    }
+  } catch {
+    /* `where` missing / claude not on PATH — caller falls back to the shell-wrapped spawn. */
+  }
+  return cachedWindowsClaudeExe;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -124,16 +180,46 @@ export function runClaude(
   options: ClaudeRunnerOptions = {}
 ): Promise<ClaudeRunResult> {
   const log = options.log ?? logLine('claude');
+  const commandOverridden = options.command !== undefined;
   const command = options.command ?? CLAUDE_COMMAND;
   const args = [...(options.args ?? CLAUDE_ARGS)];
   const cwd = options.cwd ?? process.cwd();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const useShell = options.shell ?? process.platform === 'win32';
+  const shellOverridden = options.shell !== undefined;
+  let useShell = options.shell ?? process.platform === 'win32';
   // Strip ANTHROPIC_API_KEY so claude -p uses Max subscription, not paid API
   const rawEnv = options.env ?? process.env;
   const env = { ...rawEnv };
   delete env['ANTHROPIC_API_KEY'];
   const estimate = options.estimateTokens ?? defaultEstimateTokens;
+
+  // Session 5.2: on Windows, resolve the REAL claude.exe and bypass the `.cmd` shim's shell
+  // requirement entirely — shell:true + detached:true is proven broken (see
+  // resolveWindowsClaudeExecutable's doc comment). Only when the caller didn't override
+  // command/shell (test doubles already spawn something shell:false-safe on their own).
+  let resolvedCommand = command;
+  let detachedIsSafe = true;
+  if (process.platform === 'win32' && !commandOverridden && !shellOverridden && useShell) {
+    const directExe = resolveWindowsClaudeExecutable(command);
+    if (directExe) {
+      resolvedCommand = directExe;
+      useShell = false;
+    } else {
+      // Could not resolve the real binary (non-standard install layout) — keep the shell-wrapped
+      // shim spawn (still required to run a `.cmd` at all) but DO NOT combine it with `detached`;
+      // that combination is proven to silently break claude on Windows (Session 5.2). Degrading to
+      // non-detached here means a crashing child could in principle affect the parent again
+      // (Session 5 finding #13) — but a claude call that silently never runs is strictly worse, and
+      // this is logged loudly so the operator knows death-forensics protection is degraded.
+      detachedIsSafe = false;
+      log(
+        'WARNING: could not resolve claude.exe directly (no standard npm-global install layout found ' +
+          'beside the claude shim on PATH) — falling back to a shell-wrapped spawn WITHOUT `detached` ' +
+          '(shell+detached silently breaks claude on Windows — Session 5.2). Silent-parent-death ' +
+          'protection is degraded for this run.'
+      );
+    }
+  }
 
   return new Promise<ClaudeRunResult>((resolve) => {
     const startedAt = Date.now();
@@ -143,11 +229,14 @@ export function runClaude(
     let settled = false;
     let killTimer: NodeJS.Timeout | undefined;
 
-    log(`exec: ${command} ${args.join(' ')} (cwd=${cwd}, timeout=${Math.round(timeoutMs / 1000)}s)`);
+    log(
+      `exec: ${resolvedCommand} ${args.join(' ')} (cwd=${cwd}, timeout=${Math.round(timeoutMs / 1000)}s)` +
+        (resolvedCommand !== command ? ` [resolved from '${command}']` : '')
+    );
 
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, {
+      child = spawn(resolvedCommand, args, {
         cwd,
         env,
         shell: useShell,
@@ -156,7 +245,9 @@ export function runClaude(
         // windowsHide): a crash/signal delivered to this child can never propagate back and
         // kill the FORGE parent process (Session 5 finding #13 — ~8 silent FORGE deaths traced
         // to exactly this). We still await 'close' below (no unref()), so reporting is unchanged.
-        detached: true,
+        // Session 5.2: NEVER combine with shell:true on Windows (see detachedIsSafe above) — that
+        // combination silently breaks claude (the vacuous-build root cause).
+        detached: detachedIsSafe,
         windowsHide: true,
       });
     } catch (error) {
@@ -192,13 +283,20 @@ export function runClaude(
       const stderr = partial.spawnError
         ? [stderrCaptured, partial.spawnError].filter((s) => s !== '').join('\n')
         : stderrCaptured;
-      const success =
-        !timedOut && partial.spawnError === undefined && partial.exitCode === 0;
+      // Session 5.2 Task 1: an exit-0 run with completely empty stdout proves nothing happened —
+      // `claude -p` always prints a final response in print mode, so empty stdout on a "clean"
+      // exit is itself a failure signal (this is exactly what the broken shell+detached spawn
+      // produced: exit 1 with empty output, but a future different breakage could exit 0 the same
+      // way). Never fabricate a completed outcome from an empty run (Iron Law 3).
+      const cleanExit = !timedOut && partial.spawnError === undefined && partial.exitCode === 0;
+      const success = cleanExit && stdout.trim() !== '';
 
       if (timedOut) {
         log(`TIMEOUT after ${Math.round(timeoutMs / 1000)}s — process killed (prompt FAILED)`);
       } else if (partial.spawnError) {
         log(`spawn error — ${partial.spawnError}`);
+      } else if (cleanExit && !success) {
+        log('exit code 0 but stdout was completely empty — treating as FAILED (Session 5.2)');
       } else {
         log(`exit code ${partial.exitCode ?? 'null'}${partial.signal ? ` (signal ${partial.signal})` : ''}`);
       }

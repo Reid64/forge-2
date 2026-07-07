@@ -40,7 +40,7 @@
  * failure-predictor all do the same).
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { exec, spawn } from 'node:child_process';
@@ -48,6 +48,7 @@ import type { ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { GitManager, type GitFileChange } from '../engine/git-manager.js';
+import type { PromptType } from '../engine/queue-generator.js';
 import { extractSchema, type SchemaSnapshot, type SqlExecutor } from '../tools/schema-extractor.js';
 import {
   runVisualRegression,
@@ -129,6 +130,7 @@ export type SentinelCheckName =
   | 'eslint'
   | 'build'
   | 'file_integrity'
+  | 'file_delta'
   | 'schema_drift'
   | 'dependencies'
   | 'security_scan'
@@ -156,6 +158,7 @@ export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
   'eslint',
   'build',
   'file_integrity',
+  'file_delta',
   'schema_drift',
   'dependencies',
 ];
@@ -235,6 +238,25 @@ export interface SentinelOptions {
    * (a missing baseline must never produce a false failure).
    */
   baselineDependencies?: string[];
+  /**
+   * This prompt's type (Session 5.2 file-delta law — Task 2a). Drives which prompt types are
+   * EXEMPT from the file-delta requirement (`test`/`deploy` legitimately touch zero new files).
+   * When omitted, the file-delta check treats the prompt as non-exempt (a real build call site
+   * always supplies this; only ad-hoc callers that don't care about the law omit it).
+   */
+  promptType?: PromptType;
+  /**
+   * The project's file count (excluding `.forge`/`.git`/`node_modules`) measured BEFORE this
+   * prompt executed (Session 5.2 file-delta law — Task 2a). When supplied, Sentinel compares it
+   * against a fresh count taken now and FAILS a non-exempt prompt whose count didn't change — a
+   * build/feature/schema/ui/api prompt that touched zero files produced no work product. When
+   * omitted, the file-delta check is SKIPPED (a caller not wired into the law must never get a
+   * false failure) — the real executor always supplies this.
+   */
+  fileCountBefore?: number;
+  /** Override the current (after) project file count for the file-delta check (tests). Default:
+   *  a real recursive count of `projectPath` excluding `.forge`/`.git`/`node_modules`. */
+  countProjectFiles?: (projectPath: string) => Promise<number>;
   /** Optional live-DB executor for Schema Drift introspection (else migrations are used). */
   schemaSql?: SqlExecutor;
   /** TypeScript-check timeout (ms). Default 5 minutes. */
@@ -576,23 +598,47 @@ interface ExecError {
 }
 
 /**
+ * Quote a command string for embedding inside a `powershell.exe -Command "..."` argument that is
+ * itself launched via cmd.exe's default shell. The commands this runner executes are constant
+ * strings (`npx tsc --noEmit`, `pnpm run build`, …) — no injection surface — this only needs to
+ * survive the outer double-quote layer.
+ */
+function quoteForPowerShellCommandArg(command: string): string {
+  return `"${command.replace(/"/g, '\\"')}"`;
+}
+
+/**
  * Default {@link CommandRunner}: run `command` in `cwd` with a timeout, capturing output and
  * NEVER throwing. On Windows the shell is PowerShell (Contract 6); the gate commands
  * (`pnpm tsc --noEmit`, `pnpm run build`) are constant strings — no injection surface.
+ *
+ * Session 5.2 root cause: routing through `exec(command, { shell: 'powershell.exe' })` lets
+ * Windows PowerShell load the user's `$PROFILE` script, which can (and on the machine this defect
+ * was diagnosed on, DOES) unconditionally `Set-Location` to an unrelated directory — silently
+ * overriding `cwd` at the shell level. Every mandatory build/typescript check was validating
+ * whatever project the profile happened to `cd` into, NOT the target project — a build with zero
+ * files could still "pass" because Sentinel was grading a different, real, working codebase.
+ * Node's `exec()` `shell` option only selects WHICH shell binary runs, not extra flags, so instead
+ * we build the full `powershell.exe -NoProfile -NonInteractive -Command "..."` invocation as the
+ * command string itself and let `exec()` launch it via the default shell (cmd.exe on Windows),
+ * which never reads a PowerShell profile. Verified: `Get-Location` under the old invocation
+ * reported the wrong directory; under `-NoProfile -NonInteractive` it reports the real `cwd`.
  */
 async function defaultRunCommand(
   command: string,
   cwd: string,
   timeoutMs: number
 ): Promise<CommandResult> {
-  const shell = process.platform === 'win32' ? 'powershell.exe' : undefined;
+  const effectiveCommand =
+    process.platform === 'win32'
+      ? `powershell.exe -NoProfile -NonInteractive -Command ${quoteForPowerShellCommandArg(command)}`
+      : command;
   try {
-    const { stdout, stderr } = await execAsync(command, {
+    const { stdout, stderr } = await execAsync(effectiveCommand, {
       cwd,
       timeout: timeoutMs,
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
-      ...(shell ? { shell } : {}),
     });
     return { ok: true, exitCode: 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), timedOut: false };
   } catch (error) {
@@ -1016,6 +1062,85 @@ export function parseToolchainDependencies(toolchain: string): string[] {
 }
 
 /** Evaluate the Dependency check into a {@link CheckResult}. */
+// ---------------------------------------------------------------------------
+// Check: File Delta (Session 5.2 Task 2a — a build must produce a work product)
+// ---------------------------------------------------------------------------
+
+/** Prompt types legitimately exempt from the file-delta requirement (Task 2a). */
+const FILE_DELTA_EXEMPT_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['test', 'deploy']);
+/** Directory names excluded from the recursive project file count. */
+const FILE_DELTA_EXCLUDED_DIRS: ReadonlySet<string> = new Set(['.forge', '.git', 'node_modules']);
+
+/**
+ * Recursively count files under `projectPath`, excluding `.forge`, `.git`, and `node_modules`
+ * (Session 5.2 Task 2a). Never throws — an unreadable directory contributes 0 from that branch.
+ */
+export async function defaultCountProjectFiles(projectPath: string): Promise<number> {
+  let count = 0;
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (FILE_DELTA_EXCLUDED_DIRS.has(entry.name)) continue;
+        await walk(join(dir, entry.name));
+      } else if (entry.isFile()) {
+        count += 1;
+      }
+    }
+  }
+  await walk(projectPath);
+  return count;
+}
+
+/**
+ * Evaluate the file-delta law: a non-exempt prompt (anything but `test`/`deploy`) that leaves the
+ * project's file count UNCHANGED produced no work product — Sentinel must FAIL, never pass a void
+ * (Session 5.2 — the observed dialtest defect: 15/15 prompts "passed" against a directory that
+ * never gained a single file). Skips (never fails) when no `before` count was supplied — that's a
+ * caller not wired into the law, not evidence of an empty build.
+ */
+function evaluateFileDelta(
+  promptType: PromptType | undefined,
+  before: number | undefined,
+  after: number,
+  durationMs: number
+): CheckResult {
+  if (before === undefined) {
+    return skip('file_delta', 'no pre-prompt file count supplied — not evaluated');
+  }
+  if (promptType && FILE_DELTA_EXEMPT_PROMPT_TYPES.has(promptType)) {
+    return pass(
+      'file_delta',
+      `prompt type '${promptType}' is exempt from the file-delta requirement`,
+      `before=${before}, after=${after}`,
+      durationMs
+    );
+  }
+  const delta = after - before;
+  if (delta !== 0) {
+    return pass(
+      'file_delta',
+      `file count changed ${before} -> ${after} (${delta > 0 ? '+' : ''}${delta})`,
+      `before=${before}\nafter=${after}`,
+      durationMs
+    );
+  }
+  return fail(
+    'file_delta',
+    'no work product — file count unchanged after this prompt',
+    `before=${before}\nafter=${after}\n` +
+      `Prompt type '${promptType ?? 'unknown'}' is expected to create or modify files; a zero ` +
+      'delta means claude did not (or could not) do the work, regardless of what any other ' +
+      'check reports (Session 5.2 file-delta law).',
+    durationMs
+  );
+}
+
 function evaluateDependencies(
   currentDeps: string[],
   baseline: string[] | null,
@@ -2623,7 +2748,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('typescript'));
   } else {
-    log('check 1/6: TypeScript Ring 1a (npx tsc --noEmit --pretty false) — error-parsing + DB');
+    log('check 1/7: TypeScript Ring 1a (npx tsc --noEmit --pretty false) — error-parsing + DB');
     record(await runRing1TypescriptCheck(projectPath, tscTimeoutMs, run, log));
   }
 
@@ -2632,7 +2757,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('eslint'));
   } else {
-    log('check 2/6: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) — 0 errors threshold');
+    log('check 2/7: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) — 0 errors threshold');
     record(await runRing1EslintCheck(projectPath, eslintTimeoutMs, run, log));
   }
 
@@ -2640,7 +2765,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('build'));
   } else {
-    log('check 3/6: Build (pnpm run build)');
+    log('check 3/7: Build (pnpm run build)');
     record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run));
   }
 
@@ -2648,7 +2773,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('file_integrity'));
   } else {
-    log('check 4/6: File Integrity (git diff --name-status)');
+    log('check 4/7: File Integrity (git diff --name-status)');
     const startedAt = nowMs();
     let changes: GitFileChange[] | null;
     try {
@@ -2663,13 +2788,37 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     record(evaluateFileIntegrity(changes, protectedFiles, allowedDeletions, nowMs() - startedAt));
   }
 
+  // --- 3b. File Delta (Session 5.2 Task 2a — a build must produce a work product) --------------
+  if (shouldSkipRest()) {
+    record(skipRest('file_delta'));
+  } else {
+    log('check 5/7: File Delta (project file count before vs. after this prompt)');
+    const startedAt = nowMs();
+    if (options.fileCountBefore === undefined) {
+      record(skip('file_delta', 'no pre-prompt file count supplied — not evaluated'));
+    } else {
+      const countFiles = options.countProjectFiles ?? defaultCountProjectFiles;
+      let after: number;
+      try {
+        after = await countFiles(projectPath);
+      } catch (error) {
+        log(`WARNING: post-prompt file count failed (${describe(error)})`);
+        record(skip('file_delta', `could not count project files — not evaluated (${describe(error)})`));
+        after = -1;
+      }
+      if (after >= 0) {
+        record(evaluateFileDelta(options.promptType, options.fileCountBefore, after, nowMs() - startedAt));
+      }
+    }
+  }
+
   // --- 4. Schema Drift -----------------------------------------------------
   if (shouldSkipRest()) {
     record(skipRest('schema_drift'));
   } else if (!options.schemaPromptsHaveRun) {
     record(skip('schema_drift', 'no schema prompts have run yet — drift check not applicable'));
   } else {
-    log('check 5/6: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');
+    log('check 6/7: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');
     const startedAt = nowMs();
     const registryMd =
       options.schemaRegistryContent ?? (await readTextSafe(join(governanceDir, 'SCHEMA_REGISTRY.md')));
@@ -2694,11 +2843,24 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('dependencies'));
   } else {
-    log('check 6/6: Dependencies (package.json vs TOOLCHAIN.md)');
+    log('check 7/7: Dependencies (package.json vs TOOLCHAIN.md)');
     const startedAt = nowMs();
     const pkgJson = options.packageJsonContent ?? (await readTextSafe(join(projectPath, 'package.json')));
     if (pkgJson === null) {
-      record(skip('dependencies', `package.json not found under ${projectPath} — not evaluated`));
+      // Session 5.2 absent-target law (Task 2b): a MISSING target must FAIL loudly, never skip
+      // to a pass. The observed defect was exactly this — a project with no package.json at all
+      // read as "not evaluated" instead of "this project has no dependency manifest, which for a
+      // build past its schema/scaffold prompt is itself a defect."
+      record(
+        fail(
+          'dependencies',
+          `package.json not found under ${projectPath} — cannot evaluate dependencies`,
+          `Expected a dependency manifest at ${join(projectPath, 'package.json')}; none exists. ` +
+            'An absent target fails Sentinel, it never silently skips to a pass (Session 5.2 ' +
+            'absent-target law).',
+          nowMs() - startedAt
+        )
+      );
     } else {
       const currentDeps = parsePackageDependencies(pkgJson);
       let baseline: string[] | null = options.baselineDependencies ?? null;
