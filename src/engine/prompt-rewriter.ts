@@ -267,6 +267,8 @@ function renderPreamble(
   // Restructured approach: canonical baseline + precedent-derived steps.
   const approachSteps: string[] = [...CANONICAL_APPROACH[promptType]];
   for (const p of precedents) {
+    if (p.successScore === 0) continue;
+    if (p.description.includes('escalated to human') || p.description.includes('Novel error')) continue;
     const pctText = `${(p.successScore * 100).toFixed(0)}%`;
     const head = `From a proven precedent for "${p.signature}" (${pctText} success): ${p.description.trim()}`;
     approachSteps.push(head);
