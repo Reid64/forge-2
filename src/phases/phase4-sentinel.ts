@@ -1,42 +1,42 @@
-﻿/**
- * FORGE 2.0 â€” Phase 4: Sentinel (post-prompt health checker, queue.yaml s5-p04).
+/**
+ * FORGE 2.0 — Phase 4: Sentinel (post-prompt health checker, queue.yaml s5-p04).
  *
- * Sentinel runs after EVERY Phase 3 prompt execution (BEHAVIORAL_CONTRACTS.md Contract 1 â€”
+ * Sentinel runs after EVERY Phase 3 prompt execution (BEHAVIORAL_CONTRACTS.md Contract 1 —
  * "Phase 4 runs after EVERY Phase 3 prompt") and is the gate that decides whether the
  * prompt's work is healthy enough to merge to main. It performs five health checks IN ORDER
  * (Contract 13), and ALL non-skipped checks must pass:
  *
- *   1. TypeScript  â€” `pnpm tsc --noEmit`            (Gate 1; zero errors required)
- *   2. Build       â€” `pnpm run build`               (Gate 2; must complete; warnings ok)
- *   3. File Integrity â€” `git diff --name-status`    (immutable governance docs unchanged,
- *                       no unexpected deletions â€” Contract 3 / Iron Law 1)
- *   4. Schema Drift â€” extractSchema() vs SCHEMA_REGISTRY.md, ONLY when schema prompts have
+ *   1. TypeScript  — `pnpm tsc --noEmit`            (Gate 1; zero errors required)
+ *   2. Build       — `pnpm run build`               (Gate 2; must complete; warnings ok)
+ *   3. File Integrity — `git diff --name-status`    (immutable governance docs unchanged,
+ *                       no unexpected deletions — Contract 3 / Iron Law 1)
+ *   4. Schema Drift — extractSchema() vs SCHEMA_REGISTRY.md, ONLY when schema prompts have
  *                       run. Additions are OK; modifications / deletions FAIL.
- *   5. Dependency Check â€” current package.json deps vs the locked TOOLCHAIN.md manifest /
+ *   5. Dependency Check — current package.json deps vs the locked TOOLCHAIN.md manifest /
  *                       baseline. Any NEW dependency not in the manifest FAILS.
  *
  * Returns a {@link SentinelResult} `{ passed, checks, failedCheck, diagnosticReport }`. When any
  * check fails, the diagnostic report is a full-context markdown summary the executor (s5-p05)
- * can surface to the operator (Contract 13 â†’ halt) or feed into Autonomous Recovery.
+ * can surface to the operator (Contract 13 → halt) or feed into Autonomous Recovery.
  *
  * AUTONOMOUS RECOVERY (Contract 14): {@link runAutonomousRecovery} implements the opt-in
  * self-heal loop. On a Sentinel failure, IF `autonomousRecoveryMode` is enabled AND the
  * normalized error matches an `error_patterns` row that is `auto_resolve_eligible` with
  * `success_rate > 0.90`, FORGE applies the linked resolution, RE-RUNS the prompt, and RE-RUNS
- * Sentinel â€” up to TWO attempts per prompt. A third failure, or a NOVEL error (no matching
+ * Sentinel — up to TWO attempts per prompt. A third failure, or a NOVEL error (no matching
  * pattern), ALWAYS escalates to a human. Every attempt is logged to Build Memory
  * (resolution application counts, pattern occurrence, prompt_execution resolution fields).
  *
- * Like every other FORGE tool/phase, this module is NON-FATAL and NEVER throws (Iron Law 3 â€”
+ * Like every other FORGE tool/phase, this module is NON-FATAL and NEVER throws (Iron Law 3 —
  * report the real outcome, never fabricate a pass): every command, file read, git call, schema
  * extraction, and Build Memory write is guarded. A check whose precondition cannot be evaluated
  * (e.g. git unavailable, DB unreachable, no baseline manifest) is reported as SKIPPED with a
- * note â€” never silently passed and never falsely failed. Build Memory being unreachable degrades
+ * note — never silently passed and never falsely failed. Build Memory being unreachable degrades
  * to stateless mode (Contract 4), it does not block the gate.
  *
  * Every external collaborator (the shell runner, the git diff, the schema extractor, and all
  * Build Memory reads/writes) is injectable, so Sentinel and the recovery loop unit-test with no
- * `pnpm`, no git repo, and no database â€” matching the house pattern (claude-runner, git-manager,
+ * `pnpm`, no git repo, and no database — matching the house pattern (claude-runner, git-manager,
  * failure-predictor all do the same).
  */
 
@@ -117,13 +117,13 @@ import { registerError } from '../learning/queries.js';
 const execAsync = promisify(exec);
 
 // ---------------------------------------------------------------------------
-// Public contract â€” Sentinel
+// Public contract — Sentinel
 // ---------------------------------------------------------------------------
 
 /**
  * The Sentinel health checks. The first five are the fixed Contract-13 suite (always evaluated, in
  * order). `visual_regression` and `live_preview` are OPTIONAL checks, appended only when configured
- * AND the prompt that just ran touched UI â€” they are NOT part of the mandatory five, so a build that
+ * AND the prompt that just ran touched UI — they are NOT part of the mandatory five, so a build that
  * does not opt in keeps exactly the five Contract-13 checks.
  */
 export type SentinelCheckName =
@@ -171,7 +171,7 @@ export interface CheckResult {
   name: SentinelCheckName;
   /** True when the check ran and passed. A skipped check is NOT a pass (see `skipped`). */
   passed: boolean;
-  /** True when the check could not be evaluated (precondition absent) â€” neither pass nor fail. */
+  /** True when the check could not be evaluated (precondition absent) — neither pass nor fail. */
   skipped: boolean;
   /** Short human-readable summary (one line). */
   detail: string;
@@ -211,20 +211,20 @@ export type CommandRunner = (
 
 /** Options controlling a Sentinel run. */
 export interface SentinelOptions {
-  /** Target project root â€” the repo Sentinel inspects (NEVER FORGE's own dir, Contract 6). */
+  /** Target project root — the repo Sentinel inspects (NEVER FORGE's own dir, Contract 6). */
   projectPath: string;
   /** Governance subdirectory under `projectPath`. Default `'governance'`. */
   governanceDirName?: string;
   /**
    * Whether any SCHEMA prompt has already executed in this build. When false, the Schema
-   * Drift check (4) is SKIPPED â€” there is no schema to drift yet (s5-p04 spec / Contract 13
+   * Drift check (4) is SKIPPED — there is no schema to drift yet (s5-p04 spec / Contract 13
    * step 4: "if schema prompts have run").
    */
   schemaPromptsHaveRun?: boolean;
   /**
    * Project-relative governance documents that MUST NOT change during a build (Contract 3 /
    * Iron Law 1). Compared by basename against the git diff. NOTE: STATE_OF_THE_BUILD.md and
-   * SESSION_STATE.md are deliberately ABSENT â€” they are updated after every prompt (BLUEPRINT
+   * SESSION_STATE.md are deliberately ABSENT — they are updated after every prompt (BLUEPRINT
    * canonical rule 9) and so are allowed to change. Default: the truly immutable set.
    */
   protectedGovernanceFiles?: string[];
@@ -241,7 +241,7 @@ export interface SentinelOptions {
    */
   baselineDependencies?: string[];
   /**
-   * This prompt's type (Session 5.2 file-delta law â€” Task 2a). Drives which prompt types are
+   * This prompt's type (Session 5.2 file-delta law — Task 2a). Drives which prompt types are
    * EXEMPT from the file-delta requirement (`test`/`deploy` legitimately touch zero new files).
    * When omitted, the file-delta check treats the prompt as non-exempt (a real build call site
    * always supplies this; only ad-hoc callers that don't care about the law omit it).
@@ -249,11 +249,11 @@ export interface SentinelOptions {
   promptType?: PromptType;
   /**
    * The project's file count (excluding `.forge`/`.git`/`node_modules`) measured BEFORE this
-   * prompt executed (Session 5.2 file-delta law â€” Task 2a). When supplied, Sentinel compares it
-   * against a fresh count taken now and FAILS a non-exempt prompt whose count didn't change â€” a
+   * prompt executed (Session 5.2 file-delta law — Task 2a). When supplied, Sentinel compares it
+   * against a fresh count taken now and FAILS a non-exempt prompt whose count didn't change — a
    * build/feature/schema/ui/api prompt that touched zero files produced no work product. When
    * omitted, the file-delta check is SKIPPED (a caller not wired into the law must never get a
-   * false failure) â€” the real executor always supplies this.
+   * false failure) — the real executor always supplies this.
    */
   fileCountBefore?: number;
   /** Override the current (after) project file count for the file-delta check (tests). Default:
@@ -266,7 +266,7 @@ export interface SentinelOptions {
   /** Build-check timeout (ms). Default 10 minutes. */
   buildTimeoutMs?: number;
   /**
-   * Stop after the first failing check (remaining checks are marked SKIPPED). Default true â€”
+   * Stop after the first failing check (remaining checks are marked SKIPPED). Default true —
    * Contract 13 ("any single failure halts the build") and it avoids running a 10-minute build
    * after tsc already failed. Set false to run every check for a fuller diagnostic.
    */
@@ -295,7 +295,7 @@ export interface SentinelOptions {
   /**
    * Whether the prompt that just executed was a UI prompt. The visual-regression check runs only
    * after UI prompts (the spec: "after every UI prompt execution"). `false` skips it; `undefined`
-   * (with `visualRegression` configured) is treated as "run" â€” config presence implies intent.
+   * (with `visualRegression` configured) is treated as "run" — config presence implies intent.
    */
   uiPromptJustRan?: boolean;
   /** Options forwarded to {@link runVisualRegression} (e.g. an injected driver/fs for tests). */
@@ -308,7 +308,7 @@ export interface SentinelOptions {
   /**
    * Live-preview configuration (the OPTIONAL seventh check). When supplied, Sentinel BOOTS the target
    * app's dev server (`pnpm dev`), visits every route in the app directory, and verifies each renders
-   * (HTTP 200, no console errors, non-blank body, screenshot) AFTER a UI prompt â€” that is, when the
+   * (HTTP 200, no console errors, non-blank body, screenshot) AFTER a UI prompt — that is, when the
    * prompt that just ran changed a `.tsx`/`.css` file (detected from this run's git diff via
    * {@link hasUiFileChanges}) OR `uiPromptJustRan !== false`. `projectPath` defaults from this run's
    * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
@@ -327,7 +327,7 @@ export interface SentinelOptions {
    * Security-scan configuration (the OPTIONAL eighth check). When supplied, Sentinel scans the code
    * the prompt just generated for hardcoded secrets, SQL injection, XSS, client-exposed env vars,
    * missing API auth / rate limiting, insecure CORS, and (via `npm audit`) dependency CVEs AFTER
-   * EVERY prompt â€” it is NOT gated on UI changes. `projectPath` defaults from this run's options; when
+   * EVERY prompt — it is NOT gated on UI changes. `projectPath` defaults from this run's options; when
    * `files` is omitted Sentinel passes the prompt's changed files (from the File-Integrity diff) so
    * only the new/edited code is scanned (a full walk when the diff is unavailable). When omitted, the
    * check is not added (the five Contract-13 checks stand alone). A CRITICAL finding (a live key, an
@@ -346,7 +346,7 @@ export interface SentinelOptions {
    * Accessibility-audit configuration (the OPTIONAL ninth check). When supplied, Sentinel boots the
    * target app, loads every page route, and runs axe-core in the page to audit it for WCAG 2.1 AA
    * compliance (missing alt text, colour contrast, form labels, ARIA on interactive elements, keyboard
-   * traps, skip links, heading hierarchy, `lang` attribute) AFTER a UI prompt â€” that is, when the
+   * traps, skip links, heading hierarchy, `lang` attribute) AFTER a UI prompt — that is, when the
    * prompt that just ran changed a `.tsx`/`.css` file (detected from this run's git diff via
    * {@link hasUiFileChanges}) OR `uiPromptJustRan !== false`. `projectPath` defaults from this run's
    * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
@@ -365,11 +365,11 @@ export interface SentinelOptions {
   /**
    * SEO-audit configuration (the OPTIONAL tenth check). When supplied, Sentinel boots the target app,
    * loads every page route, and validates each rendered page for search-engine readiness AFTER a UI
-   * prompt â€” that is, when the prompt that just ran changed a `.tsx`/`.css` file (detected from this
+   * prompt — that is, when the prompt that just ran changed a `.tsx`/`.css` file (detected from this
    * run's git diff via {@link hasUiFileChanges}) OR `uiPromptJustRan !== false`. It checks unique title
    * tags (no duplicates across routes), meta descriptions under 160 chars, canonical URLs, Open Graph
    * tags, valid JSON-LD structured data, page-appropriate robots meta, `sitemap.xml` validity, the
-   * internal-link graph (no orphan pages / broken links), heading hierarchy (single H1, logical H2â€“H6),
+   * internal-link graph (no orphan pages / broken links), heading hierarchy (single H1, logical H2–H6),
    * and image optimization (WebP / lazy / width+height), producing per-page SEO scores. `projectPath`
    * defaults from this run's options when absent. When omitted, the check is not added (the five
    * Contract-13 checks stand alone). A CRITICAL SEO issue FAILS the gate and blocks the build; serious/
@@ -383,12 +383,12 @@ export interface SentinelOptions {
   runSeoCheck?: (input: SeoAuditInput, options?: SeoValidatorOptions) => Promise<SEOAuditResult>;
   /**
    * Architecture-guard configuration (the OPTIONAL eleventh check). When supplied, Sentinel statically
-   * analyzes the WHOLE target codebase AFTER EVERY prompt for architectural anti-patterns â€” circular
-   * dependencies (parsed import graph â†’ cycle detection), god components (>500 lines), duplicate logic,
+   * analyzes the WHOLE target codebase AFTER EVERY prompt for architectural anti-patterns — circular
+   * dependencies (parsed import graph → cycle detection), god components (>500 lines), duplicate logic,
    * N+1 query patterns in API routes, a React tree missing an error boundary, hardcoded values that
    * belong in env vars, inconsistent file naming, dead exported code, and TypeScript strict-mode
-   * violations (`as any`/`@ts-ignore`/â€¦). It is NOT gated on UI changes (the whole graph matters every
-   * prompt) and â€” unlike the security scan â€” is NOT pinned to the changed files (cycle/dead-code
+   * violations (`as any`/`@ts-ignore`/…). It is NOT gated on UI changes (the whole graph matters every
+   * prompt) and — unlike the security scan — is NOT pinned to the changed files (cycle/dead-code
    * detection needs the full project). `projectPath` defaults from this run's options when absent. When
    * omitted, the check is not added (the five Contract-13 checks stand alone). A HIGH-severity violation
    * (a dependency cycle / an N+1 query by default; configurable via `severityOverrides`) FAILS the gate
@@ -404,9 +404,9 @@ export interface SentinelOptions {
     options?: ArchitectureGuardOptions
   ) => Promise<ArchitectureReport>;
   /**
-   * Migration-safety configuration (the OPTIONAL PRE-MIGRATION gate). When supplied â€” the executor
+   * Migration-safety configuration (the OPTIONAL PRE-MIGRATION gate). When supplied — the executor
    * passes it only on a prompt that is about to APPLY a database migration, with the migration SQL in
-   * `sql` â€” Sentinel runs {@link analyzeMigration} BEFORE the other checks: it parses the SQL for
+   * `sql` — Sentinel runs {@link analyzeMigration} BEFORE the other checks: it parses the SQL for
    * destructive operations (DROP TABLE / DROP COLUMN / lossy ALTER COLUMN TYPE / TRUNCATE / unqualified
    * DELETE), requires each to be explicitly confirmed, auto-generates a rollback migration and a
    * data-backup script, diffs the migration against the live production schema (via `schemaSql`/
@@ -415,7 +415,7 @@ export interface SentinelOptions {
    * checks stand alone). An UNCONFIRMED destructive operation or an un-acknowledged breakage FAILS the
    * gate and blocks the build (so the migration is never applied); a fully-confirmed, non-breaking
    * migration PASSES; an empty/parse-free migration with nothing destructive PASSES. Because it is the
-   * pre-migration gate it runs FIRST â€” a blocked migration short-circuits the costly tsc/build checks.
+   * pre-migration gate it runs FIRST — a blocked migration short-circuits the costly tsc/build checks.
    */
   migrationSafety?: Omit<MigrationSafetyInput, 'projectPath' | 'projectName'> & {
     projectPath?: string;
@@ -429,20 +429,20 @@ export interface SentinelOptions {
     options?: MigrationSafetyOptions
   ) => Promise<MigrationSafetyReport>;
   /**
-   * Consensus-validation configuration (the OPTIONAL post-generation check). When supplied â€” the
+   * Consensus-validation configuration (the OPTIONAL post-generation check). When supplied — the
    * executor passes it after a prompt that PRODUCED an artifact, with the prompt's `originalPrompt`,
-   * the model's `generatedOutput`, the `primaryProvider` that produced it, and the `promptType` â€”
-   * Sentinel fans the output to 2â€“3 INDEPENDENT validator models (each on a different provider than
+   * the model's `generatedOutput`, the `primaryProvider` that produced it, and the `promptType` —
+   * Sentinel fans the output to 2–3 INDEPENDENT validator models (each on a different provider than
    * the primary, via the provider-router) and scores their verdicts into a consensus (VALIDATED /
    * VALIDATED_WITH_CONCERNS / FAILED). The per-`promptType` requirement level decides the gate:
    * `architecture` needs 3-of-3, `crud` 2-of-3, `documentation` 1-of-3 (configurable). Like the
-   * security scan it is NOT gated on UI changes â€” every generation is cross-checked. For research
+   * security scan it is NOT gated on UI changes — every generation is cross-checked. For research
    * results it independently verifies each supplied claim (opportunity existence; eligibility /
    * deadline / dollar-amount accuracy). `projectName` defaults to the basename of this run's
    * `projectPath`. When omitted, the check is not added (the five Contract-13 checks stand alone). A
    * generation whose approvals fall below the prompt_type requirement FAILS the gate and blocks the
    * build; an unreachable validator panel (<2 usable judgments) SKIPS (never a false failure).
-   * Results â€” including the per-validator real-issue scoreboard â€” are stored in Build Memory (guarded).
+   * Results — including the per-validator real-issue scoreboard — are stored in Build Memory (guarded).
    */
   consensusValidation?: ConsensusValidationInput;
   /** Options forwarded to {@link runConsensusValidation} (e.g. an injected router / validator caller / store for tests). */
@@ -462,7 +462,7 @@ export interface SentinelOptions {
   runAgentShieldCheck?: (projectPath: string) => Promise<SecurityReport>;
   /**
    * Live schema drift (OPTIONAL). When supplied, Sentinel compares the LIVE database schema
-   * (via `schemaSql`) against SCHEMA_REGISTRY.md AFTER EVERY prompt â€” regardless of whether
+   * (via `schemaSql`) against SCHEMA_REGISTRY.md AFTER EVERY prompt — regardless of whether
    * schema prompts have run. `schemaSql` must be provided on `SentinelOptions`; when absent the
    * check SKIPS (a missing SQL executor must never produce a false failure). Additions are OK;
    * modifications / deletions FAIL (same semantics as the mandatory `schema_drift` check).
@@ -475,7 +475,7 @@ export interface SentinelOptions {
   /**
    * Dead code scan (OPTIONAL). When supplied, Sentinel scans the project for unused imports,
    * variables, and exports AFTER EVERY prompt. Results are ALWAYS REPORTED but NEVER BLOCK the
-   * build â€” this is a report-only check that surfaces dead code for the developer without
+   * build — this is a report-only check that surfaces dead code for the developer without
    * stopping the gate. An un-scannable project SKIPS.
    */
   deadCodeScan?: { projectPath?: string };
@@ -492,7 +492,7 @@ export interface SentinelOptions {
   runSixLawsVerification?: (projectPath: string) => Promise<SixLawsResult>;
   /**
    * Full Playwright test suite (OPTIONAL). When supplied, Sentinel runs the COMPLETE Playwright
-   * test suite (`pnpm playwright test`) after every prompt â€” not incremental. Any test failure
+   * test suite (`pnpm playwright test`) after every prompt — not incremental. Any test failure
    * FAILS the gate and blocks the build. Timeout defaults to 20 minutes. An environment without
    * Playwright installed that exits non-zero FAILS (not skipped); a timeout FAILS.
    */
@@ -507,7 +507,7 @@ export interface SentinelOptions {
    * under `src/types/`, `src/`, and the project root) to extract declared Supabase table names
    * and compares them against the live Supabase schema via the REST API (`/rest/v1/`). Credentials
    * are read from `SUPABASE_SERVICE_ROLE_KEY` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` env vars or from
-   * `.env.local`. Skips gracefully when the file is absent or credentials are unavailable â€” never
+   * `.env.local`. Skips gracefully when the file is absent or credentials are unavailable — never
    * a false failure. A table declared in `database.types.ts` that is MISSING from live Supabase
    * FAILS the gate; extra live tables are OK (additions are acceptable).
    */
@@ -518,7 +518,7 @@ export interface SentinelOptions {
    * `ring2.promptNumber % 10 === 0` OR `ring2.isFinalPrompt === true`.
    *
    * Tools:
-   *  - **Vitest** (`npx vitest run --reporter=json`): 0 failures AND â‰¥60% line coverage. Skips
+   *  - **Vitest** (`npx vitest run --reporter=json`): 0 failures AND ≥60% line coverage. Skips
    *    gracefully when `vitest.config.ts` is absent.
    *  - **Semgrep** (`npx semgrep --config=auto --json`): 0 severity ERROR findings. Skips when
    *    semgrep is not installed.
@@ -549,7 +549,7 @@ export interface SentinelOptions {
    *  - **Gitleaks** (`gitleaks detect --source=. --report-format json --exit-code 0`): 0 secret
    *    findings. Skips when gitleaks binary is not in PATH.
    *  - **Lighthouse** (starts dev server on port 3099, runs lighthouse, stops server): all four
-   *    categories (performance / accessibility / best-practices / SEO) must score â‰¥ 90. Skips
+   *    categories (performance / accessibility / best-practices / SEO) must score ≥ 90. Skips
    *    when lighthouse is not installed or the dev server does not start.
    *
    * All three tools degrade gracefully (SKIP, never FAIL) when the binary is unavailable.
@@ -586,7 +586,7 @@ const DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_CHARS = 4000;
 
 // ---------------------------------------------------------------------------
-// Default shell runner (guarded â€” never throws)
+// Default shell runner (guarded — never throws)
 // ---------------------------------------------------------------------------
 
 /** The shape `child_process.exec` throws on a non-zero exit / timeout. */
@@ -602,7 +602,7 @@ interface ExecError {
 /**
  * Quote a command string for embedding inside a `powershell.exe -Command "..."` argument that is
  * itself launched via cmd.exe's default shell. The commands this runner executes are constant
- * strings (`npx tsc --noEmit`, `pnpm run build`, â€¦) â€” no injection surface â€” this only needs to
+ * strings (`npx tsc --noEmit`, `pnpm run build`, …) — no injection surface — this only needs to
  * survive the outer double-quote layer.
  */
 function quoteForPowerShellCommandArg(command: string): string {
@@ -612,13 +612,13 @@ function quoteForPowerShellCommandArg(command: string): string {
 /**
  * Default {@link CommandRunner}: run `command` in `cwd` with a timeout, capturing output and
  * NEVER throwing. On Windows the shell is PowerShell (Contract 6); the gate commands
- * (`pnpm tsc --noEmit`, `pnpm run build`) are constant strings â€” no injection surface.
+ * (`pnpm tsc --noEmit`, `pnpm run build`) are constant strings — no injection surface.
  *
  * Session 5.2 root cause: routing through `exec(command, { shell: 'powershell.exe' })` lets
  * Windows PowerShell load the user's `$PROFILE` script, which can (and on the machine this defect
- * was diagnosed on, DOES) unconditionally `Set-Location` to an unrelated directory â€” silently
+ * was diagnosed on, DOES) unconditionally `Set-Location` to an unrelated directory — silently
  * overriding `cwd` at the shell level. Every mandatory build/typescript check was validating
- * whatever project the profile happened to `cd` into, NOT the target project â€” a build with zero
+ * whatever project the profile happened to `cd` into, NOT the target project — a build with zero
  * files could still "pass" because Sentinel was grading a different, real, working codebase.
  * Node's `exec()` `shell` option only selects WHICH shell binary runs, not extra flags, so instead
  * we build the full `powershell.exe -NoProfile -NonInteractive -Command "..."` invocation as the
@@ -669,7 +669,7 @@ async function readTextSafe(absPath: string): Promise<string | null> {
 function clip(text: string, max = MAX_OUTPUT_CHARS): string {
   const t = text ?? '';
   if (t.length <= max) return t;
-  return `${t.slice(0, max)}\nâ€¦ [${t.length - max} more chars truncated]`;
+  return `${t.slice(0, max)}\n… [${t.length - max} more chars truncated]`;
 }
 
 /** First non-empty trimmed line of a block of output (for terse `detail` strings). */
@@ -692,7 +692,7 @@ function fail(name: SentinelCheckName, detail: string, output: string, durationM
   return { name, passed: false, skipped: false, detail, output, durationMs };
 }
 
-/** A skipped check result (precondition absent â€” neither pass nor fail). */
+/** A skipped check result (precondition absent — neither pass nor fail). */
 function skip(name: SentinelCheckName, detail: string): CheckResult {
   return { name, passed: false, skipped: true, detail, output: '', durationMs: 0 };
 }
@@ -732,22 +732,22 @@ async function runCommandCheck(
 async function defaultGetFileChanges(cwd: string, log: (m: string) => void): Promise<GitFileChange[] | null> {
   // The File-Integrity diff is `main...HEAD`. When no `main` branch exists yet (a fresh repo, or one
   // that simply never created one) that diff would error and falsely FAIL the gate. Detect the absence
-  // FIRST and SKIP the check (return null â†’ evaluateFileIntegrity skips), warning rather than failing
-  // (Iron Law 3 â€” never fabricate a failure from an absent precondition).
+  // FIRST and SKIP the check (return null → evaluateFileIntegrity skips), warning rather than failing
+  // (Iron Law 3 — never fabricate a failure from an absent precondition).
   try {
     const { stdout } = await execAsync('git branch --list main', { cwd, windowsHide: true });
     if (String(stdout ?? '').trim() === '') {
-      const msg = 'no `main` branch exists â€” skipping File Integrity check (git diff main...HEAD not runnable)';
+      const msg = 'no `main` branch exists — skipping File Integrity check (git diff main...HEAD not runnable)';
       log(`WARNING: ${msg}`);
       // Session 5 finding #3/#5: git absence must WARN LOUDLY (actual Pino warn level), not sit
-      // at the same info level as routine progress lines â€” Contract 10/11/12 (branch isolation,
+      // at the same info level as routine progress lines — Contract 10/11/12 (branch isolation,
       // checkpoints, rollback) are ALL silently no-op-ing for this build without a repo.
       getLogger('sentinel').warn({ contract: ['10', '11', '12'] }, msg);
       return null;
     }
   } catch (error) {
-    // git unavailable / not a repo â€” also un-evaluable; skip rather than fail.
-    const msg = `could not check for a \`main\` branch (${describe(error)}) â€” skipping File Integrity check`;
+    // git unavailable / not a repo — also un-evaluable; skip rather than fail.
+    const msg = `could not check for a \`main\` branch (${describe(error)}) — skipping File Integrity check`;
     log(`WARNING: ${msg}`);
     getLogger('sentinel').warn({ contract: ['10', '11', '12'] }, msg);
     return null;
@@ -761,7 +761,7 @@ async function defaultGetFileChanges(cwd: string, log: (m: string) => void): Pro
 
 /**
  * Evaluate File Integrity from a git `--name-status` diff: a protected governance doc that was
- * modified/deleted/renamed FAILS (Contract 3), and any unexpected deletion FAILS (Iron Law 1 â€”
+ * modified/deleted/renamed FAILS (Contract 3), and any unexpected deletion FAILS (Iron Law 1 —
  * no silent loss of work). A null diff (git unavailable) is SKIPPED, not failed.
  */
 function evaluateFileIntegrity(
@@ -773,7 +773,7 @@ function evaluateFileIntegrity(
   if (changes === null) {
     return skip(
       'file_integrity',
-      'git diff unavailable (no repo / git not initialized) â€” file integrity not evaluated'
+      'git diff unavailable (no repo / git not initialized) — file integrity not evaluated'
     );
   }
 
@@ -786,11 +786,11 @@ function evaluateFileIntegrity(
 
     // Protected governance docs must not change at all (M / D / R<score> / C<score>).
     if (protectedFiles.has(name) && /^[MDRC]/.test(status)) {
-      const oldName = change.oldPath ? `${basename(change.oldPath)} â†’ ` : '';
+      const oldName = change.oldPath ? `${basename(change.oldPath)} → ` : '';
       violations.push(`protected governance file changed (${status}): ${oldName}${change.path}`);
       continue;
     }
-    // Renames also report the OLD path being removed â€” a protected doc renamed away is a change.
+    // Renames also report the OLD path being removed — a protected doc renamed away is a change.
     if (change.oldPath && protectedFiles.has(basename(change.oldPath))) {
       violations.push(`protected governance file renamed away (${status}): ${basename(change.oldPath)}`);
       continue;
@@ -821,17 +821,17 @@ function evaluateFileIntegrity(
 // Check 4: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)
 // ---------------------------------------------------------------------------
 
-/** A table-name â†’ declared columns map parsed out of SCHEMA_REGISTRY.md. */
+/** A table-name → declared columns map parsed out of SCHEMA_REGISTRY.md. */
 export interface RegistryTable {
   name: string;
-  /** Lowercased column name â†’ declared type string (as written in the registry). */
+  /** Lowercased column name → declared type string (as written in the registry). */
   columns: Map<string, string>;
 }
 
 /**
  * Parse SCHEMA_REGISTRY.md into expected tables + columns. Tables are `## Table: name` headings;
- * columns come from the markdown table whose header row starts `| Column | Type | â€¦`. Best-effort
- * and tolerant â€” a malformed row is skipped, never throws.
+ * columns come from the markdown table whose header row starts `| Column | Type | …`. Best-effort
+ * and tolerant — a malformed row is skipped, never throws.
  */
 export function parseSchemaRegistry(markdown: string): RegistryTable[] {
   const lines = markdown.split(/\r?\n/);
@@ -934,7 +934,7 @@ export function diffSchema(expected: RegistryTable[], actual: SchemaSnapshot): S
       }
       const want = normalizeType(expType);
       const got = normalizeType(actCol.type);
-      // Only flag a modification when BOTH sides resolve to a known, differing base family â€”
+      // Only flag a modification when BOTH sides resolve to a known, differing base family —
       // conservative, to avoid false positives from notation differences (int vs integer, etc.).
       if (want !== '' && got !== '' && want !== got) {
         findings.push({
@@ -973,14 +973,14 @@ function evaluateSchemaDrift(
   actual: SchemaSnapshot,
   durationMs: number
 ): CheckResult {
-  // Cannot compare without a registry or without any actual schema â†’ skip (no false failure).
+  // Cannot compare without a registry or without any actual schema → skip (no false failure).
   if (expected.length === 0) {
-    return skip('schema_drift', 'no tables parsed from SCHEMA_REGISTRY.md â€” drift not evaluated');
+    return skip('schema_drift', 'no tables parsed from SCHEMA_REGISTRY.md — drift not evaluated');
   }
   if (actual.tables.length === 0) {
     return skip(
       'schema_drift',
-      `no schema extracted (source: ${actual.source}) â€” drift not evaluated` +
+      `no schema extracted (source: ${actual.source}) — drift not evaluated` +
         (actual.warnings.length ? ` [${actual.warnings[0]}]` : '')
     );
   }
@@ -1034,7 +1034,7 @@ export function parsePackageDependencies(packageJson: string): string[] {
  * Best-effort parse of a dependency allow-list out of TOOLCHAIN.md. The Phase 0 manifest does not
  * (currently) enumerate npm packages, so this only finds an explicit `## Dependencies` /
  * `## Locked Dependencies` section (bullet list, backticked names, or a markdown table). Returns
- * an empty list when no such section exists â€” the caller then SKIPS the check rather than failing.
+ * an empty list when no such section exists — the caller then SKIPS the check rather than failing.
  */
 export function parseToolchainDependencies(toolchain: string): string[] {
   const lines = toolchain.split(/\r?\n/);
@@ -1065,7 +1065,7 @@ export function parseToolchainDependencies(toolchain: string): string[] {
 
 /** Evaluate the Dependency check into a {@link CheckResult}. */
 // ---------------------------------------------------------------------------
-// Check: File Delta (Session 5.2 Task 2a â€” a build must produce a work product)
+// Check: File Delta (Session 5.2 Task 2a — a build must produce a work product)
 // ---------------------------------------------------------------------------
 
 /** Prompt types legitimately exempt from the file-delta requirement (Task 2a). */
@@ -1075,7 +1075,7 @@ const FILE_DELTA_EXCLUDED_DIRS: ReadonlySet<string> = new Set(['.forge', '.git',
 
 /**
  * Recursively count files under `projectPath`, excluding `.forge`, `.git`, and `node_modules`
- * (Session 5.2 Task 2a). Never throws â€” an unreadable directory contributes 0 from that branch.
+ * (Session 5.2 Task 2a). Never throws — an unreadable directory contributes 0 from that branch.
  */
 export async function defaultCountProjectFiles(projectPath: string): Promise<number> {
   let count = 0;
@@ -1101,9 +1101,9 @@ export async function defaultCountProjectFiles(projectPath: string): Promise<num
 
 /**
  * Evaluate the file-delta law: a non-exempt prompt (anything but `test`/`deploy`) that leaves the
- * project's file count UNCHANGED produced no work product â€” Sentinel must FAIL, never pass a void
- * (Session 5.2 â€” the observed dialtest defect: 15/15 prompts "passed" against a directory that
- * never gained a single file). Skips (never fails) when no `before` count was supplied â€” that's a
+ * project's file count UNCHANGED produced no work product — Sentinel must FAIL, never pass a void
+ * (Session 5.2 — the observed dialtest defect: 15/15 prompts "passed" against a directory that
+ * never gained a single file). Skips (never fails) when no `before` count was supplied — that's a
  * caller not wired into the law, not evidence of an empty build.
  */
 function evaluateFileDelta(
@@ -1113,7 +1113,7 @@ function evaluateFileDelta(
   durationMs: number
 ): CheckResult {
   if (before === undefined) {
-    return skip('file_delta', 'no pre-prompt file count supplied â€” not evaluated');
+    return skip('file_delta', 'no pre-prompt file count supplied — not evaluated');
   }
   if (promptType && FILE_DELTA_EXEMPT_PROMPT_TYPES.has(promptType)) {
     return pass(
@@ -1134,7 +1134,7 @@ function evaluateFileDelta(
   }
   return fail(
     'file_delta',
-    'no work product â€” file count unchanged after this prompt',
+    'no work product — file count unchanged after this prompt',
     `before=${before}\nafter=${after}\n` +
       `Prompt type '${promptType ?? 'unknown'}' is expected to create or modify files; a zero ` +
       'delta means claude did not (or could not) do the work, regardless of what any other ' +
@@ -1151,7 +1151,7 @@ function evaluateDependencies(
   if (baseline === null || baseline.length === 0) {
     return skip(
       'dependencies',
-      'no dependency baseline (TOOLCHAIN.md has no dependencies section and none supplied) â€” not evaluated'
+      'no dependency baseline (TOOLCHAIN.md has no dependencies section and none supplied) — not evaluated'
     );
   }
   const allowed = new Set(baseline);
@@ -1175,28 +1175,28 @@ function evaluateDependencies(
 
 /** Map a {@link VisualRegressionResult} into the Sentinel's {@link CheckResult} contract. */
 function evaluateVisualRegression(vr: VisualRegressionResult, durationMs: number): CheckResult {
-  // Nothing comparable â€” no routes, or the app/browser was unavailable. Skip (no false failure).
+  // Nothing comparable — no routes, or the app/browser was unavailable. Skip (no false failure).
   if (vr.pages.length === 0) {
-    return skip('visual_regression', 'no routes supplied for visual regression â€” not evaluated');
+    return skip('visual_regression', 'no routes supplied for visual regression — not evaluated');
   }
   if (!vr.driverAvailable) {
-    return skip('visual_regression', 'browser unavailable (Playwright not installed / failed to launch) â€” not evaluated');
+    return skip('visual_regression', 'browser unavailable (Playwright not installed / failed to launch) — not evaluated');
   }
   if (vr.comparedPages === 0 && vr.capturedBaselines === 0) {
     return skip(
       'visual_regression',
-      `target app not reachable at ${vr.baseUrl} â€” ${vr.unreachablePages} route(s) could not be captured`
+      `target app not reachable at ${vr.baseUrl} — ${vr.unreachablePages} route(s) could not be captured`
     );
   }
 
   const summary =
     `${vr.comparedPages} compared, ${vr.capturedBaselines} baseline(s) captured, ` +
     `${vr.regressions.length} regression(s), ${vr.errorPages} error(s) (threshold ${vr.thresholdPercent}%).\n` +
-    vr.pages.map((p) => `- [${p.status}] ${p.path}${p.diffPercentage >= 0 ? ` â€” ${p.diffPercentage.toFixed(2)}%` : ''}${p.detail ? ` (${p.detail})` : ''}`).join('\n');
+    vr.pages.map((p) => `- [${p.status}] ${p.path}${p.diffPercentage >= 0 ? ` — ${p.diffPercentage.toFixed(2)}%` : ''}${p.detail ? ` (${p.detail})` : ''}`).join('\n');
 
-  // First run that only captured baselines â€” a pass (nothing to compare yet).
+  // First run that only captured baselines — a pass (nothing to compare yet).
   if (vr.firstRun) {
-    return pass('visual_regression', `captured ${vr.capturedBaselines} baseline(s) (first run â€” nothing to compare)`, summary, durationMs);
+    return pass('visual_regression', `captured ${vr.capturedBaselines} baseline(s) (first run — nothing to compare)`, summary, durationMs);
   }
   if (vr.regressions.length > 0) {
     const worst = vr.regressions
@@ -1213,24 +1213,24 @@ function evaluateVisualRegression(vr: VisualRegressionResult, durationMs: number
 
 /** Map a {@link LivePreviewResult} into the Sentinel's {@link CheckResult} contract. */
 function evaluateLivePreview(lp: LivePreviewResult, durationMs: number): CheckResult {
-  // The gate did not evaluate any route â€” distinguish the un-evaluable reasons (all SKIP, no false fail).
+  // The gate did not evaluate any route — distinguish the un-evaluable reasons (all SKIP, no false fail).
   if (!lp.ran) {
     if (lp.pages.length === 0) {
-      return skip('live_preview', 'no UI change / no page routes discovered â€” live preview not triggered');
+      return skip('live_preview', 'no UI change / no page routes discovered — live preview not triggered');
     }
     if (!lp.devServerStarted) {
-      return skip('live_preview', `dev server did not become ready â€” ${lp.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
+      return skip('live_preview', `dev server did not become ready — ${lp.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
     }
     if (!lp.driverAvailable) {
-      return skip('live_preview', 'browser unavailable (Playwright not installed / failed to launch) â€” not evaluated');
+      return skip('live_preview', 'browser unavailable (Playwright not installed / failed to launch) — not evaluated');
     }
-    return skip('live_preview', 'live preview did not run â€” not evaluated');
+    return skip('live_preview', 'live preview did not run — not evaluated');
   }
 
   const summary =
     `${lp.passedPages} passed, ${lp.failedPages} failed, ${lp.skippedPages} skipped/error of ${lp.pages.length} route(s) at ${lp.baseUrl}.\n` +
     lp.pages
-      .map((p) => `- [${p.status}] ${p.path} â€” HTTP ${p.httpStatus ?? 'none'}, ${p.bodyTextLength ?? '?'} chars${p.detail ? ` (${p.detail})` : ''}`)
+      .map((p) => `- [${p.status}] ${p.path} — HTTP ${p.httpStatus ?? 'none'}, ${p.bodyTextLength ?? '?'} chars${p.detail ? ` (${p.detail})` : ''}`)
       .join('\n');
 
   if (lp.failedPages > 0) {
@@ -1246,18 +1246,18 @@ function evaluateLivePreview(lp: LivePreviewResult, durationMs: number): CheckRe
 
 /** Map an {@link AccessibilityReport} into the Sentinel's {@link CheckResult} contract. */
 function evaluateAccessibility(report: AccessibilityReport, durationMs: number): CheckResult {
-  // The audit did not evaluate any route â€” distinguish the un-evaluable reasons (all SKIP, no false fail).
+  // The audit did not evaluate any route — distinguish the un-evaluable reasons (all SKIP, no false fail).
   if (!report.ran || report.auditedPages === 0) {
     if (report.pages.length === 0) {
-      return skip('accessibility', 'no UI change / no page routes discovered â€” accessibility audit not triggered');
+      return skip('accessibility', 'no UI change / no page routes discovered — accessibility audit not triggered');
     }
     if (!report.devServerStarted) {
-      return skip('accessibility', `dev server did not become ready â€” ${report.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
+      return skip('accessibility', `dev server did not become ready — ${report.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
     }
     if (!report.driverAvailable) {
-      return skip('accessibility', 'browser/axe unavailable (Playwright or axe-core not installed / failed to launch) â€” not evaluated');
+      return skip('accessibility', 'browser/axe unavailable (Playwright or axe-core not installed / failed to launch) — not evaluated');
     }
-    return skip('accessibility', 'accessibility audit evaluated no route â€” not assessed');
+    return skip('accessibility', 'accessibility audit evaluated no route — not assessed');
   }
 
   const c = report.counts;
@@ -1279,7 +1279,7 @@ function evaluateAccessibility(report: AccessibilityReport, durationMs: number):
       .join('; ');
     return fail(
       'accessibility',
-      `${c.critical} CRITICAL accessibility violation(s) â€” build blocked: ${worst}`,
+      `${c.critical} CRITICAL accessibility violation(s) — build blocked: ${worst}`,
       summary,
       durationMs
     );
@@ -1289,7 +1289,7 @@ function evaluateAccessibility(report: AccessibilityReport, durationMs: number):
   return pass(
     'accessibility',
     noteCount > 0
-      ? `no critical violations (${c.serious} serious, ${c.moderate} moderate, ${c.minor} minor surfaced â€” non-blocking)`
+      ? `no critical violations (${c.serious} serious, ${c.moderate} moderate, ${c.minor} minor surfaced — non-blocking)`
       : 'no WCAG 2.1 AA violations',
     summary,
     durationMs
@@ -1302,18 +1302,18 @@ function evaluateAccessibility(report: AccessibilityReport, durationMs: number):
 
 /** Map an {@link SEOAuditResult} into the Sentinel's {@link CheckResult} contract. */
 function evaluateSeo(result: SEOAuditResult, durationMs: number): CheckResult {
-  // The audit did not evaluate any route â€” distinguish the un-evaluable reasons (all SKIP, no false fail).
+  // The audit did not evaluate any route — distinguish the un-evaluable reasons (all SKIP, no false fail).
   if (!result.ran || result.auditedPages === 0) {
     if (result.pages.length === 0) {
-      return skip('seo', 'no UI change / no page routes discovered â€” SEO audit not triggered');
+      return skip('seo', 'no UI change / no page routes discovered — SEO audit not triggered');
     }
     if (!result.devServerStarted) {
-      return skip('seo', `dev server did not become ready â€” ${result.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
+      return skip('seo', `dev server did not become ready — ${result.pages[0]?.detail ?? 'app not reachable'} (not evaluated)`);
     }
     if (!result.driverAvailable) {
-      return skip('seo', 'browser unavailable (Playwright not installed / failed to launch) â€” not evaluated');
+      return skip('seo', 'browser unavailable (Playwright not installed / failed to launch) — not evaluated');
     }
-    return skip('seo', 'SEO audit evaluated no route â€” not assessed');
+    return skip('seo', 'SEO audit evaluated no route — not assessed');
   }
 
   const c = result.counts;
@@ -1333,14 +1333,14 @@ function evaluateSeo(result: SEOAuditResult, durationMs: number): CheckResult {
         return `${p.path} (${crit ? `${crit.check}: ${crit.message}` : `${p.counts.critical} critical`})`;
       })
       .join('; ');
-    return fail('seo', `${c.critical} CRITICAL SEO issue(s) â€” build blocked: ${worst}`, summary, durationMs);
+    return fail('seo', `${c.critical} CRITICAL SEO issue(s) — build blocked: ${worst}`, summary, durationMs);
   }
   // serious/moderate/minor are surfaced but do not block (only critical blocks).
   const noteCount = c.serious + c.moderate + c.minor;
   return pass(
     'seo',
     noteCount > 0
-      ? `no critical issues (site score ${result.siteScore ?? 'n/a'}/100; ${c.serious} serious, ${c.moderate} moderate, ${c.minor} minor surfaced â€” non-blocking)`
+      ? `no critical issues (site score ${result.siteScore ?? 'n/a'}/100; ${c.serious} serious, ${c.moderate} moderate, ${c.minor} minor surfaced — non-blocking)`
       : `no SEO issues (site score ${result.siteScore ?? 'n/a'}/100)`,
     summary,
     durationMs
@@ -1353,10 +1353,10 @@ function evaluateSeo(result: SEOAuditResult, durationMs: number): CheckResult {
 
 /** Map a {@link SecurityScanResult} into the Sentinel's {@link CheckResult} contract. */
 function evaluateSecurityScan(scan: SecurityScanResult, durationMs: number): CheckResult {
-  // Nothing was inspectable â€” no files scanned AND the dependency audit could not run. Skip (no
+  // Nothing was inspectable — no files scanned AND the dependency audit could not run. Skip (no
   // false failure): an empty/unreadable project must not fabricate a vulnerability.
   if (scan.scannedFiles === 0 && !scan.dependencyAuditAvailable) {
-    return skip('security_scan', 'no source files scanned and npm audit unavailable â€” security not evaluated');
+    return skip('security_scan', 'no source files scanned and npm audit unavailable — security not evaluated');
   }
 
   const c = scan.counts;
@@ -1375,7 +1375,7 @@ function evaluateSecurityScan(scan: SecurityScanResult, durationMs: number): Che
       .join('; ');
     return fail(
       'security_scan',
-      `${c.critical} CRITICAL security finding(s) â€” build blocked: ${crits}`,
+      `${c.critical} CRITICAL security finding(s) — build blocked: ${crits}`,
       summary,
       durationMs
     );
@@ -1385,7 +1385,7 @@ function evaluateSecurityScan(scan: SecurityScanResult, durationMs: number): Che
   return pass(
     'security_scan',
     noteCount > 0
-      ? `no critical findings (${c.high} high, ${c.medium} medium, ${c.low} low surfaced â€” non-blocking)`
+      ? `no critical findings (${c.high} high, ${c.medium} medium, ${c.low} low surfaced — non-blocking)`
       : 'no security findings',
     summary,
     durationMs
@@ -1393,15 +1393,15 @@ function evaluateSecurityScan(scan: SecurityScanResult, durationMs: number): Che
 }
 
 // ---------------------------------------------------------------------------
-// Check 11 (optional): Architecture Guard (cycles / god components / N+1 / dead code / â€¦)
+// Check 11 (optional): Architecture Guard (cycles / god components / N+1 / dead code / …)
 // ---------------------------------------------------------------------------
 
 /** Map an {@link ArchitectureReport} into the Sentinel's {@link CheckResult} contract. */
 function evaluateArchitectureGuard(report: ArchitectureReport, durationMs: number): CheckResult {
-  // Nothing was analyzable â€” no source files parsed. Skip (no false failure): an empty project must
+  // Nothing was analyzable — no source files parsed. Skip (no false failure): an empty project must
   // not fabricate an architectural violation.
   if (report.scannedFiles === 0) {
-    return skip('architecture', 'no source files analyzed â€” architecture not evaluated');
+    return skip('architecture', 'no source files analyzed — architecture not evaluated');
   }
 
   const c = report.counts;
@@ -1419,7 +1419,7 @@ function evaluateArchitectureGuard(report: ArchitectureReport, durationMs: numbe
       .join('; ');
     return fail(
       'architecture',
-      `${c.high} HIGH-severity architectural violation(s) â€” build blocked: ${worst}`,
+      `${c.high} HIGH-severity architectural violation(s) — build blocked: ${worst}`,
       summary,
       durationMs
     );
@@ -1429,7 +1429,7 @@ function evaluateArchitectureGuard(report: ArchitectureReport, durationMs: numbe
   return pass(
     'architecture',
     noteCount > 0
-      ? `no high-severity violations (${c.medium} medium, ${c.low} low surfaced â€” non-blocking)`
+      ? `no high-severity violations (${c.medium} medium, ${c.low} low surfaced — non-blocking)`
       : 'no architectural anti-patterns',
     summary,
     durationMs
@@ -1442,11 +1442,11 @@ function evaluateArchitectureGuard(report: ArchitectureReport, durationMs: numbe
 
 /** Map a {@link ConsensusValidationResult} into the Sentinel's {@link CheckResult} contract. */
 function evaluateConsensus(result: ConsensusValidationResult, durationMs: number): CheckResult {
-  // Too few usable validators (panel unreachable) â†’ SKIP (no false failure).
+  // Too few usable validators (panel unreachable) → SKIP (no false failure).
   if (result.usableValidators < MIN_VALIDATORS) {
     return skip(
       'consensus_validation',
-      `only ${result.usableValidators} of ${result.totalValidators} validator(s) usable (need â‰¥${MIN_VALIDATORS}) â€” consensus not evaluated`
+      `only ${result.usableValidators} of ${result.totalValidators} validator(s) usable (need ≥${MIN_VALIDATORS}) — consensus not evaluated`
     );
   }
 
@@ -1461,7 +1461,7 @@ function evaluateConsensus(result: ConsensusValidationResult, durationMs: number
   if (result.blocked) {
     return fail(
       'consensus_validation',
-      `consensus ${result.verdict} â€” only ${result.approvals}/${result.usableValidators} validator(s) approved ` +
+      `consensus ${result.verdict} — only ${result.approvals}/${result.usableValidators} validator(s) approved ` +
         `(prompt_type '${result.promptType}' requires ${result.requiredApprovals}); build blocked`,
       summary,
       durationMs
@@ -1470,15 +1470,15 @@ function evaluateConsensus(result: ConsensusValidationResult, durationMs: number
   return pass(
     'consensus_validation',
     result.verdict === 'VALIDATED_WITH_CONCERNS'
-      ? `consensus with concerns â€” ${result.approvals}/${result.usableValidators} approved (requirement of ${result.requiredApprovals} met; concerns surfaced)`
-      : `consensus validated â€” ${result.approvals}/${result.usableValidators} validator(s) approved`,
+      ? `consensus with concerns — ${result.approvals}/${result.usableValidators} approved (requirement of ${result.requiredApprovals} met; concerns surfaced)`
+      : `consensus validated — ${result.approvals}/${result.usableValidators} validator(s) approved`,
     summary,
     durationMs
   );
 }
 
 // ---------------------------------------------------------------------------
-// Check 0 (optional): Migration Safety (PRE-MIGRATION gate â€” runs before the five)
+// Check 0 (optional): Migration Safety (PRE-MIGRATION gate — runs before the five)
 // ---------------------------------------------------------------------------
 
 /** Map a {@link MigrationSafetyReport} into the Sentinel's {@link CheckResult} contract. */
@@ -1491,7 +1491,7 @@ function evaluateMigrationSafety(report: MigrationSafetyReport, durationMs: numb
     `(${unacknowledged.length} un-acknowledged); production source: ${report.productionSchemaSource}.\n` +
     report.report;
 
-  // A blocked migration FAILS the gate (the migration must NOT be applied â€” Iron Law 2/3).
+  // A blocked migration FAILS the gate (the migration must NOT be applied — Iron Law 2/3).
   if (report.blocked) {
     const reasons: string[] = [];
     if (report.unconfirmed.length > 0) {
@@ -1505,7 +1505,7 @@ function evaluateMigrationSafety(report: MigrationSafetyReport, durationMs: numb
         `${unacknowledged.length} breakage(s): ` + unacknowledged.slice(0, 6).map((b) => b.message).join('; ')
       );
     }
-    return fail('migration_safety', `migration BLOCKED â€” ${reasons.join(' | ')}`, summary, durationMs);
+    return fail('migration_safety', `migration BLOCKED — ${reasons.join(' | ')}`, summary, durationMs);
   }
   const note =
     report.destructiveOperations.length > 0
@@ -1536,7 +1536,7 @@ function evaluateAgentShield(report: SecurityReport, durationMs: number): CheckR
   if (!AGENT_SHIELD_PASSING_GRADES.has(report.grade)) {
     return fail(
       'agent_shield',
-      `AgentShield grade ${report.grade} is below the required B+ â€” build blocked`,
+      `AgentShield grade ${report.grade} is below the required B+ — build blocked`,
       summary,
       durationMs
     );
@@ -1550,16 +1550,16 @@ function evaluateAgentShield(report: SecurityReport, durationMs: number): CheckR
 }
 
 // ---------------------------------------------------------------------------
-// Check 14 (optional): Live Schema Drift (code vs live database â€” requires schemaSql)
+// Check 14 (optional): Live Schema Drift (code vs live database — requires schemaSql)
 // ---------------------------------------------------------------------------
 
-// Evaluation is delegated to the existing `evaluateSchemaDrift` â€” same semantics (additions ok,
+// Evaluation is delegated to the existing `evaluateSchemaDrift` — same semantics (additions ok,
 // modifications/deletions fail). The difference from the mandatory `schema_drift` check is that
 // this check REQUIRES a live SQL executor and always runs when configured, regardless of whether
 // schema prompts have executed.
 
 // ---------------------------------------------------------------------------
-// Check 15 (optional): Dead Code Scan (report only â€” never blocks)
+// Check 15 (optional): Dead Code Scan (report only — never blocks)
 // ---------------------------------------------------------------------------
 
 function evaluateDeadCode(report: DeadCodeReport, durationMs: number): CheckResult {
@@ -1568,7 +1568,7 @@ function evaluateDeadCode(report: DeadCodeReport, durationMs: number): CheckResu
   return pass(
     'dead_code',
     total > 0
-      ? `dead code: ${report.unusedImports.length} unused import(s), ${report.unusedVariables.length} unused variable(s), ${report.unusedExports.length} unused export(s) across ${report.scannedFiles} file(s) (report only â€” non-blocking)`
+      ? `dead code: ${report.unusedImports.length} unused import(s), ${report.unusedVariables.length} unused variable(s), ${report.unusedExports.length} unused export(s) across ${report.scannedFiles} file(s) (report only — non-blocking)`
       : `no dead code found (${report.scannedFiles} file(s) scanned)`,
     summary,
     durationMs
@@ -1601,17 +1601,17 @@ function evaluateSixLaws(result: SixLawsResult, durationMs: number): CheckResult
 }
 
 // ---------------------------------------------------------------------------
-// Ring 2 â€” Every-10th-prompt gate (Vitest, Semgrep, knip)
+// Ring 2 — Every-10th-prompt gate (Vitest, Semgrep, knip)
 // ---------------------------------------------------------------------------
 
-/** Output shape from `npx vitest run --reporter=json` (partial â€” fields we use). */
+/** Output shape from `npx vitest run --reporter=json` (partial — fields we use). */
 interface VitestJsonOutput {
   numPassedTests?: number;
   numFailedTests?: number;
   numTotalTests?: number;
 }
 
-/** Shape of Istanbul/v8 `coverage/coverage-summary.json` â€” only the `total` bucket. */
+/** Shape of Istanbul/v8 `coverage/coverage-summary.json` — only the `total` bucket. */
 interface CoverageSummaryJson {
   total?: { lines?: { pct?: number } };
 }
@@ -1619,10 +1619,10 @@ interface CoverageSummaryJson {
 /**
  * Ring 2a: Vitest check.
  * Runs `npx vitest run --reporter=json` (exactly as specified). Skips when no vitest config file
- * is present. Threshold: 0 failing tests AND line coverage â‰¥ coverageThreshold (default 60%).
+ * is present. Threshold: 0 failing tests AND line coverage ≥ coverageThreshold (default 60%).
  * Coverage data is read from `coverage/coverage-summary.json` when present (written by vitest's
  * coverage provider when `coverage.enabled: true` in the config); if absent, coverage is skipped
- * (graceful â€” no coverage provider is not a failure).
+ * (graceful — no coverage provider is not a failure).
  * Registers failures to the learning DB.
  */
 async function runRing2VitestCheck(
@@ -1638,7 +1638,7 @@ async function runRing2VitestCheck(
   ];
   const hasConfig = configPaths.some((p) => existsSync(p));
   if (!hasConfig) {
-    return skip('vitest', 'vitest.config.ts not found â€” Ring 2 Vitest check skipped');
+    return skip('vitest', 'vitest.config.ts not found — Ring 2 Vitest check skipped');
   }
 
   const startedAt = nowMs();
@@ -1682,7 +1682,7 @@ async function runRing2VitestCheck(
       const pct = covJson.total?.lines?.pct;
       if (typeof pct === 'number') lineCoverage = pct;
     } catch {
-      log('WARNING: Ring 2 Vitest â€” coverage-summary.json could not be parsed; coverage check skipped');
+      log('WARNING: Ring 2 Vitest — coverage-summary.json could not be parsed; coverage check skipped');
     }
   }
 
@@ -1699,7 +1699,7 @@ async function runRing2VitestCheck(
     return fail('vitest', `Vitest: coverage ${lineCoverage.toFixed(1)}% < ${coverageThreshold}% threshold`, clip(combined), durationMs);
   }
 
-  const coverageNote = lineCoverage !== null ? `, coverage ${lineCoverage.toFixed(1)}%` : ' (coverage data unavailable â€” not checked)';
+  const coverageNote = lineCoverage !== null ? `, coverage ${lineCoverage.toFixed(1)}%` : ' (coverage data unavailable — not checked)';
   return pass('vitest', `Vitest: ${totalTests} test(s) passed${coverageNote}`, clip(combined), durationMs);
 }
 
@@ -1736,7 +1736,7 @@ async function runRing2SemgrepCheck(
 
   // Skip when semgrep is not installed (command not found).
   if (/command not found|is not recognized|Cannot find module|no such file|ENOENT|not installed/i.test(combined)) {
-    return skip('semgrep', 'semgrep not installed â€” Ring 2 Semgrep check skipped');
+    return skip('semgrep', 'semgrep not installed — Ring 2 Semgrep check skipped');
   }
 
   // Try to parse JSON output.
@@ -1774,7 +1774,7 @@ async function runRing2SemgrepCheck(
 
   if (errorFindings.length > 0) {
     const firstError = errorFindings[0]!;
-    const detail = `Semgrep: ${errorFindings.length} ERROR finding(s) â€” ${firstError.check_id ?? 'rule'} at ${firstError.path ?? '?'}:${firstError.start?.line ?? '?'}`;
+    const detail = `Semgrep: ${errorFindings.length} ERROR finding(s) — ${firstError.check_id ?? 'rule'} at ${firstError.path ?? '?'}:${firstError.start?.line ?? '?'}`;
     const output = errorFindings
       .map((f) => `[ERROR] ${f.check_id ?? 'rule'} at ${f.path ?? '?'}:${f.start?.line ?? '?'}: ${f.extra?.message ?? ''}`)
       .join('\n');
@@ -1782,7 +1782,7 @@ async function runRing2SemgrepCheck(
   }
 
   const warnCount = findings.filter((f) => (f.extra?.severity ?? '').toUpperCase() === 'WARNING').length;
-  const note = warnCount > 0 ? ` (${warnCount} warning(s) surfaced â€” non-blocking)` : '';
+  const note = warnCount > 0 ? ` (${warnCount} warning(s) surfaced — non-blocking)` : '';
   return pass('semgrep', `Semgrep: 0 ERROR finding(s)${note}`, clip(combined), durationMs);
 }
 
@@ -1820,7 +1820,7 @@ async function runRing2KnipCheck(
 
   // Skip when knip is not installed.
   if (/command not found|is not recognized|Cannot find module|no such file|ENOENT|not installed/i.test(combined)) {
-    return skip('knip', 'knip not installed â€” Ring 2 knip check skipped');
+    return skip('knip', 'knip not installed — Ring 2 knip check skipped');
   }
 
   // Parse JSON output.
@@ -1860,7 +1860,7 @@ async function runRing2KnipCheck(
       },
       log
     );
-    const detail = `knip: ${unusedCount} unused export(s) â€” first: ${first.name ?? '?'} in ${first.filePath ?? '?'}`;
+    const detail = `knip: ${unusedCount} unused export(s) — first: ${first.name ?? '?'} in ${first.filePath ?? '?'}`;
     const output = unusedExports
       .slice(0, 50)
       .map((e) => `${e.filePath ?? '?'}: ${e.name ?? '?'}`)
@@ -1880,7 +1880,7 @@ export function shouldFireRing2(promptNumber: number, isFinalPrompt = false): bo
 }
 
 // ---------------------------------------------------------------------------
-// Ring 3 â€” End-of-run gate (Trivy, Gitleaks, Lighthouse)
+// Ring 3 — End-of-run gate (Trivy, Gitleaks, Lighthouse)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1932,7 +1932,7 @@ async function runRing3TrivyCheck(
     /command not found|is not recognized|no such file|ENOENT|not installed/i.test(combined) &&
     !res.stdout.trim().startsWith('{');
   if (notInstalled) {
-    return skip('trivy', 'trivy not installed or not in PATH â€” Ring 3 Trivy check skipped');
+    return skip('trivy', 'trivy not installed or not in PATH — Ring 3 Trivy check skipped');
   }
 
   // Parse JSON output.
@@ -1955,7 +1955,7 @@ async function runRing3TrivyCheck(
         durationMs
       );
     }
-    // exit 0 but no JSON â€” treat as clean (some versions print nothing when no vulns found).
+    // exit 0 but no JSON — treat as clean (some versions print nothing when no vulns found).
     return pass('trivy', 'Trivy: 0 CRITICAL/HIGH CVEs (no JSON output; exit 0)', combined, durationMs);
   }
 
@@ -1989,7 +1989,7 @@ async function runRing3TrivyCheck(
     );
     return fail(
       'trivy',
-      `Trivy: ${critical.length} CRITICAL + ${high.length} HIGH CVE(s) â€” build blocked: ${worst}`,
+      `Trivy: ${critical.length} CRITICAL + ${high.length} HIGH CVE(s) — build blocked: ${worst}`,
       summary,
       durationMs
     );
@@ -2041,7 +2041,7 @@ async function runRing3GitleaksCheck(
   }
 
   if (/command not found|is not recognized|no such file|ENOENT|not installed/i.test(combined)) {
-    return skip('gitleaks', 'gitleaks not installed or not in PATH â€” Ring 3 Gitleaks check skipped');
+    return skip('gitleaks', 'gitleaks not installed or not in PATH — Ring 3 Gitleaks check skipped');
   }
 
   // Read the report file (only written by gitleaks when findings are present).
@@ -2054,7 +2054,7 @@ async function runRing3GitleaksCheck(
         findings = parsed as GitleaksFinding[];
       }
     } catch {
-      log('WARNING: Ring 3 Gitleaks â€” report JSON could not be parsed');
+      log('WARNING: Ring 3 Gitleaks — report JSON could not be parsed');
     }
   }
 
@@ -2083,7 +2083,7 @@ async function runRing3GitleaksCheck(
     );
     return fail(
       'gitleaks',
-      `Gitleaks: ${findings.length} secret(s) detected â€” build blocked`,
+      `Gitleaks: ${findings.length} secret(s) detected — build blocked`,
       summary,
       durationMs
     );
@@ -2104,7 +2104,7 @@ interface LighthouseReport {
 
 /** Port used by the dev server spawned for Ring 3 Lighthouse. */
 const LIGHTHOUSE_DEV_PORT = 3099;
-/** Minimum Lighthouse category score (0â€“100) to pass the gate. */
+/** Minimum Lighthouse category score (0–100) to pass the gate. */
 const LIGHTHOUSE_THRESHOLD = 90;
 /** Categories evaluated by the gate. */
 const LIGHTHOUSE_AUDITED_CATS = new Set(['performance', 'accessibility', 'best-practices', 'seo']);
@@ -2125,10 +2125,10 @@ async function waitForDevServer(
       clearTimeout(timer);
       if (resp.status < 500) return true;
     } catch {
-      // Not ready yet â€” swallow and poll again.
+      // Not ready yet — swallow and poll again.
     }
     await new Promise<void>((r) => setTimeout(r, POLL_MS));
-    log(`Ring 3c: waiting for dev server at ${url}â€¦`);
+    log(`Ring 3c: waiting for dev server at ${url}…`);
   }
   return false;
 }
@@ -2140,7 +2140,7 @@ function killChildProcess(proc: ChildProcess | null, log: (m: string) => void): 
     if (!proc.killed) proc.kill('SIGTERM');
   } catch (err) {
     log(
-      `WARNING: Ring 3 Lighthouse â€” could not kill dev server (${err instanceof Error ? err.message : String(err)})`
+      `WARNING: Ring 3 Lighthouse — could not kill dev server (${err instanceof Error ? err.message : String(err)})`
     );
   }
 }
@@ -2149,7 +2149,7 @@ function killChildProcess(proc: ChildProcess | null, log: (m: string) => void): 
  * Ring 3c: Lighthouse performance / accessibility / best-practices / SEO audit.
  * Starts a dev server on port 3099, runs Lighthouse, stops the dev server.
  * Skips gracefully when lighthouse is not installed or the dev server does not start.
- * Threshold: all four categories â‰¥ 90.
+ * Threshold: all four categories ≥ 90.
  */
 async function runRing3LighthouseCheck(
   projectPath: string,
@@ -2169,7 +2169,7 @@ async function runRing3LighthouseCheck(
     /command not found|is not recognized|no such file|ENOENT|not installed/i.test(versionOut) ||
     (!versionRes.ok && !versionRes.stdout.trim())
   ) {
-    return skip('lighthouse', 'lighthouse not installed or not in PATH â€” Ring 3 Lighthouse check skipped');
+    return skip('lighthouse', 'lighthouse not installed or not in PATH — Ring 3 Lighthouse check skipped');
   }
 
   // Spawn the dev server.
@@ -2185,9 +2185,9 @@ async function runRing3LighthouseCheck(
     });
   } catch (err) {
     log(
-      `WARNING: Ring 3 Lighthouse â€” could not spawn dev server (${err instanceof Error ? err.message : String(err)})`
+      `WARNING: Ring 3 Lighthouse — could not spawn dev server (${err instanceof Error ? err.message : String(err)})`
     );
-    return skip('lighthouse', 'dev server could not be spawned â€” Lighthouse check skipped');
+    return skip('lighthouse', 'dev server could not be spawned — Lighthouse check skipped');
   }
 
   // Wait for the dev server to accept connections (up to 30 s).
@@ -2196,7 +2196,7 @@ async function runRing3LighthouseCheck(
     killChildProcess(devServer, log);
     return skip(
       'lighthouse',
-      `dev server on port ${LIGHTHOUSE_DEV_PORT} did not become ready within 30s â€” Lighthouse check skipped`
+      `dev server on port ${LIGHTHOUSE_DEV_PORT} did not become ready within 30s — Lighthouse check skipped`
     );
   }
 
@@ -2221,7 +2221,7 @@ async function runRing3LighthouseCheck(
     /command not found|is not recognized|ENOENT|not found/i.test(lhCombined) &&
     !lhRes.ok
   ) {
-    return skip('lighthouse', 'lighthouse binary not found during run â€” Lighthouse check skipped');
+    return skip('lighthouse', 'lighthouse binary not found during run — Lighthouse check skipped');
   }
 
   // Read and parse the output file.
@@ -2235,7 +2235,7 @@ async function runRing3LighthouseCheck(
         durationMs
       );
     }
-    return skip('lighthouse', 'Lighthouse report not found at .forge/lighthouse.json â€” not evaluated');
+    return skip('lighthouse', 'Lighthouse report not found at .forge/lighthouse.json — not evaluated');
   }
 
   let report: LighthouseReport | null = null;
@@ -2291,14 +2291,14 @@ async function runRing3LighthouseCheck(
 
   return pass(
     'lighthouse',
-    `Lighthouse: all categories â‰¥ ${LIGHTHOUSE_THRESHOLD} â€” ${audited.map((a) => `${a.name} ${a.score}`).join(', ')}`,
+    `Lighthouse: all categories ≥ ${LIGHTHOUSE_THRESHOLD} — ${audited.map((a) => `${a.name} ${a.score}`).join(', ')}`,
     summary,
     durationMs
   );
 }
 
 // ---------------------------------------------------------------------------
-// Ring 1 â€” Enhanced per-prompt gate (TypeScript error parsing, ESLint, schema drift)
+// Ring 1 — Enhanced per-prompt gate (TypeScript error parsing, ESLint, schema drift)
 // ---------------------------------------------------------------------------
 
 /** A TypeScript error parsed from `tsc --noEmit --pretty false` output. */
@@ -2383,7 +2383,7 @@ async function runRing1TypescriptCheck(
     return fail('typescript', `TypeScript TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, combined, durationMs);
   }
   if (res.ok) {
-    return pass('typescript', '`npx tsc --noEmit` passed â€” 0 errors', combined, durationMs);
+    return pass('typescript', '`npx tsc --noEmit` passed — 0 errors', combined, durationMs);
   }
 
   const errors = parseTscErrors(combined);
@@ -2393,7 +2393,7 @@ async function runRing1TypescriptCheck(
 
   const first = errors[0];
   const detail = first
-    ? `TypeScript: ${errors.length} error(s) â€” first: ${first.code} at ${first.file}:${first.line}: ${first.message}`
+    ? `TypeScript: ${errors.length} error(s) — first: ${first.code} at ${first.file}:${first.line}: ${first.message}`
     : `TypeScript failed (exit ${res.exitCode ?? 'null'}): ${firstLine(res.stderr) || firstLine(res.stdout)}`;
   const output = errors.length > 0
     ? errors.map((e) => `${e.code} at ${e.file}:${e.line},${e.col}: ${e.message}`).join('\n')
@@ -2454,9 +2454,9 @@ async function runRing1EslintCheck(
   const jsonStr = res.stdout.trim();
 
   if (!jsonStr.startsWith('[')) {
-    // Not JSON â€” ESLint not installed, binary not found, or fatal config error.
+    // Not JSON — ESLint not installed, binary not found, or fatal config error.
     if (/command not found|is not recognized|Cannot find module|no such file|ENOENT/i.test(combined)) {
-      return skip('eslint', 'ESLint not installed (`npx eslint` not available) â€” Ring 1b ESLint check skipped');
+      return skip('eslint', 'ESLint not installed (`npx eslint` not available) — Ring 1b ESLint check skipped');
     }
     return fail(
       'eslint',
@@ -2480,11 +2480,11 @@ async function runRing1EslintCheck(
   }
 
   if (errors.length === 0) {
-    return pass('eslint', '`npx eslint` passed â€” 0 severity-2 errors', '', durationMs);
+    return pass('eslint', '`npx eslint` passed — 0 severity-2 errors', '', durationMs);
   }
 
   const first = errors[0]!;
-  const detail = `ESLint: ${errors.length} error(s) â€” ${first.rule} at ${first.file}:${first.line}: ${first.message}`;
+  const detail = `ESLint: ${errors.length} error(s) — ${first.rule} at ${first.file}:${first.line}: ${first.message}`;
   const output = errors.map((e) => `${e.rule} at ${e.file}:${e.line},${e.col}: ${e.message}`).join('\n');
   return fail('eslint', detail, output, durationMs);
 }
@@ -2496,11 +2496,11 @@ async function runRing1EslintCheck(
  */
 export function parseDatabaseTypesTableNames(content: string): string[] {
   const names: string[] = [];
-  // Find the Tables block â€” stop at the next sibling key (Views / Functions / Enums / end of public)
+  // Find the Tables block — stop at the next sibling key (Views / Functions / Enums / end of public)
   const tablesBlockMatch = /Tables:\s*\{([\s\S]*?)(?:\n\s{4,8}(?:Views|Functions|Enums|CompositeTypes):\s*\{|\n\s{2,4}\})/m.exec(content);
   if (!tablesBlockMatch) return names;
   const block = tablesBlockMatch[1] ?? '';
-  // Extract top-level property names: 6â€“12 spaces of indentation followed by `identifier: {`
+  // Extract top-level property names: 6–12 spaces of indentation followed by `identifier: {`
   const rowRe = /^\s{6,12}(\w+):\s*\{/gm;
   const skipNames = new Set(['Row', 'Insert', 'Update', 'Relationships']);
   let m: RegExpExecArray | null;
@@ -2514,7 +2514,7 @@ export function parseDatabaseTypesTableNames(content: string): string[] {
 /**
  * Try to list Supabase table names via the PostgREST REST API (`/rest/v1/`).
  * Reads credentials from env vars or `.env.local`. Returns null when credentials are absent or
- * the request fails (graceful degradation â€” never throws).
+ * the request fails (graceful degradation — never throws).
  */
 async function getSupabaseTableNamesFromEnv(
   projectPath: string,
@@ -2540,7 +2540,7 @@ async function getSupabaseTableNamesFromEnv(
       headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
     });
     if (!resp.ok) {
-      log(`WARNING: Supabase REST API returned HTTP ${resp.status} â€” Ring 1c schema drift skipped`);
+      log(`WARNING: Supabase REST API returned HTTP ${resp.status} — Ring 1c schema drift skipped`);
       return null;
     }
     // PostgREST OpenAPI: { paths: { '/tableName': {...} } }
@@ -2551,13 +2551,13 @@ async function getSupabaseTableNamesFromEnv(
       .map((p) => p.slice(1).split('?')[0] ?? '')
       .filter(Boolean);
   } catch (err) {
-    log(`WARNING: Supabase table-list fetch failed (${err instanceof Error ? err.message : String(err)}) â€” Ring 1c schema drift skipped`);
+    log(`WARNING: Supabase table-list fetch failed (${err instanceof Error ? err.message : String(err)}) — Ring 1c schema drift skipped`);
     return null;
   }
 }
 
 /**
- * Ring 1c: Schema drift â€” compare `database.types.ts` table names against live Supabase.
+ * Ring 1c: Schema drift — compare `database.types.ts` table names against live Supabase.
  * Searches for the types file under common paths; skips when absent. Reads Supabase credentials
  * from env / `.env.local`; skips when absent. A declared table MISSING from live Supabase FAILS.
  * Extra live tables are OK. Never throws (graceful degradation throughout).
@@ -2582,12 +2582,12 @@ async function runRing1TypesDriftCheck(
   }
 
   if (!typesContent) {
-    return skip('live_schema_drift', 'database.types.ts not found â€” Ring 1c schema drift not applicable');
+    return skip('live_schema_drift', 'database.types.ts not found — Ring 1c schema drift not applicable');
   }
 
   const typesTables = parseDatabaseTypesTableNames(typesContent);
   if (typesTables.length === 0) {
-    return skip('live_schema_drift', 'No table names parsed from database.types.ts â€” Ring 1c schema drift not evaluated');
+    return skip('live_schema_drift', 'No table names parsed from database.types.ts — Ring 1c schema drift not evaluated');
   }
 
   const liveTables = await getSupabaseTableNamesFromEnv(projectPath, log);
@@ -2596,7 +2596,7 @@ async function runRing1TypesDriftCheck(
   if (liveTables === null) {
     return skip(
       'live_schema_drift',
-      `database.types.ts declares ${typesTables.length} table(s) but Supabase credentials not found â€” skipping live comparison`
+      `database.types.ts declares ${typesTables.length} table(s) but Supabase credentials not found — skipping live comparison`
     );
   }
 
@@ -2642,13 +2642,13 @@ function renderDiagnosticReport(
   failedCheck: SentinelCheckName | null,
   projectPath: string
 ): string {
-  const tick = (c: CheckResult): string => (c.skipped ? 'âŠ˜ SKIP' : c.passed ? 'âœ… PASS' : 'âŒ FAIL');
+  const tick = (c: CheckResult): string => (c.skipped ? '⊘ SKIP' : c.passed ? '✅ PASS' : '❌ FAIL');
   const lines: string[] = [];
 
-  lines.push('# FORGE Sentinel â€” Diagnostic Report');
+  lines.push('# FORGE Sentinel — Diagnostic Report');
   lines.push('');
   lines.push(`- **Project:** ${projectPath}`);
-  lines.push(`- **Overall:** ${failedCheck ? `FAIL âŒ (first failure: ${failedCheck})` : 'PASS âœ…'}`);
+  lines.push(`- **Overall:** ${failedCheck ? `FAIL ❌ (first failure: ${failedCheck})` : 'PASS ✅'}`);
   lines.push('');
   lines.push('## Check Summary');
   lines.push('');
@@ -2664,7 +2664,7 @@ function renderDiagnosticReport(
     lines.push('## Failure Detail');
     lines.push('');
     for (const c of failures) {
-      lines.push(`### âŒ ${c.name} â€” ${c.detail}`);
+      lines.push(`### ❌ ${c.name} — ${c.detail}`);
       lines.push('');
       lines.push('```');
       lines.push(clip(c.output).trim() || '(no captured output)');
@@ -2680,7 +2680,7 @@ function renderDiagnosticReport(
 }
 
 // ---------------------------------------------------------------------------
-// Main entry point â€” runSentinel
+// Main entry point — runSentinel
 // ---------------------------------------------------------------------------
 
 /** Monotonic-ish millisecond clock (kept in one place so timing is easy to stub if needed). */
@@ -2693,7 +2693,7 @@ function nowMs(): number {
  *
  * Executes the five Contract-13 checks in order. With `stopOnFirstFailure` (the default), once a
  * check fails the remaining checks are recorded as SKIPPED. `passed` is true only when no check
- * failed (skipped checks do not fail the gate). Always resolves â€” never throws (Iron Law 3).
+ * failed (skipped checks do not fail the gate). Always resolves — never throws (Iron Law 3).
  */
 export async function runSentinel(options: SentinelOptions): Promise<SentinelResult> {
   const projectPath = options.projectPath;
@@ -2710,7 +2710,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
 
   const checks: CheckResult[] = [];
   let failed = false;
-  /** Project-relative paths changed on this branch (from the File Integrity diff) â€” feeds the
+  /** Project-relative paths changed on this branch (from the File Integrity diff) — feeds the
    *  Live Preview UI-change trigger. Null until the diff runs; stays null when git is unavailable. */
   let changedFilePaths: string[] | null = null;
 
@@ -2721,15 +2721,15 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   };
   const shouldSkipRest = (): boolean => failed && stopOnFirstFailure;
   const skipRest = (name: SentinelCheckName): CheckResult =>
-    skip(name, 'skipped â€” a prior Sentinel check already failed (stopOnFirstFailure)');
+    skip(name, 'skipped — a prior Sentinel check already failed (stopOnFirstFailure)');
 
   log(`running Sentinel on ${projectPath} (stopOnFirstFailure=${stopOnFirstFailure})`);
 
-  // --- 0. Migration Safety (OPTIONAL PRE-MIGRATION gate â€” runs BEFORE the five) ----------------
+  // --- 0. Migration Safety (OPTIONAL PRE-MIGRATION gate — runs BEFORE the five) ----------------
   // Not part of the mandatory Contract-13 five: prepended only when `migrationSafety` is supplied
   // (the executor passes it solely on a prompt about to APPLY a migration). It analyzes the migration
   // SQL for destructive operations / RLS+FK breakage, auto-generates a rollback + data-backup script,
-  // and BLOCKS the gate when the migration is unsafe â€” so it runs first and short-circuits the costly
+  // and BLOCKS the gate when the migration is unsafe — so it runs first and short-circuits the costly
   // tsc/build checks on a blocked migration. A build that does not opt in keeps exactly the five.
   if (options.migrationSafety) {
     log('check 0: Migration Safety (destructive-op gate / rollback / backup / production diff)');
@@ -2750,26 +2750,26 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       ms = null;
     }
     if (ms === null) {
-      record(skip('migration_safety', 'migration safety analyzer failed â€” not evaluated'));
+      record(skip('migration_safety', 'migration safety analyzer failed — not evaluated'));
     } else {
       record(evaluateMigrationSafety(ms, nowMs() - startedAt));
     }
   }
 
-  // --- 1. TypeScript (Ring 1a) â€” enhanced: parses errors + registers to learning DB ------------
+  // --- 1. TypeScript (Ring 1a) — enhanced: parses errors + registers to learning DB ------------
   if (shouldSkipRest()) {
     record(skipRest('typescript'));
   } else {
-    log('check 1/7: TypeScript Ring 1a (npx tsc --noEmit --pretty false) â€” error-parsing + DB');
+    log('check 1/7: TypeScript Ring 1a (npx tsc --noEmit --pretty false) — error-parsing + DB');
     record(await runRing1TypescriptCheck(projectPath, tscTimeoutMs, run, log));
   }
 
-  // --- 1b. ESLint (Ring 1b) â€” new mandatory gate: severity-2 errors â†’ fail -----------------
+  // --- 1b. ESLint (Ring 1b) — new mandatory gate: severity-2 errors → fail -----------------
   const eslintTimeoutMs = options.eslintTimeoutMs ?? tscTimeoutMs;
   if (shouldSkipRest()) {
     record(skipRest('eslint'));
   } else {
-    log('check 2/7: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) â€” 0 errors threshold');
+    log('check 2/7: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) — 0 errors threshold');
     record(await runRing1EslintCheck(projectPath, eslintTimeoutMs, run, log));
   }
 
@@ -2800,14 +2800,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     record(evaluateFileIntegrity(changes, protectedFiles, allowedDeletions, nowMs() - startedAt));
   }
 
-  // --- 3b. File Delta (Session 5.2 Task 2a â€” a build must produce a work product) --------------
+  // --- 3b. File Delta (Session 5.2 Task 2a — a build must produce a work product) --------------
   if (shouldSkipRest()) {
     record(skipRest('file_delta'));
   } else {
     log('check 5/7: File Delta (project file count before vs. after this prompt)');
     const startedAt = nowMs();
     if (options.fileCountBefore === undefined) {
-      record(skip('file_delta', 'no pre-prompt file count supplied â€” not evaluated'));
+      record(skip('file_delta', 'no pre-prompt file count supplied — not evaluated'));
     } else {
       const countFiles = options.countProjectFiles ?? defaultCountProjectFiles;
       let after: number;
@@ -2815,7 +2815,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         after = await countFiles(projectPath);
       } catch (error) {
         log(`WARNING: post-prompt file count failed (${describe(error)})`);
-        record(skip('file_delta', `could not count project files â€” not evaluated (${describe(error)})`));
+        record(skip('file_delta', `could not count project files — not evaluated (${describe(error)})`));
         after = -1;
       }
       if (after >= 0) {
@@ -2828,14 +2828,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('schema_drift'));
   } else if (!options.schemaPromptsHaveRun) {
-    record(skip('schema_drift', 'no schema prompts have run yet â€” drift check not applicable'));
+    record(skip('schema_drift', 'no schema prompts have run yet — drift check not applicable'));
   } else {
     log('check 6/7: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');
     const startedAt = nowMs();
     const registryMd =
       options.schemaRegistryContent ?? (await readTextSafe(join(governanceDir, 'SCHEMA_REGISTRY.md')));
     if (registryMd === null) {
-      record(skip('schema_drift', `SCHEMA_REGISTRY.md not found under ${governanceDir} â€” drift not evaluated`));
+      record(skip('schema_drift', `SCHEMA_REGISTRY.md not found under ${governanceDir} — drift not evaluated`));
     } else {
       const expected = parseSchemaRegistry(registryMd);
       let actual: SchemaSnapshot;
@@ -2860,13 +2860,13 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     const pkgJson = options.packageJsonContent ?? (await readTextSafe(join(projectPath, 'package.json')));
     if (pkgJson === null) {
       // Session 5.2 absent-target law (Task 2b): a MISSING target must FAIL loudly, never skip
-      // to a pass. The observed defect was exactly this â€” a project with no package.json at all
+      // to a pass. The observed defect was exactly this — a project with no package.json at all
       // read as "not evaluated" instead of "this project has no dependency manifest, which for a
       // build past its schema/scaffold prompt is itself a defect."
       record(
         fail(
           'dependencies',
-          `package.json not found under ${projectPath} â€” cannot evaluate dependencies`,
+          `package.json not found under ${projectPath} — cannot evaluate dependencies`,
           `Expected a dependency manifest at ${join(projectPath, 'package.json')}; none exists. ` +
             'An absent target fails Sentinel, it never silently skips to a pass (Session 5.2 ' +
             'absent-target law).',
@@ -2901,15 +2901,15 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         r1Schema = await runRing1TypesDriftCheck(r1SchemaPath, log);
       } catch (err) {
         log(`WARNING: Ring 1c schema drift failed (${describe(err)})`);
-        r1Schema = skip('live_schema_drift', 'Ring 1c schema drift runner threw â€” not evaluated');
+        r1Schema = skip('live_schema_drift', 'Ring 1c schema drift runner threw — not evaluated');
       }
       record(r1Schema);
     }
   }
 
-  // --- 6. Security Scan (OPTIONAL â€” only when configured; runs after EVERY prompt) -------------
+  // --- 6. Security Scan (OPTIONAL — only when configured; runs after EVERY prompt) -------------
   // Not part of the mandatory Contract-13 five: appended only when `securityScan` is supplied. Unlike
-  // visual regression / live preview it is NOT gated on UI changes â€” every prompt's generated code is
+  // visual regression / live preview it is NOT gated on UI changes — every prompt's generated code is
   // scanned. When `files` is not pinned, the prompt's changed files (from the File-Integrity diff) are
   // scanned so only the new/edited code is inspected; a null diff falls back to a full project walk.
   if (options.securityScan) {
@@ -2936,14 +2936,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         scan = null;
       }
       if (scan === null) {
-        record(skip('security_scan', 'security scanner failed â€” not evaluated'));
+        record(skip('security_scan', 'security scanner failed — not evaluated'));
       } else {
         record(evaluateSecurityScan(scan, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 7. Visual Regression (OPTIONAL â€” only when configured AND after a UI prompt) ------------
+  // --- 7. Visual Regression (OPTIONAL — only when configured AND after a UI prompt) ------------
   // Not part of the mandatory Contract-13 five: the check is appended only when `visualRegression`
   // is supplied. A build that does not opt in keeps exactly five checks (backward-compatible).
   if (options.visualRegression && options.uiPromptJustRan !== false) {
@@ -2965,14 +2965,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         vr = null;
       }
       if (vr === null) {
-        record(skip('visual_regression', 'visual regression runner failed â€” not evaluated'));
+        record(skip('visual_regression', 'visual regression runner failed — not evaluated'));
       } else {
         record(evaluateVisualRegression(vr, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 8. Live Preview (OPTIONAL â€” only when configured AND after a UI change) -----------------
+  // --- 8. Live Preview (OPTIONAL — only when configured AND after a UI change) -----------------
   // Not part of the mandatory Contract-13 five: appended only when `livePreview` is supplied AND the
   // prompt that just ran touched UI. "Touched UI" = a changed `.tsx`/`.css` file in this run's git
   // diff (when known), OR `uiPromptJustRan !== false` (config presence + UI signal implies intent).
@@ -2987,7 +2987,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       const lpInput: LivePreviewInput = {
         ...options.livePreview,
         projectPath: options.livePreview.projectPath ?? projectPath,
-        // Pass the diff so the gate's own `.tsx`/`.css` trigger is exact; null diff â‡’ let it run.
+        // Pass the diff so the gate's own `.tsx`/`.css` trigger is exact; null diff ⇒ let it run.
         ...(changedFilePaths !== null ? { changedFiles: changedFilePaths } : {}),
       };
       const runLive = options.runLivePreviewCheck ?? runLivePreviewGate;
@@ -2999,16 +2999,16 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         lp = null;
       }
       if (lp === null) {
-        record(skip('live_preview', 'live preview runner failed â€” not evaluated'));
+        record(skip('live_preview', 'live preview runner failed — not evaluated'));
       } else {
         record(evaluateLivePreview(lp, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 9. Accessibility (OPTIONAL â€” only when configured AND after a UI change) ----------------
+  // --- 9. Accessibility (OPTIONAL — only when configured AND after a UI change) ----------------
   // Not part of the mandatory Contract-13 five: appended only when `accessibility` is supplied AND the
-  // prompt that just ran touched UI (same trigger as live preview â€” a `.tsx`/`.css` change in this
+  // prompt that just ran touched UI (same trigger as live preview — a `.tsx`/`.css` change in this
   // run's diff, or `uiPromptJustRan !== false` when the diff is unavailable). Runs axe-core over every
   // route for WCAG 2.1 AA; a critical violation FAILS the gate, lesser ones are surfaced but pass; an
   // un-bootable app / unavailable browser / missing axe-core SKIPS (never a false fail).
@@ -3021,7 +3021,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       const a11yInput: AccessibilityAuditInput = {
         ...options.accessibility,
         projectPath: options.accessibility.projectPath ?? projectPath,
-        // Pass the diff so the auditor's own `.tsx`/`.css` trigger is exact; null diff â‡’ let it run.
+        // Pass the diff so the auditor's own `.tsx`/`.css` trigger is exact; null diff ⇒ let it run.
         ...(changedFilePaths !== null ? { changedFiles: changedFilePaths } : {}),
       };
       const runA11y = options.runAccessibilityCheck ?? runAccessibilityAudit;
@@ -3033,16 +3033,16 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         report = null;
       }
       if (report === null) {
-        record(skip('accessibility', 'accessibility runner failed â€” not evaluated'));
+        record(skip('accessibility', 'accessibility runner failed — not evaluated'));
       } else {
         record(evaluateAccessibility(report, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 10. SEO (OPTIONAL â€” only when configured AND after a UI change) -------------------------
+  // --- 10. SEO (OPTIONAL — only when configured AND after a UI change) -------------------------
   // Not part of the mandatory Contract-13 five: appended only when `seo` is supplied AND the prompt
-  // that just ran touched UI (same trigger as live-preview / accessibility â€” a `.tsx`/`.css` change in
+  // that just ran touched UI (same trigger as live-preview / accessibility — a `.tsx`/`.css` change in
   // this run's diff, or `uiPromptJustRan !== false` when the diff is unavailable). Validates every route
   // for search-engine readiness with per-page scores; a critical issue FAILS the gate, lesser ones are
   // surfaced but pass; an un-bootable app / unavailable browser / no routes SKIPS (never a false fail).
@@ -3055,7 +3055,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       const seoInput: SeoAuditInput = {
         ...options.seo,
         projectPath: options.seo.projectPath ?? projectPath,
-        // Pass the diff so the validator's own `.tsx`/`.css` trigger is exact; null diff â‡’ let it run.
+        // Pass the diff so the validator's own `.tsx`/`.css` trigger is exact; null diff ⇒ let it run.
         ...(changedFilePaths !== null ? { changedFiles: changedFilePaths } : {}),
       };
       const runSeo = options.runSeoCheck ?? runSeoAudit;
@@ -3067,16 +3067,16 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         seoResult = null;
       }
       if (seoResult === null) {
-        record(skip('seo', 'SEO runner failed â€” not evaluated'));
+        record(skip('seo', 'SEO runner failed — not evaluated'));
       } else {
         record(evaluateSeo(seoResult, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 11. Architecture Guard (OPTIONAL â€” only when configured; runs after EVERY prompt) ------
+  // --- 11. Architecture Guard (OPTIONAL — only when configured; runs after EVERY prompt) ------
   // Not part of the mandatory Contract-13 five: appended only when `architectureGuard` is supplied. Like
-  // the security scan it is NOT gated on UI changes â€” the WHOLE codebase is analyzed every prompt. Unlike
+  // the security scan it is NOT gated on UI changes — the WHOLE codebase is analyzed every prompt. Unlike
   // the security scan it is NOT pinned to the changed files: cycle/dead-code detection needs the full
   // module graph, so the guard always walks the project (the prompt's changed files are passed only as
   // context). A HIGH-severity violation (a dependency cycle / N+1 query by default) FAILS the gate; an
@@ -3104,17 +3104,17 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         arch = null;
       }
       if (arch === null) {
-        record(skip('architecture', 'architecture guard failed â€” not evaluated'));
+        record(skip('architecture', 'architecture guard failed — not evaluated'));
       } else {
         record(evaluateArchitectureGuard(arch, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 12. Consensus Validation (OPTIONAL post-generation check â€” runs after EVERY prompt) -----
+  // --- 12. Consensus Validation (OPTIONAL post-generation check — runs after EVERY prompt) -----
   // Not part of the mandatory Contract-13 five: appended only when `consensusValidation` is supplied
   // (the executor passes it after a prompt that produced an artifact). Like the security scan it is
-  // NOT gated on UI changes â€” every generation is cross-checked by an independent multi-model panel.
+  // NOT gated on UI changes — every generation is cross-checked by an independent multi-model panel.
   // The generation BLOCKS the gate when its approvals fall below the prompt_type consensus requirement
   // (architecture 3-of-3, crud 2-of-3, documentation 1-of-3 by default); an unreachable panel SKIPS.
   if (options.consensusValidation) {
@@ -3139,16 +3139,16 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         cv = null;
       }
       if (cv === null) {
-        record(skip('consensus_validation', 'consensus validator failed â€” not evaluated'));
+        record(skip('consensus_validation', 'consensus validator failed — not evaluated'));
       } else {
         record(evaluateConsensus(cv, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 13. AgentShield Security Scan (OPTIONAL â€” grade B+ required; runs after every prompt) ----
+  // --- 13. AgentShield Security Scan (OPTIONAL — grade B+ required; runs after every prompt) ----
   // Not part of the mandatory Contract-13 five: appended only when `agentShield` is supplied. Like
-  // the security scan it is NOT gated on UI changes â€” every prompt's output is scanned. A grade
+  // the security scan it is NOT gated on UI changes — every prompt's output is scanned. A grade
   // below B (i.e. C/D/F) FAILS the gate; A or B passes; an un-scannable project SKIPS.
   if (options.agentShield) {
     if (shouldSkipRest()) {
@@ -3166,24 +3166,24 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         shield = null;
       }
       if (shield === null) {
-        record(skip('agent_shield', 'AgentShield scanner failed â€” not evaluated'));
+        record(skip('agent_shield', 'AgentShield scanner failed — not evaluated'));
       } else {
         record(evaluateAgentShield(shield, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 14. Live Schema Drift (OPTIONAL â€” requires schemaSql; runs after every prompt) -----------
+  // --- 14. Live Schema Drift (OPTIONAL — requires schemaSql; runs after every prompt) -----------
   // A second schema-drift pass that SPECIFICALLY requires a live SQL executor. Unlike the mandatory
   // schema_drift check (which falls back to migration files when no SQL executor is available), this
-  // check is only meaningful against the LIVE database â€” it SKIPS when `schemaSql` is absent rather
+  // check is only meaningful against the LIVE database — it SKIPS when `schemaSql` is absent rather
   // than falling back. This gives an always-current "code vs live DB" picture independent of whether
   // schema prompts have executed.
   if (options.liveSchemaCheck) {
     if (shouldSkipRest()) {
       record(skipRest('live_schema_drift'));
     } else if (!options.schemaSql) {
-      record(skip('live_schema_drift', 'no schemaSql executor provided â€” live schema drift not evaluated'));
+      record(skip('live_schema_drift', 'no schemaSql executor provided — live schema drift not evaluated'));
     } else {
       log('check 14: Live Schema Drift (code vs live database via schemaSql)');
       const startedAt = nowMs();
@@ -3193,7 +3193,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         options.schemaRegistryContent ??
         (await readTextSafe(join(governanceDir, 'SCHEMA_REGISTRY.md')));
       if (registryMd === null) {
-        record(skip('live_schema_drift', `SCHEMA_REGISTRY.md not found under ${governanceDir} â€” live drift not evaluated`));
+        record(skip('live_schema_drift', `SCHEMA_REGISTRY.md not found under ${governanceDir} — live drift not evaluated`));
       } else {
         const expected = parseSchemaRegistry(registryMd);
         let actual: SchemaSnapshot;
@@ -3211,7 +3211,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     }
   }
 
-  // --- 15. Dead Code Scan (OPTIONAL â€” report only, never blocks; runs after every prompt) -------
+  // --- 15. Dead Code Scan (OPTIONAL — report only, never blocks; runs after every prompt) -------
   // Not part of the mandatory Contract-13 five: appended only when `deadCodeScan` is supplied. It
   // scans for unused imports, variables, and exports across the project. Results are ALWAYS surfaced
   // but NEVER block the build (report-only by design, matching the task spec "report, don't block").
@@ -3219,7 +3219,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     if (shouldSkipRest()) {
       record(skipRest('dead_code'));
     } else {
-      log('check 15: Dead Code Scan (unused imports / variables / exports â€” report only)');
+      log('check 15: Dead Code Scan (unused imports / variables / exports — report only)');
       const startedAt = nowMs();
       const deadPath = options.deadCodeScan.projectPath ?? projectPath;
       const runDead = options.runDeadCodeScan ?? scanDeadCode;
@@ -3231,14 +3231,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         dead = null;
       }
       if (dead === null) {
-        record(skip('dead_code', 'dead code scanner failed â€” not evaluated'));
+        record(skip('dead_code', 'dead code scanner failed — not evaluated'));
       } else {
         record(evaluateDeadCode(dead, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 16. Six Laws Verification (OPTIONAL â€” via governance-gate; runs after every prompt) ------
+  // --- 16. Six Laws Verification (OPTIONAL — via governance-gate; runs after every prompt) ------
   // Not part of the mandatory Contract-13 five: appended only when `sixLaws` is supplied. Runs the
   // full Six Laws check via `runSixLawsCheck` (governance-gate). A failing law FAILS the gate; a
   // law that cannot be evaluated SKIPS; an un-reachable app / browser SKIPS (never a false failure).
@@ -3258,17 +3258,17 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         six = null;
       }
       if (six === null) {
-        record(skip('six_laws', 'Six Laws verifier failed â€” not evaluated'));
+        record(skip('six_laws', 'Six Laws verifier failed — not evaluated'));
       } else {
         record(evaluateSixLaws(six, nowMs() - startedAt));
       }
     }
   }
 
-  // --- 17. Full Playwright Test Suite (OPTIONAL â€” not incremental; runs after every prompt) -----
+  // --- 17. Full Playwright Test Suite (OPTIONAL — not incremental; runs after every prompt) -----
   // Not part of the mandatory Contract-13 five: appended only when `playwright` is supplied. Unlike
   // the incremental-tester, this runs the COMPLETE Playwright suite (`pnpm playwright test`) every
-  // time â€” no file-change filtering. Any test failure FAILS the gate; a timeout also FAILS. There
+  // time — no file-change filtering. Any test failure FAILS the gate; a timeout also FAILS. There
   // is no SKIP path (a missing Playwright install will produce a non-zero exit, which fails).
   if (options.playwright) {
     if (shouldSkipRest()) {
@@ -3302,7 +3302,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         vitestResult = await vitestFn(projectPath, run, log, coverageThreshold);
       } catch (err) {
         log(`WARNING: Ring 2 Vitest check threw (${describe(err)})`);
-        vitestResult = skip('vitest', 'Ring 2 Vitest runner threw â€” not evaluated');
+        vitestResult = skip('vitest', 'Ring 2 Vitest runner threw — not evaluated');
       }
       record(vitestResult);
     }
@@ -3318,7 +3318,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         semgrepResult = await semgrepFn(projectPath, run, log);
       } catch (err) {
         log(`WARNING: Ring 2 Semgrep check threw (${describe(err)})`);
-        semgrepResult = skip('semgrep', 'Ring 2 Semgrep runner threw â€” not evaluated');
+        semgrepResult = skip('semgrep', 'Ring 2 Semgrep runner threw — not evaluated');
       }
       record(semgrepResult);
     }
@@ -3334,7 +3334,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         knipResult = await knipFn(projectPath, run, log);
       } catch (err) {
         log(`WARNING: Ring 2 knip check threw (${describe(err)})`);
-        knipResult = skip('knip', 'Ring 2 knip runner threw â€” not evaluated');
+        knipResult = skip('knip', 'Ring 2 knip runner threw — not evaluated');
       }
       record(knipResult);
     }
@@ -3342,10 +3342,10 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
 
   // --- Ring 3. End-of-run gate (Trivy, Gitleaks, Lighthouse) ----------------------------------
   // Fires when ring3.isFinalPrompt === true OR ring3.forceRun === true.
-  // All three tools skip gracefully when the binary is not installed â€” never a false failure.
+  // All three tools skip gracefully when the binary is not installed — never a false failure.
   // A failing tool registers a fix_patterns entry in the learning DB.
   if (options.ring3 && shouldFireRing3(options.ring3.isFinalPrompt, options.ring3.forceRun)) {
-    // Ring 3a: Trivy (CVE scan â€” 0 CRITICAL + 0 HIGH threshold)
+    // Ring 3a: Trivy (CVE scan — 0 CRITICAL + 0 HIGH threshold)
     if (shouldSkipRest()) {
       record(skipRest('trivy'));
     } else {
@@ -3356,12 +3356,12 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         trivyResult = await trivyFn(projectPath, run, log);
       } catch (err) {
         log(`WARNING: Ring 3 Trivy check threw (${describe(err)})`);
-        trivyResult = skip('trivy', 'Ring 3 Trivy runner threw â€” not evaluated');
+        trivyResult = skip('trivy', 'Ring 3 Trivy runner threw — not evaluated');
       }
       record(trivyResult);
     }
 
-    // Ring 3b: Gitleaks (secret scan â€” 0 findings threshold)
+    // Ring 3b: Gitleaks (secret scan — 0 findings threshold)
     if (shouldSkipRest()) {
       record(skipRest('gitleaks'));
     } else {
@@ -3372,23 +3372,23 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         gitleaksResult = await gitleaksFn(projectPath, run, log);
       } catch (err) {
         log(`WARNING: Ring 3 Gitleaks check threw (${describe(err)})`);
-        gitleaksResult = skip('gitleaks', 'Ring 3 Gitleaks runner threw â€” not evaluated');
+        gitleaksResult = skip('gitleaks', 'Ring 3 Gitleaks runner threw — not evaluated');
       }
       record(gitleaksResult);
     }
 
-    // Ring 3c: Lighthouse (â‰¥ 90 for performance / accessibility / best-practices / SEO)
+    // Ring 3c: Lighthouse (≥ 90 for performance / accessibility / best-practices / SEO)
     if (shouldSkipRest()) {
       record(skipRest('lighthouse'));
     } else {
-      log('Ring 3c: Lighthouse performance/accessibility/best-practices/SEO audit (â‰¥ 90 threshold)');
+      log('Ring 3c: Lighthouse performance/accessibility/best-practices/SEO audit (≥ 90 threshold)');
       const lighthouseFn = options.ring3.runLighthouse ?? runRing3LighthouseCheck;
       let lighthouseResult: CheckResult;
       try {
         lighthouseResult = await lighthouseFn(projectPath, run, log);
       } catch (err) {
         log(`WARNING: Ring 3 Lighthouse check threw (${describe(err)})`);
-        lighthouseResult = skip('lighthouse', 'Ring 3 Lighthouse runner threw â€” not evaluated');
+        lighthouseResult = skip('lighthouse', 'Ring 3 Lighthouse runner threw — not evaluated');
       }
       record(lighthouseResult);
     }
@@ -3398,7 +3398,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   const passed = failedCheck === null;
   const diagnosticReport = renderDiagnosticReport(checks, failedCheck, projectPath);
 
-  log(passed ? 'Sentinel: PASS âœ…' : `Sentinel: FAIL âŒ (first failure: ${failedCheck})`);
+  log(passed ? 'Sentinel: PASS ✅' : `Sentinel: FAIL ❌ (first failure: ${failedCheck})`);
   return { passed, checks, failedCheck, diagnosticReport };
 }
 
@@ -3450,7 +3450,7 @@ export interface AutoRecoveryAttempt {
   errorSignature: string;
   /** Category assigned to the error. */
   errorCategory: ErrorCategory;
-  /** The matched eligible pattern, or null if none matched (â†’ novel error â†’ escalate). */
+  /** The matched eligible pattern, or null if none matched (→ novel error → escalate). */
   matchedPattern: { id: string; signature: string; successRate: number } | null;
   /** The resolution applied, or null if no resolution was available. */
   resolutionApplied: { id: string; type: string; description: string } | null;
@@ -3488,7 +3488,7 @@ export interface AutoRecoveryResult {
 export interface AutoRecoveryOptions {
   /** Whether Autonomous Recovery Mode is enabled for this build (opt-in per build, Contract 14). */
   autonomousRecoveryMode: boolean;
-  /** Re-execute the failed prompt (the executor supplies this â€” wraps claude-runner + git). */
+  /** Re-execute the failed prompt (the executor supplies this — wraps claude-runner + git). */
   rerunPrompt: () => Promise<RerunOutcome>;
   /** Re-run Sentinel after a resolution + re-run. Default: {@link runSentinel} with `sentinelOptions`. */
   rerunSentinel?: () => Promise<SentinelResult>;
@@ -3498,7 +3498,7 @@ export interface AutoRecoveryOptions {
   maxAttempts?: number;
   /** prompt_executions.id to annotate with the applied resolution (optional Build Memory write). */
   promptExecutionId?: string | null;
-  /** Fetch auto-resolvable patterns. Default: `BuildMemory.errors.getAutoResolvable()` (â†’ []). */
+  /** Fetch auto-resolvable patterns. Default: `BuildMemory.errors.getAutoResolvable()` (→ []). */
   fetchAutoResolvable?: () => Promise<ErrorPattern[]>;
   /** Fetch the resolution for a pattern. Default: `BuildMemory.resolutions.getResolutionForPattern`. */
   fetchResolution?: (patternId: string) => Promise<Resolution | null>;
@@ -3516,7 +3516,7 @@ export interface AutoRecoveryOptions {
 /**
  * Normalize a raw error string into a stable signature (Contract 15): lowercase, strip absolute
  * paths, line:column numbers, hex hashes, and ISO timestamps, collapse whitespace, and keep the
- * most informative leading slice. Deterministic â€” the same class of error yields the same string.
+ * most informative leading slice. Deterministic — the same class of error yields the same string.
  */
 export function normalizeErrorSignature(raw: string): string {
   return (raw ?? '')
@@ -3605,7 +3605,7 @@ async function defaultApplyResolution(
 ): Promise<boolean> {
   const commands = extractCommands(resolution.resolution_steps);
   if (commands.length === 0) {
-    log(`resolution ${resolution.id} has no executable commands â€” treating as applied-by-re-run`);
+    log(`resolution ${resolution.id} has no executable commands — treating as applied-by-re-run`);
     return true;
   }
   let allOk = true;
@@ -3635,7 +3635,7 @@ function extractCommands(steps: Json): string[] {
  * Disabled mode, or a novel error (no eligible pattern), or exhausting `maxAttempts` (2) all
  * ESCALATE to a human. On each attempt: match the failed check's normalized error to an
  * `auto_resolve_eligible` pattern with `success_rate > 0.90`, apply its resolution, re-run the
- * prompt, re-run Sentinel, and log the outcome to Build Memory (Contract 4 â€” guarded, non-fatal).
+ * prompt, re-run Sentinel, and log the outcome to Build Memory (Contract 4 — guarded, non-fatal).
  * Stops as soon as Sentinel goes green. Never throws.
  */
 export async function runAutonomousRecovery(
@@ -3653,19 +3653,19 @@ export async function runAutonomousRecovery(
   const attempts: AutoRecoveryAttempt[] = [];
   let current = failedSentinel;
 
-  // Already green, or disabled â†’ no recovery here.
+  // Already green, or disabled → no recovery here.
   if (failedSentinel.passed) {
-    return { enabled: options.autonomousRecoveryMode, attempted: false, recovered: true, escalated: false, attempts, finalSentinel: failedSentinel, reason: 'Sentinel already passing â€” nothing to recover.' };
+    return { enabled: options.autonomousRecoveryMode, attempted: false, recovered: true, escalated: false, attempts, finalSentinel: failedSentinel, reason: 'Sentinel already passing — nothing to recover.' };
   }
   if (!options.autonomousRecoveryMode) {
-    return { enabled: false, attempted: false, recovered: false, escalated: true, attempts, finalSentinel: failedSentinel, reason: 'Autonomous Recovery Mode disabled â€” escalating to human (Contract 14).' };
+    return { enabled: false, attempted: false, recovered: false, escalated: true, attempts, finalSentinel: failedSentinel, reason: 'Autonomous Recovery Mode disabled — escalating to human (Contract 14).' };
   }
 
   const rerunSentinel =
     options.rerunSentinel ??
     (options.sentinelOptions ? () => runSentinel(options.sentinelOptions as SentinelOptions) : null);
   if (!rerunSentinel) {
-    return { enabled: true, attempted: false, recovered: false, escalated: true, attempts, finalSentinel: failedSentinel, reason: 'No rerunSentinel/sentinelOptions supplied â€” cannot re-verify; escalating.' };
+    return { enabled: true, attempted: false, recovered: false, escalated: true, attempts, finalSentinel: failedSentinel, reason: 'No rerunSentinel/sentinelOptions supplied — cannot re-verify; escalating.' };
   }
 
   const applyResolution =
@@ -3684,10 +3684,10 @@ export async function runAutonomousRecovery(
     const match = selectMatchingPattern(patterns, signature, category);
 
     if (!match) {
-      // Novel error â†’ ALWAYS escalate (Contract 14).
-      attempts.push({ attempt, errorSignature: signature, errorCategory: category, matchedPattern: null, resolutionApplied: null, resolutionSucceeded: false, rerunSucceeded: false, sentinel: current, recovered: false, note: 'No eligible pattern (success_rate > 0.90) matched â€” novel error, escalating to human.' });
-      log('novel error â€” no eligible auto-resolve pattern matched; escalating');
-      return { enabled: true, attempted: true, recovered: false, escalated: true, attempts, finalSentinel: current, reason: 'Novel error (no matching auto-resolvable pattern) â€” escalated to human (Contract 14).' };
+      // Novel error → ALWAYS escalate (Contract 14).
+      attempts.push({ attempt, errorSignature: signature, errorCategory: category, matchedPattern: null, resolutionApplied: null, resolutionSucceeded: false, rerunSucceeded: false, sentinel: current, recovered: false, note: 'No eligible pattern (success_rate > 0.90) matched — novel error, escalating to human.' });
+      log('novel error — no eligible auto-resolve pattern matched; escalating');
+      return { enabled: true, attempted: true, recovered: false, escalated: true, attempts, finalSentinel: current, reason: 'Novel error (no matching auto-resolvable pattern) — escalated to human (Contract 14).' };
     }
 
     const pattern = match.pattern;
@@ -3699,11 +3699,11 @@ export async function runAutonomousRecovery(
       try {
         resolutionSucceeded = await applyResolution(resolution);
       } catch (error) {
-        log(`WARNING: applyResolution threw (${describe(error)}) â€” treating as failed`);
+        log(`WARNING: applyResolution threw (${describe(error)}) — treating as failed`);
         resolutionSucceeded = false;
       }
     } else {
-      log(`pattern ${pattern.id} has no linked resolution â€” relying on prompt re-run alone`);
+      log(`pattern ${pattern.id} has no linked resolution — relying on prompt re-run alone`);
       resolutionSucceeded = true; // the re-run itself is the remediation
     }
 
@@ -3712,7 +3712,7 @@ export async function runAutonomousRecovery(
     try {
       rerun = await options.rerunPrompt();
     } catch (error) {
-      log(`WARNING: rerunPrompt threw (${describe(error)}) â€” treating as failed`);
+      log(`WARNING: rerunPrompt threw (${describe(error)}) — treating as failed`);
       rerun = { success: false, output: describe(error) };
     }
 
@@ -3720,13 +3720,13 @@ export async function runAutonomousRecovery(
     try {
       sentinel = await rerunSentinel();
     } catch (error) {
-      log(`WARNING: rerunSentinel threw (${describe(error)}) â€” keeping prior failure`);
+      log(`WARNING: rerunSentinel threw (${describe(error)}) — keeping prior failure`);
       sentinel = current;
     }
     current = sentinel;
     const recovered = sentinel.passed;
 
-    // Log everything to Build Memory (Contract 4 â€” guarded; failures degrade, never throw).
+    // Log everything to Build Memory (Contract 4 — guarded; failures degrade, never throw).
     await recordAttemptToMemory(pattern, resolution, recovered, options.promptExecutionId ?? null, sentinel, log);
 
     attempts.push({
@@ -3740,7 +3740,7 @@ export async function runAutonomousRecovery(
       sentinel,
       recovered,
       note: recovered
-        ? 'Resolution applied, prompt re-run, Sentinel green â€” recovered.'
+        ? 'Resolution applied, prompt re-run, Sentinel green — recovered.'
         : `Resolution applied + prompt re-run, but Sentinel still failing (${sentinel.failedCheck ?? 'unknown'}).`,
     });
 
@@ -3750,9 +3750,9 @@ export async function runAutonomousRecovery(
     }
   }
 
-  // Exhausted attempts â†’ escalate (Contract 14: third failure escalates to human).
-  log(`exhausted ${maxAttempts} recovery attempt(s) â€” escalating`);
-  return { enabled: true, attempted: true, recovered: false, escalated: true, attempts, finalSentinel: current, reason: `Exhausted ${maxAttempts} auto-recovery attempt(s) without a green Sentinel â€” escalated to human (Contract 14).` };
+  // Exhausted attempts → escalate (Contract 14: third failure escalates to human).
+  log(`exhausted ${maxAttempts} recovery attempt(s) — escalating`);
+  return { enabled: true, attempted: true, recovered: false, escalated: true, attempts, finalSentinel: current, reason: `Exhausted ${maxAttempts} auto-recovery attempt(s) without a green Sentinel — escalated to human (Contract 14).` };
 }
 
 /** Persist one recovery attempt's outcome to Build Memory (all writes guarded). */
@@ -3789,14 +3789,14 @@ function describe(error: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Standalone CLI entry point â€” `forge sentinel <path> --ring N`
+// Standalone CLI entry point — `forge sentinel <path> --ring N`
 // ---------------------------------------------------------------------------
 
 /**
  * Run a specific Sentinel ring (1, 2, or 3) as a standalone operation.
  * Ring 1 = mandatory checks (tsc, eslint, build, file-integrity, schema-drift, deps).
- * Ring 2 = every-10th-prompt checks (Vitest, Semgrep, knip) â€” fires unconditionally here.
- * Ring 3 = end-of-run checks (Trivy, Gitleaks, Lighthouse) â€” fires unconditionally here.
+ * Ring 2 = every-10th-prompt checks (Vitest, Semgrep, knip) — fires unconditionally here.
+ * Ring 3 = end-of-run checks (Trivy, Gitleaks, Lighthouse) — fires unconditionally here.
  * Returns the aggregate pass/fail and the per-check results.
  */
 export async function runSentinelRing(
@@ -3817,4 +3817,3 @@ export async function runSentinelRing(
 }
 
 export default runSentinel;
-
