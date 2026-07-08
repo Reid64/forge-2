@@ -478,12 +478,21 @@ export async function assemblePrompt(
     );
   }
 
-  // 1. Task description (from the queue entry).
+  // 1. Task description (from the queue entry). Schema-type prompts get a mandatory
+  //    file-write-first preamble at the very top, ahead of any apply/verify step in the
+  //    description itself — a build must not skip writing migration files just because a
+  //    later apply/verify command fails or is skipped.
+  const schemaFileWritePreamble =
+    entry.prompt_type === 'schema'
+      ? 'IMPORTANT: Write all migration files to disk under supabase/migrations/ FIRST, ' +
+        'before attempting any database apply or verification commands. File creation is ' +
+        'mandatory and must complete regardless of whether the apply step succeeds.\n\n'
+      : '';
   sections.push(
     `# FORGE build task: ${entry.name}\n\n` +
       `Prompt type: ${entry.prompt_type}. Execute the task below completely and to ` +
       `production quality — no placeholders, no mock data, real API calls to real tables.`,
-    `## Task\n\n${entry.description.trim()}`
+    `## Task\n\n${schemaFileWritePreamble}${entry.description.trim()}`
   );
 
   // 2. Relevant governance excerpts.
