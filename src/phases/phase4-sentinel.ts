@@ -1100,26 +1100,59 @@ export async function defaultCountProjectFiles(projectPath: string): Promise<num
 }
 
 /**
+ * Check whether the expected on-disk output for `promptType` already exists with real content.
+ * Currently only 'schema' has a known expected-output shape: at least one non-empty `.sql` file
+ * under `supabase/migrations/`. Other prompt types have no well-known output path, so this
+ * returns false for them rather than guessing. A zero-byte `.sql` file (e.g. a stub left by a
+ * failed prior attempt) does not count as real content.
+ */
+function expectedOutputExistsOnDisk(promptType: PromptType | undefined, projectPath: string): boolean {
+  if (promptType !== 'schema') return false;
+  const migrationsDir = join(projectPath, 'supabase', 'migrations');
+  if (!existsSync(migrationsDir)) return false;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(migrationsDir);
+  } catch {
+    return false;
+  }
+  return entries.some((name) => {
+    if (!name.toLowerCase().endsWith('.sql')) return false;
+    try {
+      return fs.statSync(join(migrationsDir, name)).size > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * Evaluate the file-delta law: a non-exempt prompt (anything but `test`/`deploy`) that leaves the
  * project's file count UNCHANGED produced no work product — Sentinel must FAIL, never pass a void
  * (Session 5.2 — the observed dialtest defect: 15/15 prompts "passed" against a directory that
  * never gained a single file). Skips (never fails) when no `before` count was supplied — that's a
  * caller not wired into the law, not evidence of an empty build.
  *
- * Exemption: a zero delta is not necessarily an empty build — Claude may have correctly verified
+ * Exemption 1: a zero delta is not necessarily an empty build — Claude may have correctly verified
  * that expected work product already exists (e.g. from a prior attempt on this branch) and made
  * no further changes. The File Integrity check (which runs immediately before this one) already
  * computed `git diff main...HEAD`; if that diff shows real files staged/committed on this branch,
  * there IS a work product — just not one produced by counting files during this specific prompt.
  * Trust the git diff over the raw count in that case, rather than fail a correct "already done"
  * verification.
+ *
+ * Exemption 2: the git-diff check only sees work committed to a feature branch ahead of `main`.
+ * If the work product was instead committed directly to `main` (or is otherwise off that diff),
+ * `changedFilePaths` is empty even though the output genuinely exists. In that case, fall back to
+ * checking the expected output path on disk directly (see {@link expectedOutputExistsOnDisk}).
  */
 function evaluateFileDelta(
   promptType: PromptType | undefined,
   before: number | undefined,
   after: number,
   durationMs: number,
-  changedFilePaths: string[] | null
+  changedFilePaths: string[] | null,
+  projectPath: string
 ): CheckResult {
   if (before === undefined) {
     return skip('file_delta', 'no pre-prompt file count supplied — not evaluated');
@@ -1148,6 +1181,16 @@ function evaluateFileDelta(
         `${changedFilePaths.length} file(s) already staged/committed on this branch — real work ` +
         'product exists from a prior attempt; this prompt correctly left it as-is',
       `before=${before}\nafter=${after}\nchanged on branch: ${changedFilePaths.join(', ')}`,
+      durationMs
+    );
+  }
+  if (expectedOutputExistsOnDisk(promptType, projectPath)) {
+    return pass(
+      'file_delta',
+      'Expected output already exists on disk from prior work',
+      `before=${before}\nafter=${after}\n` +
+        `prompt type '${promptType}' expects output under supabase/migrations/*.sql, which exists ` +
+        'on disk regardless of branch state',
       durationMs
     );
   }
@@ -2852,7 +2895,14 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       }
       if (after >= 0) {
         record(
-          evaluateFileDelta(options.promptType, options.fileCountBefore, after, nowMs() - startedAt, changedFilePaths)
+          evaluateFileDelta(
+            options.promptType,
+            options.fileCountBefore,
+            after,
+            nowMs() - startedAt,
+            changedFilePaths,
+            projectPath
+          )
         );
       }
     }
