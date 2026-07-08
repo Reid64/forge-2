@@ -2442,6 +2442,16 @@ async function runRing1EslintCheck(
   run: CommandRunner,
   log: (m: string) => void
 ): Promise<CheckResult> {
+  const pkgJson = path.join(projectPath, 'package.json');
+  if (!fs.existsSync(pkgJson)) {
+    log('sentinel: no package.json in project root — ESLint check skipped (not a Node project yet)');
+    return pass('eslint', 'Skipped — no package.json present; project has no ESLint to check', '', 0);
+  }
+  const localEslint = path.join(projectPath, 'node_modules', '.bin', 'eslint');
+  if (!fs.existsSync(localEslint)) {
+    log('sentinel: no local eslint binary found — ESLint check skipped (eslint not installed)');
+    return pass('eslint', 'Skipped — eslint not installed locally', '', 0);
+  }
   const startedAt = nowMs();
   const res = await run('npx eslint . --format json --ext .ts,.tsx', projectPath, timeoutMs);
   const durationMs = nowMs() - startedAt;
@@ -2776,6 +2786,9 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   // --- 2. Build ------------------------------------------------------------
   if (shouldSkipRest()) {
     record(skipRest('build'));
+  } else if (!fs.existsSync(join(projectPath, 'package.json'))) {
+    log('sentinel: no package.json in project root — Build check skipped (not a Node project yet)');
+    record(pass('build', 'Skipped — no package.json present; project has no build script to run', '', 0));
   } else {
     log('check 3/7: Build (pnpm run build)');
     record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run));
