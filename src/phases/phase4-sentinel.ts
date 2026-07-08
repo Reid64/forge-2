@@ -1105,12 +1105,21 @@ export async function defaultCountProjectFiles(projectPath: string): Promise<num
  * (Session 5.2 — the observed dialtest defect: 15/15 prompts "passed" against a directory that
  * never gained a single file). Skips (never fails) when no `before` count was supplied — that's a
  * caller not wired into the law, not evidence of an empty build.
+ *
+ * Exemption: a zero delta is not necessarily an empty build — Claude may have correctly verified
+ * that expected work product already exists (e.g. from a prior attempt on this branch) and made
+ * no further changes. The File Integrity check (which runs immediately before this one) already
+ * computed `git diff main...HEAD`; if that diff shows real files staged/committed on this branch,
+ * there IS a work product — just not one produced by counting files during this specific prompt.
+ * Trust the git diff over the raw count in that case, rather than fail a correct "already done"
+ * verification.
  */
 function evaluateFileDelta(
   promptType: PromptType | undefined,
   before: number | undefined,
   after: number,
-  durationMs: number
+  durationMs: number,
+  changedFilePaths: string[] | null
 ): CheckResult {
   if (before === undefined) {
     return skip('file_delta', 'no pre-prompt file count supplied — not evaluated');
@@ -1129,6 +1138,16 @@ function evaluateFileDelta(
       'file_delta',
       `file count changed ${before} -> ${after} (${delta > 0 ? '+' : ''}${delta})`,
       `before=${before}\nafter=${after}`,
+      durationMs
+    );
+  }
+  if (changedFilePaths !== null && changedFilePaths.length > 0) {
+    return pass(
+      'file_delta',
+      `file count unchanged (${before} -> ${after}), but git diff (main...HEAD) shows ` +
+        `${changedFilePaths.length} file(s) already staged/committed on this branch — real work ` +
+        'product exists from a prior attempt; this prompt correctly left it as-is',
+      `before=${before}\nafter=${after}\nchanged on branch: ${changedFilePaths.join(', ')}`,
       durationMs
     );
   }
@@ -2832,7 +2851,9 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         after = -1;
       }
       if (after >= 0) {
-        record(evaluateFileDelta(options.promptType, options.fileCountBefore, after, nowMs() - startedAt));
+        record(
+          evaluateFileDelta(options.promptType, options.fileCountBefore, after, nowMs() - startedAt, changedFilePaths)
+        );
       }
     }
   }
