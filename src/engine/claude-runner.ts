@@ -288,8 +288,12 @@ export function runClaude(
       // exit is itself a failure signal (this is exactly what the broken shell+detached spawn
       // produced: exit 1 with empty output, but a future different breakage could exit 0 the same
       // way). Never fabricate a completed outcome from an empty run (Iron Law 3).
+      // This instant-death guard only makes sense for runs that failed fast — a legitimate long
+      // run that genuinely produced no stdout (>=10s) should not be penalized the same way.
+      const durationMs = Date.now() - startedAt;
       const cleanExit = !timedOut && partial.spawnError === undefined && partial.exitCode === 0;
-      const success = cleanExit && stdout.trim() !== '';
+      const emptyStdout = stdout.trim() === '';
+      const success = cleanExit && (!emptyStdout || durationMs >= 10000);
 
       if (timedOut) {
         log(`TIMEOUT after ${Math.round(timeoutMs / 1000)}s — process killed (prompt FAILED)`);
