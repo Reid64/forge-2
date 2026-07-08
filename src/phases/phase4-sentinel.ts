@@ -2942,7 +2942,9 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     log('check 7/7: Dependencies (package.json vs TOOLCHAIN.md)');
     const startedAt = nowMs();
     const pkgJson = options.packageJsonContent ?? (await readTextSafe(join(projectPath, 'package.json')));
-    if (pkgJson === null) {
+    if (pkgJson === null && options.promptType === 'schema') {
+      record(pass('dependencies', 'Skipped — schema prompt type has no package.json dependency requirements', '', nowMs() - startedAt));
+    } else if (pkgJson === null) {
       // Session 5.2 absent-target law (Task 2b): a MISSING target must FAIL loudly, never skip
       // to a pass. The observed defect was exactly this — a project with no package.json at all
       // read as "not evaluated" instead of "this project has no dependency manifest, which for a
