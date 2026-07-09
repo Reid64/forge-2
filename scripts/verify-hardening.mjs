@@ -33,7 +33,7 @@ const { computeResumeStartAt } = await import('../dist/engine/auto-resume.js');
 const { queueShortHash } = await import('../dist/tools/queue-versioning.js');
 const { BuildMemory } = await import('../dist/memory/index.js');
 const { runClaude } = await import('../dist/engine/claude-runner.js');
-const { runSentinel, defaultCountProjectFiles } = await import('../dist/phases/phase4-sentinel.js');
+const { runSentinel } = await import('../dist/phases/phase4-sentinel.js');
 const { findOutOfBoundsPaths } = await import('../dist/phases/phase3-executor.js');
 
 let failed = false;
@@ -466,9 +466,12 @@ function makeQueueYaml(count, prefix) {
 }
 
 // ---------------------------------------------------------------------------
-// (11) Session 5.2 Task 2a: the file-delta law — a non-exempt prompt (anything but test/deploy)
-//      that leaves the project's file count unchanged FAILS Sentinel with 'no work product',
-//      exempt prompt types pass regardless, and a real file addition passes with a positive delta.
+// (11) File-delta law — the authoritative signal is `git diff --name-status main...HEAD` (the
+//      SAME diff File Integrity computes), not a before/after file count: a non-exempt prompt
+//      (anything but test/deploy) whose branch diff shows no added/modified files AND has no
+//      expected output already on disk FAILS Sentinel with 'no work product'; exempt prompt types
+//      pass regardless; a real added/modified file on the branch diff PASSES; and an unavailable
+//      diff (no repo / no main branch) SKIPS rather than falsely failing.
 // ---------------------------------------------------------------------------
 
 {
@@ -477,7 +480,6 @@ function makeQueueYaml(count, prefix) {
   writeFileSync(join(projectPath, 'existing.txt'), 'unchanged', 'utf8');
 
   const okCmd = async () => ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
-  const before = await defaultCountProjectFiles(projectPath);
 
   const zeroDeltaResult = await runSentinel({
     projectPath,
@@ -487,10 +489,9 @@ function makeQueueYaml(count, prefix) {
     packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
     baselineDependencies: [],
     promptType: 'feature',
-    fileCountBefore: before,
   });
   const fileDelta = zeroDeltaResult.checks.find((c) => c.name === 'file_delta');
-  assert(fileDelta && !fileDelta.passed && !fileDelta.skipped, "file_delta: a non-exempt ('feature') prompt with zero file delta FAILS");
+  assert(fileDelta && !fileDelta.passed && !fileDelta.skipped, "file_delta: a non-exempt ('feature') prompt with an empty git diff and no on-disk output FAILS");
   assert(fileDelta && /no work product/.test(fileDelta.detail), "file_delta failure reason includes 'no work product'");
   assert(zeroDeltaResult.passed === false, 'runSentinel: overall result FAILS when file_delta fails');
 
@@ -502,37 +503,33 @@ function makeQueueYaml(count, prefix) {
     packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
     baselineDependencies: [],
     promptType: 'test',
-    fileCountBefore: before,
   });
   const fileDeltaExempt = exemptResult.checks.find((c) => c.name === 'file_delta');
   assert(fileDeltaExempt && fileDeltaExempt.passed, "file_delta: a 'test'-type prompt is exempt from the delta requirement");
 
-  writeFileSync(join(projectPath, 'new-file.txt'), 'real work happened', 'utf8');
   const realWorkResult = await runSentinel({
     projectPath,
     runCommand: okCmd,
-    getFileChanges: async () => [],
+    getFileChanges: async () => [{ status: 'A', path: 'src/new-file.ts' }],
     stopOnFirstFailure: false,
     packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
     baselineDependencies: [],
     promptType: 'feature',
-    fileCountBefore: before,
   });
   const fileDeltaReal = realWorkResult.checks.find((c) => c.name === 'file_delta');
-  assert(fileDeltaReal && fileDeltaReal.passed, 'file_delta: a real added file produces a positive delta and PASSES');
+  assert(fileDeltaReal && fileDeltaReal.passed, 'file_delta: an added file on the branch git diff (main...HEAD) PASSES');
 
-  const noBeforeResult = await runSentinel({
+  const noDiffResult = await runSentinel({
     projectPath,
     runCommand: okCmd,
-    getFileChanges: async () => [],
+    getFileChanges: async () => null,
     stopOnFirstFailure: false,
     packageJsonContent: JSON.stringify({ name: 'x', dependencies: {} }),
     baselineDependencies: [],
     promptType: 'feature',
-    // fileCountBefore intentionally omitted
   });
-  const fileDeltaSkipped = noBeforeResult.checks.find((c) => c.name === 'file_delta');
-  assert(fileDeltaSkipped && fileDeltaSkipped.skipped, 'file_delta: SKIPPED (never a false failure) when no before-count is supplied');
+  const fileDeltaSkipped = noDiffResult.checks.find((c) => c.name === 'file_delta');
+  assert(fileDeltaSkipped && fileDeltaSkipped.skipped, 'file_delta: SKIPPED (never a false failure) when the git diff itself is unavailable');
 
   rmSync(projectPath, { recursive: true, force: true });
 }

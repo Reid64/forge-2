@@ -108,7 +108,6 @@ import {
   runSentinel,
   runAutonomousRecovery,
   toPreviousSentinelStatus,
-  defaultCountProjectFiles,
   type SentinelResult,
   type SentinelOptions,
   type AutoRecoveryResult,
@@ -1514,15 +1513,13 @@ interface LoopContext {
 function sentinelOptionsFor(
   ctx: LoopContext,
   schemaPromptsHaveRun: boolean,
-  promptType: PromptType,
-  fileCountBefore: number
+  promptType: PromptType
 ): SentinelOptions {
   return {
     projectPath: ctx.projectPath,
     governanceDirName: ctx.governanceDirName,
     schemaPromptsHaveRun,
     promptType,
-    fileCountBefore,
   };
 }
 
@@ -1655,24 +1652,12 @@ async function executePrompt(
       failureProbability: prediction.probability,
     });
 
-    // Session 5.2 Task 2a (file-delta law): snapshot the project's file count NOW, immediately
-    // before claude runs, so Sentinel can tell a real work product from a void afterward. Guarded
-    // — a count that fails to compute degrades to "not evaluated" inside Sentinel, never a false
-    // failure or a false pass.
-    let fileCountBefore = 0;
-    try {
-      fileCountBefore = await defaultCountProjectFiles(ctx.projectPath);
-    } catch (error) {
-      log(`prompt ${index} '${entry.id}': pre-prompt file count failed (${describe(error)}) — file-delta law degraded to skip for this prompt`);
-    }
-
     // The Sentinel options are built first because a DECOMPOSED prompt runs the Sentinel BETWEEN its
     // atomic sub-steps — the same options drive those inter-step checks and the final gate.
     const sentinelOptions = sentinelOptionsFor(
       ctx,
       schemaPromptsHaveRun || entry.prompt_type === 'schema',
-      entry.prompt_type,
-      fileCountBefore
+      entry.prompt_type
     );
 
     // f. Execute via the claude-runner, then commit the work to the feature branch.

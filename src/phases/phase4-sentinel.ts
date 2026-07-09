@@ -40,7 +40,7 @@
  * failure-predictor all do the same).
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as fs from 'node:fs';
 import { basename, join } from 'node:path';
@@ -247,18 +247,6 @@ export interface SentinelOptions {
    * always supplies this; only ad-hoc callers that don't care about the law omit it).
    */
   promptType?: PromptType;
-  /**
-   * The project's file count (excluding `.forge`/`.git`/`node_modules`) measured BEFORE this
-   * prompt executed (Session 5.2 file-delta law — Task 2a). When supplied, Sentinel compares it
-   * against a fresh count taken now and FAILS a non-exempt prompt whose count didn't change — a
-   * build/feature/schema/ui/api prompt that touched zero files produced no work product. When
-   * omitted, the file-delta check is SKIPPED (a caller not wired into the law must never get a
-   * false failure) — the real executor always supplies this.
-   */
-  fileCountBefore?: number;
-  /** Override the current (after) project file count for the file-delta check (tests). Default:
-   *  a real recursive count of `projectPath` excluding `.forge`/`.git`/`node_modules`. */
-  countProjectFiles?: (projectPath: string) => Promise<number>;
   /** Optional live-DB executor for Schema Drift introspection (else migrations are used). */
   schemaSql?: SqlExecutor;
   /** TypeScript-check timeout (ms). Default 5 minutes. */
@@ -1070,34 +1058,6 @@ export function parseToolchainDependencies(toolchain: string): string[] {
 
 /** Prompt types legitimately exempt from the file-delta requirement (Task 2a). */
 const FILE_DELTA_EXEMPT_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['test', 'deploy']);
-/** Directory names excluded from the recursive project file count. */
-const FILE_DELTA_EXCLUDED_DIRS: ReadonlySet<string> = new Set(['.forge', '.git', 'node_modules']);
-
-/**
- * Recursively count files under `projectPath`, excluding `.forge`, `.git`, and `node_modules`
- * (Session 5.2 Task 2a). Never throws — an unreadable directory contributes 0 from that branch.
- */
-export async function defaultCountProjectFiles(projectPath: string): Promise<number> {
-  let count = 0;
-  async function walk(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (FILE_DELTA_EXCLUDED_DIRS.has(entry.name)) continue;
-        await walk(join(dir, entry.name));
-      } else if (entry.isFile()) {
-        count += 1;
-      }
-    }
-  }
-  await walk(projectPath);
-  return count;
-}
 
 /**
  * Check whether the expected on-disk output for `promptType` already exists with real content.
@@ -1159,81 +1119,80 @@ function dirContainsNonEmptyFile(dir: string): boolean {
   return false;
 }
 
+/** Git statuses that count as "this branch produced a work product" for the file-delta law. */
+const FILE_DELTA_PRODUCTIVE_STATUS = /^[AMRC]/;
+
 /**
- * Evaluate the file-delta law: a non-exempt prompt (anything but `test`/`deploy`) that leaves the
- * project's file count UNCHANGED produced no work product — Sentinel must FAIL, never pass a void
- * (Session 5.2 — the observed dialtest defect: 15/15 prompts "passed" against a directory that
- * never gained a single file). Skips (never fails) when no `before` count was supplied — that's a
- * caller not wired into the law, not evidence of an empty build.
+ * Evaluate the file-delta law: a non-exempt prompt (anything but `test`/`deploy`) must have
+ * produced a real work product — Sentinel must FAIL, never pass a void (Session 5.2 — the
+ * observed dialtest defect: 15/15 prompts "passed" against a directory that never gained a single
+ * file). The authoritative signal is the SAME `git diff --name-status main...HEAD` the File
+ * Integrity check (which runs immediately before this one) already computed — a raw before/after
+ * file COUNT cannot distinguish "no work happened" from "work happened but a file was also
+ * deleted", and always fails a prompt that correctly verifies pre-existing work on `main` without
+ * touching anything (the exact bug this replaces).
  *
- * Exemption 1: a zero delta is not necessarily an empty build — Claude may have correctly verified
- * that expected work product already exists (e.g. from a prior attempt on this branch) and made
- * no further changes. The File Integrity check (which runs immediately before this one) already
- * computed `git diff main...HEAD`; if that diff shows real files staged/committed on this branch,
- * there IS a work product — just not one produced by counting files during this specific prompt.
- * Trust the git diff over the raw count in that case, rather than fail a correct "already done"
- * verification.
+ * Primary signal: any added/modified/renamed/copied (`A`/`M`/`R`/`C`) path on this branch's diff
+ * against `main` is a real work product — PASS.
  *
- * Exemption 2: the git-diff check only sees work committed to a feature branch ahead of `main`.
- * If the work product was instead committed directly to `main` (or is otherwise off that diff),
- * `changedFilePaths` is empty even though the output genuinely exists. In that case, fall back to
- * checking the expected output path on disk directly (see {@link expectedOutputExistsOnDisk}).
+ * Fallback: the git diff only sees work committed to a feature branch ahead of `main`. When the
+ * expected output was instead committed directly to `main` (or the diff is otherwise empty),
+ * fall back to checking the expected on-disk output path directly (see
+ * {@link expectedOutputExistsOnDisk}) — a schema/ui prompt whose expected output already exists
+ * with real content also counts as a work product.
+ *
+ * Skips (never fails) when the diff itself is unavailable (no repo / no `main` branch, same
+ * precondition as File Integrity) — an un-evaluable precondition must never produce a false
+ * failure.
  */
 function evaluateFileDelta(
   promptType: PromptType | undefined,
-  before: number | undefined,
-  after: number,
-  durationMs: number,
-  changedFilePaths: string[] | null,
-  projectPath: string
+  gitDiffChanges: GitFileChange[] | null,
+  projectPath: string,
+  durationMs: number
 ): CheckResult {
-  if (before === undefined) {
-    return skip('file_delta', 'no pre-prompt file count supplied — not evaluated');
-  }
   if (promptType && FILE_DELTA_EXEMPT_PROMPT_TYPES.has(promptType)) {
     return pass(
       'file_delta',
       `prompt type '${promptType}' is exempt from the file-delta requirement`,
-      `before=${before}, after=${after}`,
+      '',
       durationMs
     );
   }
-  const delta = after - before;
-  if (delta !== 0) {
+  if (gitDiffChanges === null) {
+    return skip(
+      'file_delta',
+      'git diff main...HEAD unavailable (no repo / no `main` branch) — file delta not evaluated'
+    );
+  }
+
+  const productive = gitDiffChanges.filter((c) => FILE_DELTA_PRODUCTIVE_STATUS.test((c.status ?? '').toUpperCase()));
+  if (productive.length > 0) {
     return pass(
       'file_delta',
-      `file count changed ${before} -> ${after} (${delta > 0 ? '+' : ''}${delta})`,
-      `before=${before}\nafter=${after}`,
+      `git diff (main...HEAD) shows ${productive.length} file(s) added/modified on this branch`,
+      productive.map((c) => `${c.status} ${c.path}`).join('\n'),
       durationMs
     );
   }
-  if (changedFilePaths !== null && changedFilePaths.length > 0) {
-    return pass(
-      'file_delta',
-      `file count unchanged (${before} -> ${after}), but git diff (main...HEAD) shows ` +
-        `${changedFilePaths.length} file(s) already staged/committed on this branch — real work ` +
-        'product exists from a prior attempt; this prompt correctly left it as-is',
-      `before=${before}\nafter=${after}\nchanged on branch: ${changedFilePaths.join(', ')}`,
-      durationMs
-    );
-  }
+
   if (expectedOutputExistsOnDisk(promptType, projectPath)) {
     return pass(
       'file_delta',
       'Expected output already exists on disk from prior work',
-      `before=${before}\nafter=${after}\n` +
-        `prompt type '${promptType}' expects output under supabase/migrations/*.sql, which exists ` +
-        'on disk regardless of branch state',
+      `git diff (main...HEAD) shows no added/modified files, but prompt type '${promptType}' expected ` +
+        'output already exists on disk with content — real work product from a prior attempt',
       durationMs
     );
   }
+
   return fail(
     'file_delta',
-    'no work product — file count unchanged after this prompt',
-    `before=${before}\nafter=${after}\n` +
-      `Prompt type '${promptType ?? 'unknown'}' is expected to create or modify files; a zero ` +
-      'delta means claude did not (or could not) do the work, regardless of what any other ' +
-      'check reports (Session 5.2 file-delta law).',
+    'no work product — git diff (main...HEAD) shows no added/modified files',
+    `changes on branch: ${gitDiffChanges.length === 0 ? '(none)' : gitDiffChanges.map((c) => `${c.status} ${c.path}`).join(', ')}\n` +
+      `Prompt type '${promptType ?? 'unknown'}' is expected to create or modify files; no productive ` +
+      'diff against main and no expected output on disk means claude did not (or could not) do the ' +
+      'work, regardless of what any other check reports (Session 5.2 file-delta law).',
     durationMs
   );
 }
@@ -2818,6 +2777,9 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   /** Project-relative paths changed on this branch (from the File Integrity diff) — feeds the
    *  Live Preview UI-change trigger. Null until the diff runs; stays null when git is unavailable. */
   let changedFilePaths: string[] | null = null;
+  /** The same `git diff --name-status main...HEAD` result (with per-file status), for the File
+   *  Delta check — the authoritative "did this branch produce a work product" signal. */
+  let gitDiffChanges: GitFileChange[] | null = null;
 
   /** Record a check; once one fails, short-circuit the rest into SKIPs (if configured). */
   const record = (result: CheckResult): void => {
@@ -2905,40 +2867,17 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       changes = null;
     }
     if (changes !== null) changedFilePaths = changes.map((c) => c.path);
+    gitDiffChanges = changes;
     record(evaluateFileIntegrity(changes, protectedFiles, allowedDeletions, nowMs() - startedAt));
   }
 
-  // --- 3b. File Delta (Session 5.2 Task 2a — a build must produce a work product) --------------
+  // --- 3b. File Delta (git diff vs main is the authoritative "produced a work product" signal) ---
   if (shouldSkipRest()) {
     record(skipRest('file_delta'));
   } else {
-    log('check 5/7: File Delta (project file count before vs. after this prompt)');
+    log('check 5/7: File Delta (git diff --name-status main...HEAD vs on-disk expected output)');
     const startedAt = nowMs();
-    if (options.fileCountBefore === undefined) {
-      record(skip('file_delta', 'no pre-prompt file count supplied — not evaluated'));
-    } else {
-      const countFiles = options.countProjectFiles ?? defaultCountProjectFiles;
-      let after: number;
-      try {
-        after = await countFiles(projectPath);
-      } catch (error) {
-        log(`WARNING: post-prompt file count failed (${describe(error)})`);
-        record(skip('file_delta', `could not count project files — not evaluated (${describe(error)})`));
-        after = -1;
-      }
-      if (after >= 0) {
-        record(
-          evaluateFileDelta(
-            options.promptType,
-            options.fileCountBefore,
-            after,
-            nowMs() - startedAt,
-            changedFilePaths,
-            projectPath
-          )
-        );
-      }
-    }
+    record(evaluateFileDelta(options.promptType, gitDiffChanges, projectPath, nowMs() - startedAt));
   }
 
   // --- 4. Schema Drift -----------------------------------------------------

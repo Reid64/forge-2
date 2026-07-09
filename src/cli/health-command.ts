@@ -263,10 +263,8 @@ export async function gatherHealthReport(): Promise<HealthReport> {
     },
     {
       capability: 'file-delta law',
-      wired:
-        isReferencedIn(forgeRoot, 'src/phases/phase4-sentinel.ts', 'evaluateFileDelta') &&
-        isReferencedIn(forgeRoot, 'src/phases/phase3-executor.ts', 'defaultCountProjectFiles'),
-      detail: 'src/phases/phase4-sentinel.ts FAILs a non-exempt prompt with zero file-count delta ("no work product"); src/phases/phase3-executor.ts snapshots the before-count on every prompt (Session 5.2).',
+      wired: isReferencedIn(forgeRoot, 'src/phases/phase4-sentinel.ts', 'evaluateFileDelta'),
+      detail: 'src/phases/phase4-sentinel.ts FAILs a non-exempt prompt whose git diff (main...HEAD) shows no added/modified files and whose expected output is not already on disk ("no work product").',
     },
   ];
 
