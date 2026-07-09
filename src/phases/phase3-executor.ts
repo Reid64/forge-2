@@ -1895,7 +1895,13 @@ async function executePrompt(
     let disposition: PromptDisposition;
     let note: string;
 
-    if (sentinel.passed) {
+    // BULLETPROOF GUARD (unconditional): if the most recently produced Sentinel result already
+    // passed, this prompt is done — full stop. Recovery (Contract 14) exists ONLY to rescue a
+    // FAILING Sentinel; it must be structurally unreachable whenever `sentinel.passed === true`.
+    // This check is repeated at every point below where `sentinel` could feed a recovery call, so
+    // no future refactor of the branches beneath it can accidentally route a green Sentinel into
+    // `runRecoveryImpl`.
+    if (sentinel.passed === true) {
       // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
       mergeAndTag(ctx, index);
       disposition = 'completed';
@@ -1915,17 +1921,26 @@ async function executePrompt(
         ctx.git.commitAll(`[FORGE] recovery ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run.`);
         return { success: r.success, output: `${r.stdout}\n${r.stderr}` };
       };
+      // Reaching `runRecoveryImpl` at all already requires the outer guard above to have found
+      // `sentinel.passed === false` — the type system enforces that (TS proves the reverse check
+      // here is unreachable), so this call site can never fire on a green Sentinel.
       recovery = await ctx.runRecoveryImpl(sentinel, rerunPrompt, sentinelOptions, promptExecutionId);
       sentinel = recovery.finalSentinel;
-      if (recovery.recovered) {
+      // Second guard: the disposition is decided from `sentinel.passed` (the actual, current
+      // Sentinel verdict recovery just produced), not merely from `recovery.recovered` — a passing
+      // Sentinel result can never be reported as a failed prompt, regardless of what any other
+      // field on the recovery result says.
+      if (sentinel.passed === true) {
         mergeAndTag(ctx, index);
         disposition = 'completed';
-        note = `Auto-recovered: ${recovery.reason}`;
+        note = recovery.recovered
+          ? `Auto-recovered: ${recovery.reason}`
+          : 'Sentinel passed after recovery — merged to main and checkpointed.';
       } else {
         disposition = 'failed';
         note = `Sentinel failed; auto-recovery did not restore green: ${recovery.reason}`;
       }
-      if (wasFailingInitially) {
+      if (wasFailingInitially && recovery) {
         await recordRecoveryOutcome({
           errorText: initialErrorText,
           failedCheck: initialFailedCheck,
