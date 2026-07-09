@@ -1121,6 +1121,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     dryRun,
     governanceDocs,
     git,
+    mainBranch,
     rag,
     runClaudeImpl,
     timeoutBudgetMsFor,
@@ -1441,6 +1442,8 @@ interface LoopContext {
   dryRun: boolean;
   governanceDocs: Record<string, string>;
   git: GitManager;
+  /** The configured main branch (Contract 10) — Claude must NEVER run while checked out on this. */
+  mainBranch: string;
   runClaudeImpl: (prompt: string, cwd: string, timeoutMs?: number) => Promise<ClaudeRunResult>;
   /** Per-prompt-type timeout budget (ms) — `test`/`deploy` get the long budget (Session 5 finding #14). */
   timeoutBudgetMsFor: (promptType: PromptType) => number;
@@ -1632,11 +1635,31 @@ async function executePrompt(
         `complexity=${complexity} ~$${promptCostEstimate.costUsd.toFixed(4)}`
     );
 
-    // e. Create the Contract-10 feature branch.
+    // e. Create the Contract-10 feature branch. This is a hard requirement, not best-effort:
+    // Claude must NEVER run against `main` directly, so a failed checkout (or one that silently
+    // leaves HEAD on main) aborts this prompt immediately rather than "continuing on current branch".
     const branch = ctx.git.createBranch(buildIdOf(ctx), index, entry.name);
     const branchName = branch.branchName;
     if (!branch.success) {
-      log(`prompt ${index} '${entry.id}': branch create failed — ${branch.error ?? 'unknown'} (continuing on current branch)`);
+      throw new Error(
+        `feature branch creation failed — aborting prompt: git checkout -b ${branchName} failed ` +
+          `(${branch.error ?? 'unknown error'})`
+      );
+    }
+    // Verify the checkout actually landed on the feature branch — a `success: true` result with
+    // exit 0 does not, by itself, prove HEAD moved off main (e.g. a branch that already existed).
+    const currentBranch = ctx.git.getCurrentBranch();
+    if (!currentBranch.success || currentBranch.branch === null) {
+      throw new Error(
+        `feature branch creation failed — aborting prompt: could not verify current branch after ` +
+          `checkout (${currentBranch.error ?? 'unknown error'})`
+      );
+    }
+    if (currentBranch.branch === ctx.mainBranch) {
+      throw new Error(
+        `feature branch creation failed — aborting prompt: still on '${ctx.mainBranch}' after ` +
+          `checkout -b ${branchName} — refusing to run claude on ${ctx.mainBranch}`
+      );
     }
 
     // g. Log the prompt_execution (status running). Done BEFORE Sentinel so recovery can annotate it.
@@ -1699,6 +1722,22 @@ async function executePrompt(
       }
     } else {
       run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
+      // Verify claude's run didn't leave HEAD on main (e.g. via a stray `git checkout main`) before
+      // committing — commitAll operates on whatever branch is currently checked out, so a drift back
+      // to main here would otherwise land a direct commit on main in violation of Contract 10.
+      const branchBeforeCommit = ctx.git.getCurrentBranch();
+      if (!branchBeforeCommit.success || branchBeforeCommit.branch === null) {
+        throw new Error(
+          `feature branch creation failed — aborting prompt: could not verify current branch before ` +
+            `commit (${branchBeforeCommit.error ?? 'unknown error'})`
+        );
+      }
+      if (branchBeforeCommit.branch === ctx.mainBranch) {
+        throw new Error(
+          `feature branch creation failed — aborting prompt: HEAD drifted back to '${ctx.mainBranch}' ` +
+            `before commit — refusing to commit claude's work directly to ${ctx.mainBranch}`
+        );
+      }
       const commit = ctx.git.commitAll(`[FORGE] ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}).`);
       if (!commit.success) {
         log(`prompt ${index} '${entry.id}': commit failed — ${commit.error ?? 'unknown'}`);
