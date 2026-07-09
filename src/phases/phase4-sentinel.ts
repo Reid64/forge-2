@@ -1101,29 +1101,62 @@ export async function defaultCountProjectFiles(projectPath: string): Promise<num
 
 /**
  * Check whether the expected on-disk output for `promptType` already exists with real content.
- * Currently only 'schema' has a known expected-output shape: at least one non-empty `.sql` file
- * under `supabase/migrations/`. Other prompt types have no well-known output path, so this
- * returns false for them rather than guessing. A zero-byte `.sql` file (e.g. a stub left by a
- * failed prior attempt) does not count as real content.
+ * 'schema' has a known expected-output shape: at least one non-empty `.sql` file under
+ * `supabase/migrations/`. 'ui' has a known expected-output shape: at least one non-empty file
+ * under `src/app/`, `src/components/`, or `src/pages/`. Other prompt types have no well-known
+ * output path, so this returns false for them rather than guessing. A zero-byte file (e.g. a
+ * stub left by a failed prior attempt) does not count as real content.
  */
 function expectedOutputExistsOnDisk(promptType: PromptType | undefined, projectPath: string): boolean {
-  if (promptType !== 'schema') return false;
-  const migrationsDir = join(projectPath, 'supabase', 'migrations');
-  if (!existsSync(migrationsDir)) return false;
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(migrationsDir);
-  } catch {
-    return false;
-  }
-  return entries.some((name) => {
-    if (!name.toLowerCase().endsWith('.sql')) return false;
+  if (promptType === 'schema') {
+    const migrationsDir = join(projectPath, 'supabase', 'migrations');
+    if (!existsSync(migrationsDir)) return false;
+    let entries: string[];
     try {
-      return fs.statSync(join(migrationsDir, name)).size > 0;
+      entries = fs.readdirSync(migrationsDir);
     } catch {
       return false;
     }
-  });
+    return entries.some((name) => {
+      if (!name.toLowerCase().endsWith('.sql')) return false;
+      try {
+        return fs.statSync(join(migrationsDir, name)).size > 0;
+      } catch {
+        return false;
+      }
+    });
+  }
+  if (promptType === 'ui') {
+    const uiDirs = ['src/app', 'src/components', 'src/pages'];
+    return uiDirs.some((relDir) => {
+      const dir = join(projectPath, relDir);
+      if (!existsSync(dir)) return false;
+      return dirContainsNonEmptyFile(dir);
+    });
+  }
+  return false;
+}
+
+function dirContainsNonEmptyFile(dir: string): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (dirContainsNonEmptyFile(entryPath)) return true;
+    } else if (entry.isFile()) {
+      try {
+        if (fs.statSync(entryPath).size > 0) return true;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return false;
 }
 
 /**
