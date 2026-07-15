@@ -1721,7 +1721,26 @@ async function executePrompt(
         log(`prompt ${index} '${entry.id}': decomposed run not green — ${decomposition.note}`);
       }
     } else {
+      // Hard enforcement (not just verification): force HEAD onto the feature branch immediately
+      // before handing control to claude, regardless of what branch is currently checked out.
+      const preRunCheckout = ctx.git.checkout(branchName);
+      if (!preRunCheckout.success) {
+        throw new Error(
+          `feature branch creation failed — aborting prompt: git checkout ${branchName} before claude ` +
+            `run failed (${preRunCheckout.error ?? 'unknown error'})`
+        );
+      }
       run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
+      // Hard enforcement: force HEAD back onto the feature branch immediately after claude returns —
+      // this catches any case where claude drifted HEAD back to main (e.g. a stray `git checkout main`)
+      // before Sentinel runs, rather than merely detecting the drift.
+      const postRunCheckout = ctx.git.checkout(branchName);
+      if (!postRunCheckout.success) {
+        throw new Error(
+          `feature branch creation failed — aborting prompt: git checkout ${branchName} after claude ` +
+            `run failed (${postRunCheckout.error ?? 'unknown error'})`
+        );
+      }
       // Verify claude's run didn't leave HEAD on main (e.g. via a stray `git checkout main`) before
       // committing — commitAll operates on whatever branch is currently checked out, so a drift back
       // to main here would otherwise land a direct commit on main in violation of Contract 10.
