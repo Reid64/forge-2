@@ -364,6 +364,7 @@ export class GitManager {
     if (!co.success) return { ...co, mergedBranch, targetBranch: this.mainBranch };
 
     const merge = this.run(['merge', '--no-ff', '--no-edit', mergedBranch]);
+    this.checkout(mergedBranch);
     return { ...merge, mergedBranch, targetBranch: this.mainBranch };
   }
 
