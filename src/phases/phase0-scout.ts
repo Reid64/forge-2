@@ -236,9 +236,9 @@ async function pathExists(path: string): Promise<boolean> {
 /**
  * True if `projectPath` is a FORGE installation itself (not just a project FORGE
  * is building). Detected by the presence of phase3-executor.ts or a package.json
- * whose name contains "forge". Used to exempt FORGE's own .claude/skills from the
- * AgentShield scan, which would otherwise flag FORGE's operator-facing skill docs
- * as untrusted third-party content.
+ * whose name contains "forge". Used to exempt FORGE's own .claude/skills and
+ * .claude/worktrees from the AgentShield scan, which would otherwise flag FORGE's
+ * operator-facing skill docs and orphaned worktrees as untrusted third-party content.
  */
 async function isForgeInstallation(projectPath: string): Promise<boolean> {
   if (await pathExists(join(projectPath, 'src', 'phases', 'phase3-executor.ts'))) return true;
@@ -759,7 +759,7 @@ export async function runPhase0Scout(
     log('step 9: AgentShield security scan');
     try {
       const excludePaths = (await isForgeInstallation(projectPath))
-        ? [join(projectPath, '.claude', 'skills')]
+        ? [join(projectPath, '.claude', 'skills'), join(projectPath, '.claude', 'worktrees')]
         : [];
       securityReport = await scanProjectSecurity(projectPath, { excludePaths });
       const { grade, findings } = securityReport;

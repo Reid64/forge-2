@@ -397,7 +397,7 @@ function buildRecommendations(findings: readonly SecurityFinding[]): string[] {
 // ---------------------------------------------------------------------------
 
 export interface ScanProjectSecurityOptions {
-  /** Absolute directory paths to skip entirely (e.g. FORGE's own .claude/skills when self-scanning). */
+  /** Absolute directory paths to skip entirely (e.g. FORGE's own .claude/skills and .claude/worktrees when self-scanning). */
   excludePaths?: readonly string[];
 }
 
@@ -413,6 +413,11 @@ export async function scanProjectSecurity(
     log(`excluded from scan: ${[...excludeDirs].join(', ')}`);
   }
 
+  // tests/ fixtures routinely contain synthetic credentials for test purposes; excluding them
+  // from the secrets scan only (not insecure_defaults) avoids false positives without hiding
+  // real insecure-default findings that may live in test config.
+  const secretsExcludeDirs = new Set([...excludeDirs, join(projectPath, 'tests')]);
+
   const knownArtifacts = ['.claude', 'CLAUDE.md', 'settings.json', 'hooks', 'hooks.json', '.mcp.json'];
   const scannedPaths: string[] = [];
   for (const name of knownArtifacts) {
@@ -421,7 +426,7 @@ export async function scanProjectSecurity(
   log(`config artifacts found: ${scannedPaths.join(', ') || 'none'}`);
 
   const [secretFindings, permFindings, hookFindings, mcpFindings, defaultFindings] = await Promise.all([
-    scanSecrets(projectPath, excludeDirs),
+    scanSecrets(projectPath, secretsExcludeDirs),
     scanPermissions(projectPath),
     scanHooks(projectPath),
     scanMcpServers(projectPath),
