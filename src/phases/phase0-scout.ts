@@ -33,7 +33,7 @@
  * on). Authoring this file performs no installs.
  */
 
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -228,6 +228,24 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True if `projectPath` is a FORGE installation itself (not just a project FORGE
+ * is building). Detected by the presence of phase3-executor.ts or a package.json
+ * whose name contains "forge". Used to exempt FORGE's own .claude/skills from the
+ * AgentShield scan, which would otherwise flag FORGE's operator-facing skill docs
+ * as untrusted third-party content.
+ */
+async function isForgeInstallation(projectPath: string): Promise<boolean> {
+  if (await pathExists(join(projectPath, 'src', 'phases', 'phase3-executor.ts'))) return true;
+  try {
+    const raw = await readFile(join(projectPath, 'package.json'), 'utf8');
+    const pkg = JSON.parse(raw) as { name?: unknown };
+    return typeof pkg.name === 'string' && pkg.name.toLowerCase().includes('forge');
   } catch {
     return false;
   }
@@ -740,7 +758,10 @@ export async function runPhase0Scout(
   } else {
     log('step 9: AgentShield security scan');
     try {
-      securityReport = await scanProjectSecurity(projectPath);
+      const excludePaths = (await isForgeInstallation(projectPath))
+        ? [join(projectPath, '.claude', 'skills')]
+        : [];
+      securityReport = await scanProjectSecurity(projectPath, { excludePaths });
       const { grade, findings } = securityReport;
       log(`AgentShield: grade=${grade} | ${findings.length} finding(s) | ${securityReport.scannedPaths.length} artifact(s) scanned`);
       for (const f of findings) {

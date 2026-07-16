@@ -33,7 +33,11 @@ const WALK_SKIP_DIRS = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', 'out', 'coverage', '.forge', '.turbo', '.vercel',
 ]);
 
-async function walkDir(dir: string, exts: ReadonlySet<string>): Promise<string[]> {
+async function walkDir(
+  dir: string,
+  exts: ReadonlySet<string>,
+  excludeDirs: ReadonlySet<string> = new Set()
+): Promise<string[]> {
   const results: string[] = [];
   let entries;
   try {
@@ -44,8 +48,8 @@ async function walkDir(dir: string, exts: ReadonlySet<string>): Promise<string[]
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (WALK_SKIP_DIRS.has(entry.name)) continue;
-      results.push(...(await walkDir(full, exts)));
+      if (WALK_SKIP_DIRS.has(entry.name) || excludeDirs.has(full)) continue;
+      results.push(...(await walkDir(full, exts, excludeDirs)));
     } else if (entry.isFile()) {
       if (exts.has(extname(entry.name).toLowerCase())) results.push(full);
     }
@@ -100,9 +104,9 @@ const SECRET_SIGS: readonly SecretSig[] = [
 
 const ENV_VAR_REF = /process\.env|import\.meta\.env|\$\{[^}]+\}/;
 
-async function scanSecrets(projectPath: string): Promise<SecurityFinding[]> {
+async function scanSecrets(projectPath: string, excludeDirs: ReadonlySet<string>): Promise<SecurityFinding[]> {
   const findings: SecurityFinding[] = [];
-  const tsFiles = await walkDir(projectPath, TS_EXTS);
+  const tsFiles = await walkDir(projectPath, TS_EXTS, excludeDirs);
   const envFiles: string[] = [];
   for (const name of ENV_NAMES) {
     const p = join(projectPath, name);
@@ -303,9 +307,12 @@ const HTTP_HANDLER_RE = /export\s+(?:async\s+)?function\s+(?:GET|POST|PUT|PATCH|
 const AUTH_REFERENCE_RE = /\b(?:auth\s*\(|getUser\b|getSession\b|requireAuth\b|authenticate\b|verifyToken\b|supabase\.auth|createServerClient\b|company_id\b)/i;
 const CORS_WILDCARD_RE = /['"]Access-Control-Allow-Origin['"]\s*[:,]\s*['"]\*['"]/i;
 
-async function scanInsecureDefaults(projectPath: string): Promise<SecurityFinding[]> {
+async function scanInsecureDefaults(
+  projectPath: string,
+  excludeDirs: ReadonlySet<string>
+): Promise<SecurityFinding[]> {
   const findings: SecurityFinding[] = [];
-  const tsFiles = await walkDir(projectPath, TS_EXTS);
+  const tsFiles = await walkDir(projectPath, TS_EXTS, excludeDirs);
   const routeFiles = tsFiles.filter((f) => ROUTE_FILE_RE.test(f));
 
   for (const absPath of routeFiles) {
@@ -389,9 +396,22 @@ function buildRecommendations(findings: readonly SecurityFinding[]): string[] {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-export async function scanProjectSecurity(projectPath: string): Promise<SecurityReport> {
+export interface ScanProjectSecurityOptions {
+  /** Absolute directory paths to skip entirely (e.g. FORGE's own .claude/skills when self-scanning). */
+  excludePaths?: readonly string[];
+}
+
+export async function scanProjectSecurity(
+  projectPath: string,
+  options: ScanProjectSecurityOptions = {}
+): Promise<SecurityReport> {
   const log = logLine('agent-shield');
   log(`starting AgentShield security scan for ${projectPath}`);
+
+  const excludeDirs = new Set(options.excludePaths ?? []);
+  if (excludeDirs.size > 0) {
+    log(`excluded from scan: ${[...excludeDirs].join(', ')}`);
+  }
 
   const knownArtifacts = ['.claude', 'CLAUDE.md', 'settings.json', 'hooks', 'hooks.json', '.mcp.json'];
   const scannedPaths: string[] = [];
@@ -401,11 +421,11 @@ export async function scanProjectSecurity(projectPath: string): Promise<Security
   log(`config artifacts found: ${scannedPaths.join(', ') || 'none'}`);
 
   const [secretFindings, permFindings, hookFindings, mcpFindings, defaultFindings] = await Promise.all([
-    scanSecrets(projectPath),
+    scanSecrets(projectPath, excludeDirs),
     scanPermissions(projectPath),
     scanHooks(projectPath),
     scanMcpServers(projectPath),
-    scanInsecureDefaults(projectPath),
+    scanInsecureDefaults(projectPath, excludeDirs),
   ]);
 
   const findings: SecurityFinding[] = [
