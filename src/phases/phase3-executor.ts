@@ -1757,7 +1757,11 @@ async function executePrompt(
             `before commit — refusing to commit claude's work directly to ${ctx.mainBranch}`
         );
       }
-      const commit = ctx.git.commitAll(`[FORGE] ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}).`);
+      // FORGE owns git add + commit after claude exits — claude never needs to commit anything
+      // itself. `commitAll` runs `git add -A` then `git commit`; a clean tree (nothing staged) is
+      // reported as `nothingToCommit: true` with `success: true`, so that case is skipped silently
+      // rather than logged as a failure.
+      const commit = ctx.git.commitAll(entry.name);
       if (!commit.success) {
         log(`prompt ${index} '${entry.id}': commit failed — ${commit.error ?? 'unknown'}`);
       }
