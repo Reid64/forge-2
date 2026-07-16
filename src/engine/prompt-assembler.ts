@@ -67,6 +67,19 @@ import { handlePreToolUse } from '../learning/hooks-enhanced.js';
 export const STATE_AUDIT_FOOTER =
   'Update STATE_OF_THE_BUILD.md and SESSION_STATE.md from actual codebase audit before session ends.';
 
+/**
+ * Mandatory rule prepended to EVERY assembled prompt, ahead of all other content — FORGE alone
+ * owns branch switching (see the executor's checkout-before/after-run guard) and a Claude run
+ * that checks out a different branch mid-task silently desyncs the executor's tracked branch
+ * from the branch actually on disk. Verbatim — the executor and any audit tooling match on this
+ * exact string.
+ */
+export const GIT_BRANCH_RULE =
+  'CRITICAL GIT RULE: Never run git checkout, git switch, or any command that changes the ' +
+  'current git branch. Never run git checkout main or git checkout master. FORGE manages ' +
+  'branch switching — you must stay on whatever branch you are currently on. Only run git add ' +
+  'and git commit to stage and commit your work.';
+
 /** Max characters of any single governance document injected (keeps prompts bounded). */
 const MAX_GOVERNANCE_CHARS_PER_DOC = 6000;
 /** Max characters of the head-overview fallback when no specific section matched. */
@@ -549,7 +562,7 @@ export async function assemblePrompt(
     // non-fatal — skip injection
   }
 
-  const prompt = learningContextPrefix + sections.join('\n\n');
+  const prompt = `${GIT_BRANCH_RULE}\n\n${learningContextPrefix}${sections.join('\n\n')}`;
   const hash = hashPrompt(prompt);
 
   // 6. Automatic model selection (Model Router) — keyed on prompt type + recovery flag.
