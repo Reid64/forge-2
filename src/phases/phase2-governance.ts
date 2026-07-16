@@ -62,6 +62,7 @@ import type { CodebaseSnapshot } from '../tools/codebase-reader.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 import { toAsciiGovernanceText } from '../tools/governance-text.js';
+import { detectVsCodePath } from '../tools/live-status.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -985,6 +986,12 @@ const EMBEDDED_TEMPLATES: Record<GovernanceDocName, string> = {
     '## Active Build',
     '{{ACTIVE_BUILD}}',
     '',
+    '## IDE STATUS',
+    '',
+    '- **VS Code path:** {{IDE_VSCODE_PATH}}',
+    '- **CHANGESET.md reviewed:** {{IDE_CHANGESET_REVIEWED}}',
+    '- **Last changeset date:** {{IDE_LAST_CHANGESET_DATE}}',
+    '',
     '## Notes',
     '{{SESSION_NOTES}}',
     '',
@@ -1109,6 +1116,9 @@ export async function runPhase2Governance(
     COMPLETED_PROMPTS: '0',
     FAILED_PROMPTS: '0',
     ACTIVE_BUILD: 'none â€” no build is executing yet',
+    IDE_VSCODE_PATH: detectVsCodePath() ?? 'not detected',
+    IDE_CHANGESET_REVIEWED: 'NO',
+    IDE_LAST_CHANGESET_DATE: 'none yet',
     SESSION_NOTES: 'Initialized empty by Phase 2 (Governance Generator). Phase 3 updates this after every prompt.',
   };
 

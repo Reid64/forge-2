@@ -71,6 +71,7 @@
 
 import { readFile, mkdir, appendFile } from 'node:fs/promises';
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -120,7 +121,7 @@ import {
   recordRecoveryOutcome,
   recordSmokeTestFailureObserved,
 } from '../engine/learning-writeback.js';
-import { LiveStatusWriter } from '../tools/live-status.js';
+import { LiveStatusWriter, readIdeStatus, syncIdeStatus } from '../tools/live-status.js';
 import {
   acquireRunLock,
   checkStaleLock,
@@ -700,30 +701,67 @@ export function coerceQueueEntry(
 }
 
 /**
- * Parse queue.yaml text into {@link QueueEntry}[]. A malformed entry is skipped with a
- * warning rather than throwing. Returns the entries + warnings.
+ * The VS Code integration layer's build-level pre-run gate (checked ONCE before any prompt
+ * executes — never per-prompt). Declared as a top-level `pre_run_checks:` block in queue.yaml
+ * ALONGSIDE the prompt list (queue.yaml then becomes `{ prompts: [...], pre_run_checks: {...} }`
+ * rather than a bare list — the classic bare-list shape keeps working with no `pre_run_checks`).
  */
-export function parseQueueYaml(yamlText: string): { entries: QueueEntry[]; warnings: string[] } {
+export interface PreRunChecks {
+  /** Require a running VS Code (`Code.exe`) process before the build starts. */
+  vs_code_open?: boolean;
+  /** Require SESSION_STATE.md's IDE STATUS block to show `CHANGESET.md reviewed: YES`. */
+  changeset_reviewed?: boolean;
+}
+
+/** Coerce a raw `pre_run_checks` mapping into {@link PreRunChecks} (`null` when empty/absent). */
+function asPreRunChecks(v: unknown): PreRunChecks | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const checks: PreRunChecks = {};
+  if (typeof o.vs_code_open === 'boolean') checks.vs_code_open = o.vs_code_open;
+  if (typeof o.changeset_reviewed === 'boolean') checks.changeset_reviewed = o.changeset_reviewed;
+  return Object.keys(checks).length > 0 ? checks : null;
+}
+
+/**
+ * Parse queue.yaml text into {@link QueueEntry}[]. Accepts either shape: the classic bare list of
+ * prompts, or `{ prompts: [...], pre_run_checks: {...} }` (the VS Code integration layer's opt-in
+ * pre-run gate). A malformed entry is skipped with a warning rather than throwing. Returns the
+ * entries + warnings + the parsed `pre_run_checks` block (`null` when absent — the bare-list shape
+ * never has one).
+ */
+export function parseQueueYaml(
+  yamlText: string
+): { entries: QueueEntry[]; warnings: string[]; preRunChecks: PreRunChecks | null } {
   const warnings: string[] = [];
   let doc: unknown;
   try {
     doc = parseYaml(yamlText);
   } catch (error) {
     warnings.push(`queue.yaml is not valid YAML (${describe(error)}) — no prompts parsed.`);
-    return { entries: [], warnings };
+    return { entries: [], warnings, preRunChecks: null };
   }
-  if (!Array.isArray(doc)) {
+
+  let rawEntries: unknown[];
+  let preRunChecks: PreRunChecks | null = null;
+  if (Array.isArray(doc)) {
+    rawEntries = doc;
+  } else if (doc && typeof doc === 'object' && Array.isArray((doc as Record<string, unknown>).prompts)) {
+    const o = doc as Record<string, unknown>;
+    rawEntries = o.prompts as unknown[];
+    preRunChecks = asPreRunChecks(o.pre_run_checks);
+  } else {
     warnings.push('queue.yaml did not parse to a list of prompts — no prompts parsed.');
-    return { entries: [], warnings };
+    return { entries: [], warnings, preRunChecks: null };
   }
 
   const entries: QueueEntry[] = [];
-  doc.forEach((raw, i) => {
+  rawEntries.forEach((raw, i) => {
     const entry = coerceQueueEntry(raw, `queue.yaml entry #${i + 1}`, (m) => warnings.push(m));
     if (entry) entries.push(entry);
   });
 
-  return { entries, warnings };
+  return { entries, warnings, preRunChecks };
 }
 
 /**
@@ -932,6 +970,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // read from disk — a caller supplying `options.entries` directly (tests, in-memory queues) has
   // no on-disk file for a resume to compare against, so it stays null.
   let queueHashForBuild: string | null = null;
+  // VS Code integration layer (queue.yaml pre-run gate): the optional `pre_run_checks` block,
+  // present only when queue.yaml uses the `{ prompts, pre_run_checks }` shape.
+  let preRunChecks: PreRunChecks | null = null;
   if (options.entries === undefined) {
     const queuePath = options.queuePath ?? join(projectPath, 'queue.yaml');
     let yamlText: string | null = null;
@@ -946,6 +987,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       entries = parsed.entries;
       warnings.push(...parsed.warnings);
       queueHashForBuild = queueShortHash(yamlText);
+      preRunChecks = parsed.preRunChecks;
     }
   }
 
@@ -966,6 +1008,19 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       log(`ERROR: ${msg}`);
       return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
     }
+  }
+
+  // VS Code integration layer: queue.yaml's optional `pre_run_checks` gate — a build-level check
+  // run ONCE before any prompt executes (never per-prompt). Skipped for dry runs (nothing executes)
+  // and when the queue declares no `pre_run_checks` block.
+  if (!dryRun && preRunChecks) {
+    const gate = checkPreRunGates(preRunChecks, { governanceDir, log });
+    if (!gate.passed) {
+      const msg = gate.reason ?? 'queue.yaml pre_run_checks failed.';
+      log(`ERROR: ${msg}`);
+      return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
+    }
+    log(`pre-run gate: queue.yaml pre_run_checks (${Object.keys(preRunChecks).join(', ')}) — all checks passed.`);
   }
 
   log(
@@ -1114,6 +1169,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     projectPath,
     projectName,
     governanceDirName,
+    totalPrompts: schedule.order.length,
     buildRunId,
     machineId,
     stackFingerprint: options.stackFingerprint ?? null,
@@ -1435,6 +1491,8 @@ interface LoopContext {
   projectPath: string;
   projectName: string;
   governanceDirName: string;
+  /** Total scheduled prompts (`schedule.order.length`) — the "N" in CHANGESET.md's "prompt i/N". */
+  totalPrompts: number;
   buildRunId: string | null;
   machineId: string;
   stackFingerprint: StackFingerprint | null;
@@ -1714,6 +1772,8 @@ async function executePrompt(
         }
       );
       run = decomposition.aggregateRun;
+      // VS Code integration layer: record this prompt's changeset before the gating Sentinel below.
+      await appendChangeset(ctx, entry, index, filesChanged(ctx));
       // Reuse the decomposer's between-sub-steps Sentinel as THIS prompt's gate (avoids a redundant
       // whole-prompt re-run); fall back only if it executed nothing (never, for a >threshold prompt).
       sentinel = decomposition.finalSentinel ?? (await ctx.runSentinelImpl(sentinelOptions));
@@ -1768,6 +1828,9 @@ async function executePrompt(
       if (!run.success) {
         log(`prompt ${index} '${entry.id}': claude exited ${run.exitCode ?? 'null'}${run.timedOut ? ' (TIMEOUT)' : ''}`);
       }
+
+      // VS Code integration layer: record this prompt's changeset before Sentinel runs.
+      await appendChangeset(ctx, entry, index, filesChanged(ctx));
 
       // h. Run the Phase 4 Sentinel (the five Contract-13 checks).
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
@@ -2321,6 +2384,51 @@ function skippedOutcome(entry: QueueEntry, index: number, note: string): PromptO
 }
 
 // ---------------------------------------------------------------------------
+// VS Code integration layer: queue.yaml pre-run gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a VS Code (`Code.exe`) process is currently running. Windows-only check (`tasklist`) —
+ * on any other platform, or when the check itself errors, this degrades to `true` (never block a
+ * build over an unsupported/unavailable check; that is a different failure than "VS Code isn't
+ * open"). Only a tasklist run that actually completes and finds no `Code.exe` returns `false`.
+ */
+function isVsCodeRunning(log: (message: string) => void): boolean {
+  if (process.platform !== 'win32') return true;
+  try {
+    const output = execSync('tasklist /FI "IMAGENAME eq Code.exe"', { encoding: 'utf8', windowsHide: true });
+    return /Code\.exe/i.test(output);
+  } catch (error) {
+    log(`pre-run gate: tasklist check failed (${describe(error)}) — treating vs_code_open as satisfied`);
+    return true;
+  }
+}
+
+/** Evaluate queue.yaml's optional `pre_run_checks` block once, before any prompt executes. */
+function checkPreRunGates(
+  checks: PreRunChecks,
+  input: { governanceDir: string; log: (message: string) => void }
+): { passed: boolean; reason: string | null } {
+  if (checks.vs_code_open === true && !isVsCodeRunning(input.log)) {
+    return {
+      passed: false,
+      reason:
+        "queue.yaml pre_run_checks.vs_code_open is true, but no running VS Code ('Code.exe') process " +
+        'was found. Open VS Code on this project, then re-run the build.',
+    };
+  }
+  if (checks.changeset_reviewed === true && !readIdeStatus(input.governanceDir).changesetReviewed) {
+    return {
+      passed: false,
+      reason:
+        "queue.yaml pre_run_checks.changeset_reviewed is true, but SESSION_STATE.md's IDE STATUS block " +
+        "shows 'CHANGESET.md reviewed: NO'. Review CHANGESET.md, set that field to YES, then re-run the build.",
+    };
+  }
+  return { passed: true, reason: null };
+}
+
+// ---------------------------------------------------------------------------
 // git helpers
 // ---------------------------------------------------------------------------
 
@@ -2355,6 +2463,40 @@ function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]
     }
   }
   return { created, modified, deleted };
+}
+
+/**
+ * VS Code integration layer: append one prompt's structured entry to `<projectPath>/CHANGESET.md`
+ * — created if absent, NEVER overwritten — right after that prompt's Claude Code run + commit and
+ * before Sentinel evaluates it, so a reviewer always has a durable, human-readable record of
+ * exactly what the run touched. Also refreshes SESSION_STATE.md's IDE STATUS "last changeset date"
+ * field (via {@link syncIdeStatus}). Guarded — a write failure is logged and swallowed.
+ */
+async function appendChangeset(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  files: { created: string[]; modified: string[]; deleted: string[] }
+): Promise<void> {
+  const timestamp = nowIso();
+  const section = (label: string, list: string[]): string =>
+    [`### ${label}`, '', ...(list.length > 0 ? list.map((f) => `- ${f}`) : ['- (none)']), ''].join('\n');
+  const entryText = [
+    `## ${timestamp} — ${entry.name} (prompt ${index}/${ctx.totalPrompts})`,
+    '',
+    section('Files Created', files.created),
+    section('Files Modified', files.modified),
+    section('Files Deleted', files.deleted),
+    '---',
+    '',
+  ].join('\n');
+  try {
+    await appendFile(join(ctx.projectPath, 'CHANGESET.md'), entryText, 'utf8');
+  } catch (error) {
+    ctx.log(`prompt ${index} '${entry.id}': CHANGESET.md write failed (${describe(error)})`);
+    return;
+  }
+  await syncIdeStatus(join(ctx.projectPath, ctx.governanceDirName), { lastChangesetDate: timestamp, log: ctx.log });
 }
 
 /**

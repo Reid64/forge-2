@@ -14,8 +14,8 @@
  * a build's status is a convenience, never a build-blocking concern.
  */
 
-import { mkdir, rename, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdir, rename, writeFile, readFile } from 'node:fs/promises';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -179,5 +179,130 @@ export class LiveStatusWriter {
     } catch {
       // non-fatal — observability must never block or fail a build
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IDE STATUS (VS Code integration layer) — SESSION_STATE.md's "## IDE STATUS" block.
+// ---------------------------------------------------------------------------
+
+/** Parsed shape of SESSION_STATE.md's "## IDE STATUS" section. */
+export interface IdeStatus {
+  vsCodePath: string | null;
+  /** Manually set by a human (or their editor) to YES after reviewing CHANGESET.md; never auto-set. */
+  changesetReviewed: boolean;
+  lastChangesetDate: string | null;
+}
+
+const IDE_STATUS_HEADING = '## IDE STATUS';
+const IDE_STATUS_DEFAULTS: IdeStatus = { vsCodePath: null, changesetReviewed: false, lastChangesetDate: null };
+
+/** Common Windows install locations for VS Code, checked in order; first hit wins. */
+function candidateVsCodePaths(): string[] {
+  const candidates: string[] = [];
+  const localAppData = process.env.LOCALAPPDATA;
+  const programFiles = process.env.ProgramFiles;
+  const programFilesX86 = process.env['ProgramFiles(x86)'];
+  if (localAppData) candidates.push(join(localAppData, 'Programs', 'Microsoft VS Code', 'Code.exe'));
+  if (programFiles) candidates.push(join(programFiles, 'Microsoft VS Code', 'Code.exe'));
+  if (programFilesX86) candidates.push(join(programFilesX86, 'Microsoft VS Code', 'Code.exe'));
+  return candidates;
+}
+
+/** Auto-detect an installed VS Code executable from common Windows install paths. Never throws. */
+export function detectVsCodePath(): string | null {
+  try {
+    for (const candidate of candidateVsCodePaths()) {
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    /* best-effort — a detection failure just reads as "not detected" */
+  }
+  return null;
+}
+
+/** Render the "## IDE STATUS" section body (no trailing newline). */
+function renderIdeStatusBlock(status: IdeStatus): string {
+  return [
+    IDE_STATUS_HEADING,
+    '',
+    `- **VS Code path:** ${status.vsCodePath ?? 'not detected'}`,
+    `- **CHANGESET.md reviewed:** ${status.changesetReviewed ? 'YES' : 'NO'}`,
+    `- **Last changeset date:** ${status.lastChangesetDate ?? 'none yet'}`,
+  ].join('\n');
+}
+
+/** Parse the "## IDE STATUS" section out of SESSION_STATE.md text, or defaults if absent. */
+export function parseIdeStatus(sessionStateText: string): IdeStatus {
+  const headingIndex = sessionStateText.indexOf(IDE_STATUS_HEADING);
+  if (headingIndex === -1) return { ...IDE_STATUS_DEFAULTS };
+  const rest = sessionStateText.slice(headingIndex);
+  const nextHeadingIndex = rest.indexOf('\n## ', 1);
+  const section = nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex);
+  const vsCodeMatch = section.match(/\*\*VS Code path:\*\*\s*(.+)/);
+  const reviewedMatch = section.match(/\*\*CHANGESET\.md reviewed:\*\*\s*(\S+)/);
+  const dateMatch = section.match(/\*\*Last changeset date:\*\*\s*(.+)/);
+  const vsCodePathRaw = vsCodeMatch?.[1]?.trim() ?? null;
+  const lastChangesetDateRaw = dateMatch?.[1]?.trim() ?? null;
+  return {
+    vsCodePath: vsCodePathRaw && vsCodePathRaw !== 'not detected' ? vsCodePathRaw : null,
+    changesetReviewed: reviewedMatch?.[1]?.trim().toUpperCase() === 'YES',
+    lastChangesetDate: lastChangesetDateRaw && lastChangesetDateRaw !== 'none yet' ? lastChangesetDateRaw : null,
+  };
+}
+
+/** Read + parse the "## IDE STATUS" block from `<governanceDir>/SESSION_STATE.md`. Never throws. */
+export function readIdeStatus(governanceDir: string): IdeStatus {
+  try {
+    return parseIdeStatus(readFileSync(join(governanceDir, 'SESSION_STATE.md'), 'utf8'));
+  } catch {
+    return { ...IDE_STATUS_DEFAULTS };
+  }
+}
+
+/**
+ * Refresh the "## IDE STATUS" block in `<governanceDir>/SESSION_STATE.md`: re-detects the VS Code
+ * path and (when supplied) sets `lastChangesetDate`, but PRESERVES whatever `changesetReviewed`
+ * value is already on disk — that field defaults to NO only when the block doesn't exist yet;
+ * flipping it to YES is a manual human action this function must never perform on its own.
+ * Inserts the section if missing, else replaces it in place. Guarded — a read/write failure is
+ * logged and swallowed, never thrown (observability must never block or fail a build).
+ */
+export async function syncIdeStatus(
+  governanceDir: string,
+  opts: { lastChangesetDate?: string; log?: (message: string) => void } = {}
+): Promise<void> {
+  const path = join(governanceDir, 'SESSION_STATE.md');
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    opts.log?.(
+      `IDE STATUS: SESSION_STATE.md not readable at ${path} (${error instanceof Error ? error.message : String(error)}) — skipped`
+    );
+    return;
+  }
+  const current = parseIdeStatus(text);
+  const next: IdeStatus = {
+    vsCodePath: detectVsCodePath(),
+    changesetReviewed: current.changesetReviewed,
+    lastChangesetDate: opts.lastChangesetDate ?? current.lastChangesetDate,
+  };
+  const block = renderIdeStatusBlock(next);
+  const headingIndex = text.indexOf(IDE_STATUS_HEADING);
+  let updated: string;
+  if (headingIndex === -1) {
+    updated = `${text.replace(/\s*$/, '')}\n\n${block}\n`;
+  } else {
+    const before = text.slice(0, headingIndex);
+    const rest = text.slice(headingIndex);
+    const nextHeadingIndex = rest.indexOf('\n## ', 1);
+    const after = nextHeadingIndex === -1 ? '\n' : rest.slice(nextHeadingIndex);
+    updated = `${before}${block}\n${after}`;
+  }
+  try {
+    await writeFile(path, updated, 'utf8');
+  } catch (error) {
+    opts.log?.(`IDE STATUS: SESSION_STATE.md write failed (${error instanceof Error ? error.message : String(error)})`);
   }
 }

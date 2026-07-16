@@ -13,5 +13,11 @@
 ## Active Build
 {{ACTIVE_BUILD}}
 
+## IDE STATUS
+
+- **VS Code path:** {{IDE_VSCODE_PATH}}
+- **CHANGESET.md reviewed:** {{IDE_CHANGESET_REVIEWED}}
+- **Last changeset date:** {{IDE_LAST_CHANGESET_DATE}}
+
 ## Notes
 {{SESSION_NOTES}}
