@@ -148,6 +148,8 @@ import {
 import { runSmokeTests, shouldRunTests } from '../tools/incremental-tester.js';
 import { scanDeadCode } from '../tools/dead-code-scanner.js';
 import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js';
+import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
+import { onSentinelFailure } from '../integration/bus.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -917,6 +919,11 @@ function installQuietConsole(buildLogPath: string | null): () => void {
  * the default. Always resolves — every collaborator is guarded and the loop never throws.
  */
 export async function runPhase3Executor(options: Phase3Options): Promise<Phase3Result> {
+  // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines for the lifetime of this
+  // call — every pino line any collaborator emits (this module included) is diverted to
+  // `.forge/build.log` from the very first instruction, before any other code runs, so nothing
+  // can slip a line onto stdout ahead of this gate going up. Restored in the `finally` below.
+  const releaseQuietLogging = beginQuietLogging('.forge/build.log');
   const baseLog = options.log ?? logLine('phase3');
   const projectPath = options.projectPath;
   const governanceDirName = options.governanceDirName ?? 'governance';
@@ -960,9 +967,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines during a build (matching
   // FORGE 1.0's forge.ps1 output). Everything else this run's collaborators emit — pino JSON from
-  // `log`/hook-manager/the predictor, and raw console.log from the learning engine — is diverted to
-  // `buildLogPath` instead. Both restores MUST run before every return out of this function.
-  const releaseQuietLogging = buildLogPath ? beginQuietLogging(buildLogPath) : (() => {});
+  // `log`/hook-manager/the predictor (diverted above, at function entry) and raw console.log from
+  // the learning engine (diverted here) — is kept off stdout. Both restores MUST run before every
+  // return out of this function.
   const restoreConsole = buildLogPath ? installQuietConsole(buildLogPath) : (() => {});
   const releaseStdoutQuietMode = (): void => {
     restoreConsole();
@@ -1382,6 +1389,18 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       templateHash: outcome.promptHash,
     });
 
+    // BuildBrainEvolver (LEARNING_BLUEPRINT.md § Agent: BuildBrainEvolver) — post-Sentinel
+    // rewrite-effectiveness observation, per Phase 3 prompt (Contract 1: Phase 4 runs after
+    // EVERY Phase 3 prompt). Guarded — Build Memory unreachable degrades to a no-op; a
+    // skipped/dry-run outcome never reaches here (both `continue` earlier in the loop), so
+    // `outcome.sentinel` is always populated for a real execution.
+    try {
+      const memoryClient = BuildMemory.getClient();
+      if (memoryClient && outcome.sentinel) {
+        observeRewriteOutcome(entry.id, outcome.wasRewritten, outcome.sentinel.passed, memoryClient);
+      }
+    } catch { /* non-fatal — Contract 4 */ }
+
     // Learning Engine: PostToolUse hook
     try {
       const { handlePostToolUse } = await import('../learning/hooks-enhanced.js');
@@ -1433,6 +1452,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         outcome.recovery?.reason ??
         `Sentinel failed at prompt ${index} '${entry.id}' (${outcome.sentinel?.failedCheck ?? 'unknown'}) ` +
           'and was not auto-recovered.';
+      // Integration Bus (System 4): recovery is exhausted — fan this failure out to System 1
+      // (targeted gap audit), System 2 (rewrite-effectiveness observation), and System 3
+      // (baseline test run). Non-fatal — bus.ts never throws, but wrapped defensively anyway.
+      try {
+        await onSentinelFailure(outcome.sentinel?.failedCheck ?? 'unknown', entry.id, buildRunId ?? '', projectPath);
+      } catch (error) {
+        log(`integration bus onSentinelFailure failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await rollbackAndReport(ctx, entry, index, outcome, haltReason);
       break;
     }

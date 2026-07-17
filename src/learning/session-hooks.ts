@@ -1,9 +1,20 @@
 // FORGE 2.0 - Session Hook Implementations: SessionStart and SessionEnd
-import { existsSync } from 'node:fs';
+import { existsSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { getConnection } from './database.js';
+
+// stdout during a Phase 3 build is reserved for renderProgress output only (Session 5 hardening) —
+// every diagnostic line this module emits goes to the build log file instead of console.
+function logToBuildFile(...args: unknown[]): void {
+  try {
+    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    appendFileSync('.forge/build.log', `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
 
 export interface SessionStartResult {
   governanceRulesLoaded: number;
@@ -56,7 +67,7 @@ export async function handleSessionStart(
 
       if (lastSession && lastSession.end_reason === 'INTERRUPTED') {
         result.priorSessionRecovered = true;
-        console.log(`[SESSION] Recovering from interrupted session: ${lastSession.id}`);
+        logToBuildFile(`[SESSION] Recovering from interrupted session: ${lastSession.id}`);
       }
     } catch { /* non-fatal */ }
 
@@ -68,7 +79,7 @@ export async function handleSessionStart(
     if (result.priorSessionRecovered) lines.push('  Prior interrupted session detected - reviewing recovery point');
     result.contextBlock = lines.join('\n');
 
-    console.log(result.contextBlock);
+    logToBuildFile(result.contextBlock);
 
     // Log session start
     try {

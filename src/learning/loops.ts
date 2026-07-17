@@ -1,5 +1,6 @@
 // FORGE 2.0 Learning Engine — Five Learning Loops
 // CRITICAL: FORGE evolves configuration and knowledge, NEVER its own source code.
+import { appendFileSync } from 'node:fs';
 import { getConnection, getMachineId } from './database.js';
 import {
   savePromptScore, getForgeMemory, saveToForgeMemory, updateForgeMemory,
@@ -8,6 +9,17 @@ import {
 } from './queries.js';
 import { getErrorFingerprint } from './fingerprint.js';
 import type { FixPattern, GovernanceRule, PendingEvolution, SkillEntry, BuildOutcome } from './types.js';
+
+// stdout during a Phase 3 build is reserved for renderProgress output only (Session 5 hardening) —
+// every diagnostic line this module emits goes to the build log file instead of console.
+function logToBuildFile(...args: unknown[]): void {
+  try {
+    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    appendFileSync('.forge/build.log', `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
 
 // ─── LOOP 1: Prompt Effectiveness Scoring ──────────────────────────────────────
 // Fires: PostToolUse (after every prompt execution)
@@ -39,7 +51,7 @@ export function scorePromptExecution(execution: {
       build_id: execution.buildId,
     }, dbPath);
   } catch (err) {
-    console.error('[FORGE Learning] Loop 1 scoring failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 1 scoring failed:', err);
     return '';
   }
 }
@@ -63,7 +75,7 @@ export function captureError(error: {
       knownFix: result.existingFix || undefined,
     };
   } catch (err) {
-    console.error('[FORGE Learning] Loop 2 capture failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 2 capture failed:', err);
     const fingerprint = getErrorFingerprint({
       errorCode: error.errorCode,
       filePath: error.filePath,
@@ -131,7 +143,7 @@ export function checkAutoElevation(
     }, dbPath);
     return rules[0] as GovernanceRule || null;
   } catch (err) {
-    console.error('[FORGE Learning] Loop 2 auto-elevation failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 2 auto-elevation failed:', err);
     return null;
   }
 }
@@ -167,7 +179,7 @@ export function updateDecisionWeights(buildId: string, dbPath?: string): void {
       ).run(errorRate, retryRate, totalPrompts, failedPrompts, totalRetries, decision.id);
     }
   } catch (err) {
-    console.error('[FORGE Learning] Loop 3 decision weights failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 3 decision weights failed:', err);
   }
 }
 
@@ -205,11 +217,11 @@ export function loadCrossProjectKnowledge(
       limit: 10,
     }, dbPath) as BuildOutcome[];
 
-    console.log(`[FORGE Learning] Loaded: ${rules.length} rules, ${skills.length} skills, ${fixPatterns.length} fix patterns, ${outcomes.length} outcomes, ${evolutions.length} evolutions`);
+    logToBuildFile(`[FORGE Learning] Loaded: ${rules.length} rules, ${skills.length} skills, ${fixPatterns.length} fix patterns, ${outcomes.length} outcomes, ${evolutions.length} evolutions`);
 
     return { rules, skills, fixPatterns, outcomes, evolutions };
   } catch (err) {
-    console.error('[FORGE Learning] Loop 4 knowledge loading failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 4 knowledge loading failed:', err);
     return { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] };
   }
 }
@@ -311,12 +323,12 @@ export function analyzeForEvolutions(buildId: string, dbPath?: string): PendingE
     }
 
     if (proposals.length > 0) {
-      console.log(`[FORGE Learning] Loop 5 generated ${proposals.length} evolution proposals`);
+      logToBuildFile(`[FORGE Learning] Loop 5 generated ${proposals.length} evolution proposals`);
     }
 
     return proposals;
   } catch (err) {
-    console.error('[FORGE Learning] Loop 5 analysis failed:', err);
+    logToBuildFile('[FORGE Learning] Loop 5 analysis failed:', err);
     return proposals;
   }
 }
@@ -325,7 +337,7 @@ export function presentEvolutions(dbPath?: string): PendingEvolution[] {
   try {
     return getPendingEvolutions(dbPath) as PendingEvolution[];
   } catch (err) {
-    console.error('[FORGE Learning] presentEvolutions failed:', err);
+    logToBuildFile('[FORGE Learning] presentEvolutions failed:', err);
     return [];
   }
 }
@@ -344,6 +356,6 @@ export function applyEvolution(
       dbPath
     );
   } catch (err) {
-    console.error('[FORGE Learning] applyEvolution failed:', err);
+    logToBuildFile('[FORGE Learning] applyEvolution failed:', err);
   }
 }

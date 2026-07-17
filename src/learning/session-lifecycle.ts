@@ -1,9 +1,20 @@
 // FORGE 2.0 - Session Lifecycle: lock file, crash recovery, run start/end
-import { existsSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, rmSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { getBuildFingerprint } from './session.js';
+
+// stdout during a Phase 3 build is reserved for renderProgress output only (Session 5 hardening) —
+// every diagnostic line this module emits goes to the build log file instead of console.
+function logToBuildFile(...args: unknown[]): void {
+  try {
+    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    appendFileSync('.forge/build.log', `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
 
 export interface LockFileContent {
   buildId: string;
@@ -111,14 +122,14 @@ export function checkCrashRecovery(projectPath: string): CrashRecoveryResult {
   }
 
   removeForgeLock(projectPath);
-  console.log(`[SESSION] Crash detected. Recovery point: prompt ${resumeFrom}`);
+  logToBuildFile(`[SESSION] Crash detected. Recovery point: prompt ${resumeFrom}`);
   return { recovered: true, resumeFrom, snapshotTime, buildId: content?.buildId ?? null };
 }
 
 export function onRunStart(projectPath: string, buildId: string, runNumber: number): RunStartResult {
   const recovery = checkCrashRecovery(projectPath);
   if (recovery.recovered) {
-    console.log(`[SESSION] Resuming from crash at prompt ${recovery.resumeFrom}`);
+    logToBuildFile(`[SESSION] Resuming from crash at prompt ${recovery.resumeFrom}`);
   }
   setForgeLock(projectPath, buildId, runNumber);
 
@@ -134,7 +145,7 @@ export function onRunStart(projectPath: string, buildId: string, runNumber: numb
       previousFingerprint = prev.buildFingerprint ?? null;
       if (previousFingerprint && previousFingerprint !== currentFingerprint) {
         fingerprintMismatch = true;
-        console.warn('[SESSION] Fingerprint mismatch -- files changed between runs.');
+        logToBuildFile('[SESSION] Fingerprint mismatch -- files changed between runs.');
       }
     }
   } catch { /* non-fatal */ }
@@ -146,7 +157,7 @@ export function onRunStart(projectPath: string, buildId: string, runNumber: numb
     );
   } catch { /* non-fatal */ }
 
-  console.log(`[SESSION] Run ${runNumber} started. Build: ${buildId}`);
+  logToBuildFile(`[SESSION] Run ${runNumber} started. Build: ${buildId}`);
   return { fingerprintMismatch, previousFingerprint, currentFingerprint, resumeFrom: recovery.resumeFrom };
 }
 
@@ -207,6 +218,6 @@ export function onRunEnd(opts: RunEndOptions): void {
   } catch { /* non-fatal */ }
 
   removeForgeLock(projectPath);
-  console.log(`[SESSION] Run ${runNumber} ended. Reason: ${endReason}`);
-  console.log(`[SESSION] ${promptsExecuted} executed | ${promptsPassed} passed | ${promptsFailed} failed | ${durationMinutes}m | ${(firstPassRate * 100).toFixed(1)}% first-pass`);
+  logToBuildFile(`[SESSION] Run ${runNumber} ended. Reason: ${endReason}`);
+  logToBuildFile(`[SESSION] ${promptsExecuted} executed | ${promptsPassed} passed | ${promptsFailed} failed | ${durationMinutes}m | ${(firstPassRate * 100).toFixed(1)}% first-pass`);
 }
