@@ -843,6 +843,42 @@ function humanDuration(ms: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Human-readable progress renderer (FORGE 1.0 forge.ps1 `Log` parity)
+// ---------------------------------------------------------------------------
+
+/** Progress levels, matching forge.ps1's `Log -level` switch. */
+type ProgressLevel = 'INFO' | 'PASS' | 'FAIL' | 'ERROR' | 'WARN' | 'GATE';
+
+const ANSI_RESET = '\x1b[0m';
+
+/** forge.ps1's `Write-Host -ForegroundColor` switch, ported to ANSI SGR codes. */
+const ANSI_COLOR: Record<ProgressLevel, string> = {
+  ERROR: '\x1b[31m', // Red
+  FAIL: '\x1b[31m', // Red
+  WARN: '\x1b[33m', // Yellow
+  PASS: '\x1b[32m', // Green
+  GATE: '\x1b[36m', // Cyan
+  INFO: '\x1b[37m', // White
+};
+
+function twoDigit(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/**
+ * Write one `[HH:mm:ss] [LEVEL] message` line to stdout, colorized to match forge.ps1's `Log`
+ * function (green PASS, red FAIL/ERROR, cyan GATE, yellow WARN, white INFO). This is a distinct,
+ * purpose-built console renderer for human operators watching a live build — separate from `log`
+ * (Build Memory / death-forensics / pino), which every collaborator above already feeds.
+ */
+function renderProgress(level: ProgressLevel, message: string): void {
+  const now = new Date();
+  const ts = `${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
+  const color = ANSI_COLOR[level];
+  process.stdout.write(`${color}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -1069,6 +1105,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     log(`WARNING: createBuild degraded (${describe(error)}) — running stateless`);
   }
   if (buildRunId === null) warnings.push('Build Memory unreachable — running in stateless mode (Contract 4).');
+
+  if (!dryRun) {
+    renderProgress(
+      'GATE',
+      `Phase 3 START — project "${projectName}", build ${buildRunId ?? '(stateless)'}, ` +
+        `${schedule.order.length} prompt(s), started ${generatedAt}`
+    );
+  }
 
   // Tag every log line emitted for the rest of this build with the build id + project, so any
   // module FORGE drives (assembler, sentinel, claude-runner, …) carries `build_run_id`/`project`
@@ -1428,6 +1472,15 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         : '')
   );
 
+  if (!dryRun) {
+    renderProgress(
+      status === 'completed' ? 'PASS' : status === 'halted' ? 'FAIL' : status === 'failed' ? 'FAIL' : 'WARN',
+      `Phase 3 ${status.toUpperCase()} — ${completedPrompts}/${schedule.order.length} completed, ` +
+        `${failedPrompts} failed, ${skippedPrompts} skipped; ~${totalTokens} tokens.` +
+        (halted ? ` HALTED at prompt ${haltedAt?.index} '${haltedAt?.id}'.` : '')
+    );
+  }
+
   if (!dryRun && costTracker.entries.length > 0) {
     const costSummary = costTracker.summary();
     log(
@@ -1599,6 +1652,7 @@ async function executePrompt(
   // Session 5 finding #12/#7: per-prompt elapsed duration, for console/live-status/prompt_executions.
   const promptStartedAt = Date.now();
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) — start`);
+  renderProgress('INFO', `Prompt ${index}/${ctx.totalPrompts} — ${entry.name}`);
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
   try {
@@ -1761,7 +1815,16 @@ async function executePrompt(
         { id: entry.id, name: entry.name, promptType: entry.prompt_type, index, description: entry.description },
         promptText,
         {
-          runClaude: (p) => ctx.runClaudeImpl(p, ctx.projectPath, timeoutMs),
+          runClaude: async (p) => {
+            renderProgress('INFO', `Claude exec start — timeout ${Math.round(timeoutMs / 1000)}s`);
+            const execStartedAt = Date.now();
+            const r = await ctx.runClaudeImpl(p, ctx.projectPath, timeoutMs);
+            renderProgress(
+              'INFO',
+              `Claude exit ${r.exitCode ?? 'null'}${r.timedOut ? ' (TIMEOUT)' : ''} — ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
+            );
+            return r;
+          },
           runSentinel: () => ctx.runSentinelImpl(sentinelOptions),
           commit: (message) => {
             const c = ctx.git.commitAll(message);
@@ -1790,7 +1853,13 @@ async function executePrompt(
             `run failed (${preRunCheckout.error ?? 'unknown error'})`
         );
       }
+      renderProgress('INFO', `Claude exec start — timeout ${Math.round(timeoutMs / 1000)}s`);
+      const execStartedAt = Date.now();
       run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
+      renderProgress(
+        'INFO',
+        `Claude exit ${run.exitCode ?? 'null'}${run.timedOut ? ' (TIMEOUT)' : ''} — ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
+      );
       // Hard enforcement: force HEAD back onto the feature branch immediately after claude returns —
       // this catches any case where claude drifted HEAD back to main (e.g. a stray `git checkout main`)
       // before Sentinel runs, rather than merely detecting the drift.
@@ -1834,6 +1903,15 @@ async function executePrompt(
 
       // h. Run the Phase 4 Sentinel (the five Contract-13 checks).
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
+    }
+
+    renderProgress('GATE', `Sentinel — ${sentinel.checks.length} check(s)`);
+    for (const check of sentinel.checks) {
+      const verdict = check.skipped ? 'SKIP' : check.passed ? 'PASS' : 'FAIL';
+      renderProgress(
+        check.skipped ? 'WARN' : check.passed ? 'PASS' : 'FAIL',
+        `  ${check.name} — ${verdict}${verdict === 'FAIL' ? ` (${check.detail})` : ''}`
+      );
     }
 
     // Session 5.2 Task 3: project-boundary guard — best-effort scan of claude's own stdout for
@@ -1909,8 +1987,9 @@ async function executePrompt(
 
     // e2. COMMIT PROMPT CHANGES — structured commit tracking this prompt's output.
     // Non-fatal: if nothing was staged (prior commitAll already committed), this is a no-op.
+    let commitHash: string | null = null;
     try {
-      await ctx.git.commitPromptChanges(entry.id, entry.prompt_type, 'post-run');
+      commitHash = await ctx.git.commitPromptChanges(entry.id, entry.prompt_type, 'post-run');
     } catch (commitErr) {
       log(`prompt ${index} '${entry.id}': commitPromptChanges non-fatal — ${describe(commitErr)}`);
     }
@@ -2165,6 +2244,18 @@ async function executePrompt(
 
     const durationMs = Date.now() - promptStartedAt;
     log(`prompt ${index} '${entry.id}': ${disposition} — ${note} (${humanDuration(durationMs)})`);
+    if (disposition === 'completed') {
+      renderProgress(
+        'PASS',
+        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' — PASS` +
+          `${commitHash ? ` (${commitHash.slice(0, 7)})` : ''} — ${humanDuration(durationMs)}`
+      );
+    } else {
+      renderProgress(
+        'FAIL',
+        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' — FAIL (${sentinel.failedCheck ?? 'unknown check'}) — ${humanDuration(durationMs)}`
+      );
+    }
     return {
       index,
       id: entry.id,
