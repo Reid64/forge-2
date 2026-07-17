@@ -37,6 +37,7 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 
 import { Command } from 'commander';
@@ -104,9 +105,23 @@ const SCHEDULED_TASK_TYPES: readonly ScheduledTaskType[] = [
 // Presentation helpers
 // ---------------------------------------------------------------------------
 
-/** Print the FORGE banner once at startup. */
+/**
+ * Append a line to `.forge/build.log` instead of stdout (best-effort — never throws). stdout is
+ * reserved for `renderProgress`'s `[yyyy-MM-dd HH:mm:ss] [LEVEL]` lines during a build (FORGE 1.0
+ * parity); everything else, including this banner, is diagnostic and belongs in the log file.
+ */
+function logToBuildFile(line: string): void {
+  try {
+    mkdirSync('.forge', { recursive: true });
+    appendFileSync('.forge/build.log', `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Log the FORGE banner once at startup (kept off stdout — see {@link logToBuildFile}). */
 function printHeader(): void {
-  console.log(chalk.cyan.bold('FORGE 2.0') + chalk.dim(' — autonomous software factory'));
+  logToBuildFile('FORGE 2.0 — autonomous software factory');
 }
 
 /** Print the config's non-fatal warnings (e.g. no .env, generated machine id). */
@@ -126,24 +141,25 @@ function tsPrefix(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL'): string {
 }
 
 /**
- * Run an async unit of work under an ora spinner, routing the work's progress
- * messages into the spinner's text (so the phases' verbose `log` output does not
- * scroll the terminal). The work functions never throw, but we still fail the
- * spinner defensively.
+ * Run an async unit of work, reporting its progress as `[yyyy-MM-dd HH:mm:ss] [LEVEL]` lines on
+ * stdout — matching `phase3-executor`'s `renderProgress` (FORGE 1.0 parity). Previously this used
+ * an `ora` spinner, whose checkmark/dash frames write to stderr; under PowerShell that gets
+ * wrapped as a NativeCommandError and interleaves garbled lines ahead of the real output. The work
+ * functions never throw, but we still report failure defensively.
  */
 async function withSpinner<T>(
   title: string,
   fn: (log: (message: string) => void) => Promise<T>
 ): Promise<T> {
-  const spinner = ora({ text: title }).start();
+  process.stdout.write(`${tsPrefix('INFO')} ${title}\n`);
   try {
     const result = await fn((message) => {
-      spinner.text = `${title} ${chalk.dim('— ' + message)}`;
+      process.stdout.write(`${tsPrefix('INFO')} ${title} — ${message}\n`);
     });
-    spinner.succeed(title);
+    process.stdout.write(`${tsPrefix('PASS')} ${title}\n`);
     return result;
   } catch (error) {
-    spinner.fail(title);
+    process.stdout.write(`${tsPrefix('FAIL')} ${title}\n`);
     throw error;
   }
 }
@@ -1812,7 +1828,7 @@ async function cmdRepair(
 function initBuildMemoryOrWarn(): void {
   try {
     initializeForgeMemory();
-    console.log(chalk.dim(`Build Memory: SQLite ready at ${getForgeDbPath()} (schema ${getSchemaVersion()})`));
+    logToBuildFile(`Build Memory: SQLite ready at ${getForgeDbPath()} (schema ${getSchemaVersion()})`);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error(chalk.red.bold('\n⚠ BUILD MEMORY UNAVAILABLE — FORGE is running STATELESS this session.'));

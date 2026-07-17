@@ -1158,8 +1158,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   if (!dryRun) {
     renderProgress(
       'GATE',
-      `Phase 3 START â€” project "${projectName}", build ${buildRunId ?? '(stateless)'}, ` +
-        `${schedule.order.length} prompt(s), started ${generatedAt}`
+      `FORGE PIPELINE STARTING : project "${projectName}" : build ${buildRunId ?? '(stateless)'} : ` +
+        `${schedule.order.length} prompt(s) : started ${generatedAt}`
     );
   }
 
@@ -1725,7 +1725,7 @@ async function executePrompt(
   // Session 5 finding #12/#7: per-prompt elapsed duration, for console/live-status/prompt_executions.
   const promptStartedAt = Date.now();
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) â€” start`);
-  renderProgress('INFO', `Prompt ${index}/${ctx.totalPrompts} â€” ${entry.name}`);
+  renderProgress('INFO', `PROMPT ${index}/${ctx.totalPrompts} : ${entry.id}`);
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
   try {
