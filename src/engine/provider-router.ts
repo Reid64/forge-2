@@ -14,7 +14,12 @@
  *
  * PROVIDERS (each keyed from its own env var — a missing key just drops that provider from
  * routing, never crashes):
- *   - anthropic : Claude (claude-sonnet-4-6)      — PRIMARY complex reasoning. `ANTHROPIC_API_KEY`
+ *   - anthropic : Claude (claude-sonnet-4-6)      — PRIMARY complex reasoning. For `complex_reasoning`
+ *                                                    specifically, "anthropic" does NOT mean the
+ *                                                    Messages API — it means the Claude Code CLI
+ *                                                    subprocess (Max plan usage; see callViaClaudeCode).
+ *                                                    Every OTHER task type's anthropic leg still POSTs
+ *                                                    to the Messages API and needs `ANTHROPIC_API_KEY`.
  *   - openai    : GPT-4o-mini                      — validation + simple analysis. `OPENAI_API_KEY`
  *   - gemini    : Gemini 1.5 Flash                 — documentation + research verification.
  *                                                    `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
@@ -66,6 +71,10 @@ import {
   OpenAIChatResponseSchema,
 } from '../tools/schema-validator.js';
 import { logLine } from '../tools/forge-logger.js';
+import { runClaude } from './claude-runner.js';
+
+/** Heuristic characters-per-token for splitting the CLI's coarse token estimate (matches claude-runner.ts). */
+const CLI_CHARS_PER_TOKEN = 4;
 
 // ---------------------------------------------------------------------------
 // Public contract — providers, task types, pricing
@@ -192,6 +201,9 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
  * governance a human never actually reviewed against Claude's judgment. Cost-optimized failover
  * across providers is fine for the mechanical tiers below (`validation`, `simple_analysis`,
  * `documentation`, `research_verification`, `code_review`, `pattern_matching`) — never for design.
+ * Its `anthropic` leg is also routed through the Claude Code CLI rather than the Messages API
+ * (see {@link ProviderRouter.callViaClaudeCode}) so this reasoning spends Max plan usage, not
+ * API credits.
  */
 export const DEFAULT_ROUTES: Record<ForgeTaskType, ProviderName[]> = {
   complex_reasoning: ['anthropic'],
@@ -427,6 +439,13 @@ export interface ProviderRouterOptions {
   cooldownMs?: number;
   /** Per-request timeout ms. Default {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /**
+   * Working directory for the Claude Code CLI subprocess used for `complex_reasoning` (Contract
+   * 6 — the target project root, never FORGE's own directory). Default `process.cwd()`.
+   */
+  claudeCliCwd?: string;
+  /** Timeout ms for the `complex_reasoning` CLI subprocess. Default {@link runClaude}'s own default (15 min). */
+  claudeCliTimeoutMs?: number;
   /** Monotonic clock (ms) for cooldowns. Default `Date.now`. */
   now?: () => number;
   /** Current day stamp `YYYY-MM-DD`. Default the date half of {@link nowIso}. */
@@ -516,6 +535,8 @@ export class ProviderRouter {
   private readonly usage: ProviderUsageTracker;
   private readonly cooldownMs: number;
   private readonly timeoutMs: number;
+  private readonly claudeCliCwd: string;
+  private readonly claudeCliTimeoutMs: number | undefined;
   private readonly now: () => number;
   private readonly today: () => string;
   private readonly getEnv: (name: string) => string | undefined;
@@ -551,6 +572,8 @@ export class ProviderRouter {
     this.usage = options.usage ?? new ProviderUsageTracker();
     this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.claudeCliCwd = options.claudeCliCwd ?? process.cwd();
+    this.claudeCliTimeoutMs = options.claudeCliTimeoutMs;
     this.now = options.now ?? (() => Date.now());
     this.today = options.today ?? (() => nowIso().slice(0, 10));
     this.log = options.log ?? logLine('provider-router');
@@ -597,10 +620,14 @@ export class ProviderRouter {
 
     for (const name of chain) {
       const cfg = this.providers[name];
+      // `complex_reasoning`'s anthropic leg never hits the paid Messages API — it shells out to
+      // the Claude Code CLI instead (Max-plan usage, not API credits). See callViaClaudeCode.
+      const useClaudeCli = taskType === 'complex_reasoning' && name === 'anthropic';
       const key = this.apiKeyFor(cfg);
 
-      // Direct calls need the provider's own key; proxy calls authenticate to the proxy instead.
-      if (!this.proxyUrl && key === null) {
+      // Direct calls need the provider's own key; proxy calls authenticate to the proxy instead;
+      // the CLI needs neither (it authenticates via the operator's Max plan login).
+      if (!useClaudeCli && !this.proxyUrl && key === null) {
         attempts.push({ provider: name, outcome: 'no_key' });
         continue;
       }
@@ -608,23 +635,30 @@ export class ProviderRouter {
         attempts.push({ provider: name, outcome: 'cooldown' });
         continue;
       }
-      if (this.usage.isFreeTierExhausted(name, cfg.freeTier, day)) {
+      if (!useClaudeCli && this.usage.isFreeTierExhausted(name, cfg.freeTier, day)) {
         attempts.push({ provider: name, outcome: 'free_tier_exhausted' });
         this.log(`${name} free tier exhausted for ${day} — skipping`);
         continue;
       }
 
       try {
-        const result = await this.callProvider(cfg, key, request);
-        const costUsd = estimateProviderCost(cfg.pricing, result.tokensInput, result.tokensOutput);
+        const result = useClaudeCli
+          ? await this.callViaClaudeCode(cfg, request)
+          : await this.callProvider(cfg, key, request);
+        // CLI calls are flat Max-plan usage, not metered — no per-token dollar cost to estimate.
+        const costUsd = useClaudeCli
+          ? 0
+          : estimateProviderCost(cfg.pricing, result.tokensInput, result.tokensOutput);
         this.usage.record(
           { provider: name, inputTokens: result.tokensInput, outputTokens: result.tokensOutput, costUsd },
           day
         );
         attempts.push({ provider: name, outcome: 'called', status: 200 });
         this.log(
-          `${taskType} → ${name}/${result.model}${this.proxyUrl ? ' (proxy)' : ''} ` +
-            `~${result.tokensInput}+${result.tokensOutput} tok ≈ $${costUsd.toFixed(4)}`
+          `${taskType} → ${name}/${result.model}` +
+            `${useClaudeCli ? ' (Claude Code CLI — Max plan)' : this.proxyUrl ? ' (proxy)' : ''} ` +
+            `~${result.tokensInput}+${result.tokensOutput} tok` +
+            (useClaudeCli ? '' : ` ≈ $${costUsd.toFixed(4)}`)
         );
         return {
           text: result.text,
@@ -633,15 +667,15 @@ export class ProviderRouter {
           provider: name,
           model: result.model,
           costUsd,
-          usedProxy: this.proxyUrl !== null,
+          usedProxy: !useClaudeCli && this.proxyUrl !== null,
           attempts,
         };
       } catch (error) {
         const status = error instanceof ProviderHttpError ? error.status : undefined;
         const detail = error instanceof Error ? error.message : String(error);
         attempts.push({ provider: name, outcome: 'called', ...(status ? { status } : {}), error: detail });
-        // 429 / 5xx / network = transient → cooldown + failover. 401/403/400 = drop + failover.
-        if (status === undefined || status === 429 || status >= 500) {
+        // 429 / 5xx / timeout / network = transient → cooldown + failover. 401/403/400 = drop + failover.
+        if (status === undefined || status === 429 || status === 408 || status >= 500) {
           this.startCooldown(name);
           this.log(`${name} unavailable (${status ?? 'network'}) — cooling down, failing over`);
         } else {
@@ -693,6 +727,37 @@ export class ProviderRouter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * `complex_reasoning`'s anthropic leg — Phase 1A's PRD, every Phase 1B artifact, and the Agent
+   * Creator — never POSTs to the Anthropic Messages API directly; it shells out to the Claude
+   * Code CLI via {@link runClaude} (the same subprocess Phase 3 build execution uses) so this
+   * reasoning consumes the operator's Max plan subscription instead of metered API credits.
+   * `system` + `user` are concatenated into one prompt piped over stdin (Contract 5); the CLI's
+   * only token signal is the coarse chars/4 estimate, so it's split proportionally between the
+   * piped prompt (input) and captured stdout (output).
+   */
+  private async callViaClaudeCode(
+    cfg: ProviderConfig,
+    request: ModelRequest
+  ): Promise<ModelResponse & { model: string }> {
+    const prompt = request.system.trim() !== '' ? `${request.system}\n\n${request.user}` : request.user;
+    const result = await runClaude(prompt, {
+      cwd: this.claudeCliCwd,
+      ...(this.claudeCliTimeoutMs !== undefined ? { timeoutMs: this.claudeCliTimeoutMs } : {}),
+      log: (message) => this.log(`[claude-cli] ${message}`),
+    });
+    if (!result.success) {
+      throw new ProviderHttpError(
+        cfg.name,
+        result.timedOut ? 408 : 500,
+        result.stderr.trim() !== '' ? result.stderr : 'Claude Code CLI produced no output'
+      );
+    }
+    const tokensInput = Math.ceil(prompt.length / CLI_CHARS_PER_TOKEN);
+    const tokensOutput = Math.max(0, result.tokensEstimated - tokensInput);
+    return { text: result.stdout, tokensInput, tokensOutput, model: this.modelIdFor(cfg, request) };
   }
 
   /** The model id to ask for: the caller's pin if set, else the provider default. */
