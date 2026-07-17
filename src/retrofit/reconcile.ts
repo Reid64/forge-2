@@ -28,12 +28,15 @@ function persist(d: ReconcileDecision, projectName: string, db?: string): void {
   try { execSync(`sqlite3 "${p}" "INSERT OR REPLACE INTO reconcile_decisions (id,project_name,item_id,item_type,decision,reason,timestamp) VALUES (hex(randomblob(16)),'${s(projectName)}','${s(d.itemId)}','${s(d.itemType)}','${s(d.decision)}','${s(d.reason??'')}','${s(d.timestamp)}')"`, { stdio: 'pipe' }); } catch {}
 }
 
-export async function runReconcile(projectName: string, input: ReconcileInput, nonInteractive = false): Promise<ReconcileOutput> {
+export async function runReconcile(projectName: string, input: ReconcileInput, nonInteractive = false, acceptBlockers = false): Promise<ReconcileOutput> {
   const decisions: ReconcileDecision[] = []; const approved: DiagnoseFinding[] = []; const deferred: string[] = []; const abandoned: string[] = [];
   const prior = loadPrior(projectName, input.dbPath);
-  if (nonInteractive) {
+  if (nonInteractive || acceptBlockers) {
     for (const f of input.criticalFindings) { decisions.push({ itemId: f.message, itemType: 'CRITICAL_FIX', decision: 'APPROVE', timestamp: new Date().toISOString() }); approved.push(f); }
+    for (const f of input.warnFindings) { decisions.push({ itemId: f.message, itemType: 'WARN_FIX', decision: 'APPROVE', timestamp: new Date().toISOString() }); approved.push(f); }
     for (const u of input.governanceReport.unbuilt) { const dec = u.recommendation === 'ABANDON' ? 'ABANDON' : 'BUILD'; decisions.push({ itemId: u.feature, itemType: 'UNBUILT_FEATURE', decision: dec, timestamp: new Date().toISOString() }); if (dec === 'ABANDON') abandoned.push(u.feature); else deferred.push(u.feature); }
+    for (const g of input.enterpriseReport.gaps.filter(g => !g.present)) { decisions.push({ itemId: g.pattern, itemType: 'ENTERPRISE_PATTERN', decision: 'BUILD', timestamp: new Date().toISOString() }); }
+    for (const d of decisions) persist(d, projectName, input.dbPath);
     return { decisions, approved, deferred, abandoned, confirmedAt: new Date().toISOString() };
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -87,10 +90,10 @@ export function generateRetrofitQueue(projectName: string, projectPath: string, 
 }
 
 // ── PIPELINE ──────────────────────────────────────────────────────────────────
-export interface RetrofitPipelineOptions { projectPath: string; scope?: ScanScope; skipDynamic?: boolean; resume?: boolean; nonInteractive?: boolean; queueOutputPath?: string; apiKey?: string; }
+export interface RetrofitPipelineOptions { projectPath: string; scope?: ScanScope; skipDynamic?: boolean; resume?: boolean; nonInteractive?: boolean; acceptBlockers?: boolean; queueOutputPath?: string; apiKey?: string; }
 
 export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Promise<void> {
-  const { projectPath, scope = 'C', skipDynamic = false, resume = false, nonInteractive = false, queueOutputPath, apiKey } = options;
+  const { projectPath, scope = 'C', skipDynamic = false, resume = false, nonInteractive = false, acceptBlockers = false, queueOutputPath, apiKey } = options;
   const projectName = projectPath.split(/[/\\]/).pop() ?? 'unknown';
   const C = { reset:'\x1b[0m', red:'\x1b[31m', yellow:'\x1b[33m', green:'\x1b[32m', cyan:'\x1b[36m', bold:'\x1b[1m' };
   console.log(`\n${C.bold}${C.cyan}  FORGE 2.0 RETROFIT | ${projectName} | Scope ${scope}${C.reset}\n`);
@@ -107,7 +110,7 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
   const governance = buildGovernanceReconciliationReport(report, projectPath);
   const enterprise = buildEnterprisePatternsGapReport(report, projectPath);
 
-  const reconciled = await runReconcile(projectName, { criticalFindings: health.critical, warnFindings: health.warn, governanceReport: governance, enterpriseReport: enterprise }, nonInteractive);
+  const reconciled = await runReconcile(projectName, { criticalFindings: health.critical, warnFindings: health.warn, governanceReport: governance, enterpriseReport: enterprise }, nonInteractive, acceptBlockers);
 
   const outPath = queueOutputPath ?? join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? homedir(), 'Documents', 'FORGE', 'projects', projectName);
   const queue = generateRetrofitQueue(projectName, projectPath, reconciled, outPath);

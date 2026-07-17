@@ -1933,11 +1933,12 @@ async function main(): Promise<void> {
     .option('--skip-dynamic', 'Skip dynamic route testing', false)
     .option('--resume', 'Resume from a prior SCAN checkpoint', false)
     .option('--non-interactive', 'Auto-approve all RECONCILE decisions', false)
+    .option('--accept-blockers', 'Skip the interactive RECONCILE review and auto-approve all findings without prompting', false)
     .option('--queue-output <path>', 'Override the QUEUE output directory')
     .option('--api-key <key>', 'Anthropic API key for adversarial review')
     .action(async (
       projectPath: string,
-      opts: { scope?: string; skipDynamic?: boolean; resume?: boolean; nonInteractive?: boolean; queueOutput?: string; apiKey?: string }
+      opts: { scope?: string; skipDynamic?: boolean; resume?: boolean; nonInteractive?: boolean; acceptBlockers?: boolean; queueOutput?: string; apiKey?: string }
     ) => {
       const spinner = ora('Starting FORGE RETROFIT...').start();
       try {
@@ -1949,6 +1950,7 @@ async function main(): Promise<void> {
           skipDynamic: opts.skipDynamic ?? false,
           resume: opts.resume ?? false,
           nonInteractive: opts.nonInteractive ?? false,
+          acceptBlockers: opts.acceptBlockers ?? false,
           queueOutputPath: opts.queueOutput,
           apiKey: opts.apiKey,
         });
