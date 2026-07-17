@@ -135,7 +135,7 @@ import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { Instinct, JsonObject } from '../types/index.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { CodebaseRag } from '../tools/codebase-rag.js';
-import { logLine, setLogContext, clearLogContext, runWithBuildContext } from '../tools/forge-logger.js';
+import { logLine, setLogContext, clearLogContext, runWithBuildContext, beginQuietLogging } from '../tools/forge-logger.js';
 import { HookManager } from '../engine/hook-manager.js';
 import { applyInstincts } from '../analysis/instinct-extractor.js';
 import {
@@ -878,6 +878,34 @@ function renderProgress(level: ProgressLevel, message: string): void {
   process.stdout.write(`${color}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
 }
 
+/**
+ * Redirect `console.log/warn/error` to `buildLogPath` for the duration of Phase 3. The learning
+ * engine (`[FORGE Learning]`, `[SESSION]` lines) calls these directly rather than going through
+ * `forge-logger`, so they'd otherwise interleave raw text with `renderProgress`'s
+ * `[HH:mm:ss] [LEVEL]` lines — the only thing that belongs on stdout during a build. Returns a
+ * restore function; callers must invoke it before every return out of Phase 3.
+ */
+function installQuietConsole(buildLogPath: string | null): () => void {
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  const redirect = (...args: unknown[]): void => {
+    if (!buildLogPath) return;
+    try {
+      const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      appendFileSync(buildLogPath, `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+    } catch {
+      /* best-effort */
+    }
+  };
+  console.log = redirect;
+  console.warn = redirect;
+  console.error = redirect;
+  return () => {
+    console.log = original.log;
+    console.warn = original.warn;
+    console.error = original.error;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -928,6 +956,17 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         /* best-effort */
       }
     }
+  };
+
+  // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines during a build (matching
+  // FORGE 1.0's forge.ps1 output). Everything else this run's collaborators emit — pino JSON from
+  // `log`/hook-manager/the predictor, and raw console.log from the learning engine — is diverted to
+  // `buildLogPath` instead. Both restores MUST run before every return out of this function.
+  const releaseQuietLogging = buildLogPath ? beginQuietLogging(buildLogPath) : (() => {});
+  const restoreConsole = buildLogPath ? installQuietConsole(buildLogPath) : (() => {});
+  const releaseStdoutQuietMode = (): void => {
+    restoreConsole();
+    releaseQuietLogging();
   };
 
   // Stale-lock recovery (Session 5 finding #13): a forge_running.lock left behind by a build
@@ -1037,11 +1076,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     if (!Number.isInteger(startAt) || startAt < 1) {
       const msg = `--start-at must be a positive integer >= 1 (got ${startAt})`;
       log(`ERROR: ${msg}`);
+      releaseStdoutQuietMode();
       return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
     }
     if (startAt > schedule.order.length) {
       const msg = `--start-at ${startAt} exceeds the total number of prompts in the queue (${schedule.order.length}). Nothing will be executed.`;
       log(`ERROR: ${msg}`);
+      releaseStdoutQuietMode();
       return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
     }
   }
@@ -1054,6 +1095,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     if (!gate.passed) {
       const msg = gate.reason ?? 'queue.yaml pre_run_checks failed.';
       log(`ERROR: ${msg}`);
+      releaseStdoutQuietMode();
       return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
     }
     log(`pre-run gate: queue.yaml pre_run_checks (${Object.keys(preRunChecks).join(', ')}) — all checks passed.`);
@@ -1532,6 +1574,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       releaseRunLock(projectPath);
       clearDeathForensicsState();
     }
+
+    // Restore stdout LAST — handleSessionEnd (above) still has more [SESSION]/[FORGE Learning]
+    // console output to emit, and it must land in the log file too, not on stdout.
+    releaseStdoutQuietMode();
   }
 }
 

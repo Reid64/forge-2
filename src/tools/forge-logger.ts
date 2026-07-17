@@ -22,6 +22,8 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
+import { dirname } from 'node:path';
 import pino from 'pino';
 
 /** Ambient build/prompt context merged into every log line. All fields optional. */
@@ -43,22 +45,63 @@ function currentContext(): LogContext {
 
 const isTty = Boolean(process.stdout && process.stdout.isTTY);
 
-const root = pino({
-  level: process.env['FORGE_LOG_LEVEL'] ?? 'info',
-  // Merge the active build/prompt context into every line. Returns a fresh object each call so Pino
-  // never holds a reference to mutable state.
-  mixin() {
-    return { ...currentContext() };
+interface Sink {
+  write(chunk: string): unknown;
+}
+
+// The logger's normal destination — stdout, pretty-printed in a TTY exactly as before. `gate`
+// wraps it so a caller can temporarily divert every line elsewhere (see `beginQuietLogging`)
+// without tearing down or reconstructing the pino instance (and losing the pino-pretty worker).
+const realDestination: Sink = isTty
+  ? (pino.transport({
+      target: 'pino-pretty',
+      options: { colorize: true, translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname' },
+    }) as unknown as Sink)
+  : process.stdout;
+
+let quietSink: Sink | null = null;
+
+const gate: Sink = {
+  write(chunk: string): unknown {
+    return (quietSink ?? realDestination).write(chunk);
   },
-  ...(isTty
-    ? {
-        transport: {
-          target: 'pino-pretty',
-          options: { colorize: true, translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname' },
-        },
-      }
-    : {}),
-});
+};
+
+const root = pino(
+  {
+    level: process.env['FORGE_LOG_LEVEL'] ?? 'info',
+    // Merge the active build/prompt context into every line. Returns a fresh object each call so
+    // Pino never holds a reference to mutable state.
+    mixin() {
+      return { ...currentContext() };
+    },
+  },
+  gate
+);
+
+/**
+ * Divert every line this logger emits (from ANY module — `getLogger`/`logLine` is a shared
+ * singleton) to `logFilePath` instead of stdout, until the returned function is called. Used by
+ * Phase 3 to keep its collaborators' (hook-manager, the predictor) diagnostic JSON off stdout
+ * while it owns the terminal with its own human-readable progress renderer — every OTHER caller
+ * of `getLogger`/`logLine` keeps writing to stdout normally outside that window.
+ */
+export function beginQuietLogging(logFilePath: string): () => void {
+  let stream: WriteStream | null = null;
+  try {
+    mkdirSync(dirname(logFilePath), { recursive: true });
+    stream = createWriteStream(logFilePath, { flags: 'a' });
+  } catch {
+    return () => {}; // best-effort — a build must never fail because its log file couldn't open
+  }
+  const openedStream = stream;
+  const previousQuietSink = quietSink;
+  quietSink = { write: (chunk: string) => openedStream.write(chunk) };
+  return () => {
+    quietSink = previousQuietSink;
+    openedStream.end();
+  };
+}
 
 /** A Pino logger bound to `{ module }`. Leveled API: `.info/.warn/.error/.fatal`, `(msg)` or `(obj, msg)`. */
 export type ForgeLogger = pino.Logger;
