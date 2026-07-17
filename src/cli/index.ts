@@ -69,7 +69,7 @@ import { runGapAudit, type AuditScope } from '../resurrection/index.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
-import { getLogger } from '../tools/forge-logger.js';
+import { getLogger, beginQuietLogging } from '../tools/forge-logger.js';
 import { getForgeDbPath, getSchemaVersion, initializeForgeMemory } from '../learning/database.js';
 import { deriveBrandFromBaseline, type DesignTokenSet } from '../tools/brand-inheritance.js';
 import {
@@ -112,6 +112,17 @@ function printHeader(): void {
 /** Print the config's non-fatal warnings (e.g. no .env, generated machine id). */
 function printConfigWarnings(config: EnvConfig): void {
   for (const w of config.warnings) console.log(chalk.dim(`  • ${w}`));
+}
+
+function twoDigit(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]` prefix — matches phase3-executor's renderProgress (FORGE 1.0 format). */
+function tsPrefix(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL'): string {
+  const now = new Date();
+  const ts = `${now.getFullYear()}-${twoDigit(now.getMonth() + 1)}-${twoDigit(now.getDate())} ${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
+  return `[${ts}] [${level}]`;
 }
 
 /**
@@ -648,6 +659,7 @@ async function cmdBuild(
     autoApproveGates?: boolean;
   }
 ): Promise<void> {
+  beginQuietLogging('.forge/build.log');
   const autoResume = opts.autoResume ?? false;
   // Session 5 finding #2/#3 (and the Session 5.1 hotfix): adversary-review BLOCKERs are a SEPARATE
   // concern from both Contract 14 self-heal (--autonomous-recovery) and the human-gate bypass
@@ -664,13 +676,13 @@ async function cmdBuild(
       fail('--start-at must be a positive integer >= 1 (the 1-based prompt index to start from).');
       return;
     }
-    console.log(chalk.cyan(`  --start-at ${startAt}: prompts 1–${startAt - 1} will be skipped.`));
+    process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan(`--start-at ${startAt}: prompts 1–${startAt - 1} will be skipped.`)}\n`);
   }
 
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
-  console.log(chalk.bold(`\nBuilding ${projectName} at ${projectPath}`));
-  if (opts.dryRun) console.log(chalk.cyan('  DRY RUN — no claude/git/Sentinel execution; plan + cost only.'));
+  process.stdout.write(`\n${tsPrefix('INFO')} ${chalk.bold(`Building ${projectName} at ${projectPath}`)}\n`);
+  if (opts.dryRun) process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan('DRY RUN — no claude/git/Sentinel execution; plan + cost only.')}\n`);
 
   // --use-existing-queue: skip Phase 1 (design) and Phase 2 (governance + queue generation)
   // entirely, and run Phase 3 directly against the queue.yaml already present in the target
@@ -685,10 +697,10 @@ async function cmdBuild(
       );
       return;
     }
-    console.log(
-      chalk.yellow('  --use-existing-queue: skipping Phase 1 (design) and Phase 2 (governance + queue generation).')
+    process.stdout.write(
+      `${tsPrefix('WARN')} ${chalk.yellow('--use-existing-queue: skipping Phase 1 (design) and Phase 2 (governance + queue generation).')}\n`
     );
-    console.log(chalk.dim(`  queue: ${queuePath}`));
+    process.stdout.write(`${tsPrefix('INFO')} ${chalk.dim(`queue: ${queuePath}`)}\n`);
 
     const scout = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
     const exec = await withSpinner('Phase 3 — Build Executor', (log) =>
@@ -712,7 +724,7 @@ async function cmdBuild(
     reportExecution(exec);
 
     if (opts.dryRun) {
-      console.log(chalk.cyan('\nDry run complete — nothing was executed.'));
+      process.stdout.write(`\n${tsPrefix('INFO')} ${chalk.cyan('Dry run complete — nothing was executed.')}\n`);
       return;
     }
 
@@ -726,9 +738,9 @@ async function cmdBuild(
         runPhase5Learner(exec.buildRunId as string, { log })
       );
       printWarnings(learn.warnings);
-      console.log(chalk.green('\n✔ Build pipeline complete.'));
+      process.stdout.write(`\n${tsPrefix('PASS')} ${chalk.green('✔ Build pipeline complete.')}\n`);
     } else {
-      console.log(chalk.yellow('\nBuild finished, but Build Memory was unavailable — Phase 5 learning skipped (stateless mode).'));
+      process.stdout.write(`\n${tsPrefix('WARN')} ${chalk.yellow('Build finished, but Build Memory was unavailable — Phase 5 learning skipped (stateless mode).')}\n`);
     }
     return;
   }
@@ -740,8 +752,8 @@ async function cmdBuild(
   if (opts.idea) {
     const gov = await gatherGovernanceContext(projectPath);
     if (gov.sources.length > 0) {
-      console.log(
-        chalk.dim(`  auto-context: prepending ${gov.sources.length} governance doc(s) — ${gov.sources.join(', ')}`)
+      process.stdout.write(
+        `${tsPrefix('INFO')} ${chalk.dim(`auto-context: prepending ${gov.sources.length} governance doc(s) — ${gov.sources.join(', ')}`)}\n`
       );
       opts = { ...opts, idea: `${gov.text}\n\n---\n\n# Product idea\n\n${opts.idea}` };
     }
@@ -813,7 +825,7 @@ async function cmdBuild(
     generateQueue(projectPath, design, { projectName, log })
   );
   printWarnings(queue.warnings);
-  console.log(chalk.dim(`  queue: ${queue.stats.totalPrompts} prompt(s) → ${queue.queuePath ?? '(not written)'}`));
+  process.stdout.write(`${tsPrefix('INFO')} ${chalk.dim(`queue: ${queue.stats.totalPrompts} prompt(s) → ${queue.queuePath ?? '(not written)'}`)}\n`);
   gateBanner(governance.gate.name, governance.gate.detail);
 
   // Phase 3 — Build Executor (runs Phase 4 Sentinel per-prompt internally).
@@ -837,7 +849,7 @@ async function cmdBuild(
   reportExecution(exec);
 
   if (opts.dryRun) {
-    console.log(chalk.cyan('\nDry run complete — nothing was executed.'));
+    process.stdout.write(`\n${tsPrefix('INFO')} ${chalk.cyan('Dry run complete — nothing was executed.')}\n`);
     return;
   }
 
@@ -852,9 +864,9 @@ async function cmdBuild(
       runPhase5Learner(exec.buildRunId as string, { log })
     );
     printWarnings(learn.warnings);
-    console.log(chalk.green('\n✔ Build pipeline complete.'));
+    process.stdout.write(`\n${tsPrefix('PASS')} ${chalk.green('✔ Build pipeline complete.')}\n`);
   } else {
-    console.log(chalk.yellow('\nBuild finished, but Build Memory was unavailable — Phase 5 learning skipped (stateless mode).'));
+    process.stdout.write(`\n${tsPrefix('WARN')} ${chalk.yellow('Build finished, but Build Memory was unavailable — Phase 5 learning skipped (stateless mode).')}\n`);
   }
 }
 
