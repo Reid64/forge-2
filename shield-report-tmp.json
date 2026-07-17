@@ -1,0 +1,145 @@
+{"level":30,"time":1784214607889,"pid":29372,"hostname":"ROG","module":"agent-shield","msg":"starting AgentShield security scan for C:\\Users\\manag\\Documents\\forge-2"}
+{"level":30,"time":1784214607890,"pid":29372,"hostname":"ROG","module":"agent-shield","msg":"excluded from scan: C:\\Users\\manag\\Documents\\forge-2\\.claude\\skills"}
+{"level":30,"time":1784214607892,"pid":29372,"hostname":"ROG","module":"agent-shield","msg":"config artifacts found: .claude"}
+{"level":30,"time":1784214608194,"pid":29372,"hostname":"ROG","module":"agent-shield","msg":"scan complete — grade F | 16 finding(s) | 16 critical"}
+{
+  "grade": "F",
+  "findings": [
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a361b3f8478fc38cb/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 71",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 71
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a361b3f8478fc38cb/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded PEM private key on line 81",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 81
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a361b3f8478fc38cb/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 227",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 227
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a4e66e32d88ed87e8/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 71",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 71
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a4e66e32d88ed87e8/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded PEM private key on line 81",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 81
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a4e66e32d88ed87e8/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 227",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 227
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a6c0ac754c6d9d7c2/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 71",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 71
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a6c0ac754c6d9d7c2/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded PEM private key on line 81",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 81
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-a6c0ac754c6d9d7c2/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 227",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 227
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-ab0876c5dddd63e22/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 71",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 71
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-ab0876c5dddd63e22/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded PEM private key on line 81",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 81
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.claude/worktrees/agent-ab0876c5dddd63e22/tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 227",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 227
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 71",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 71
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./tests/security-scanner.test.ts",
+      "message": "Possible hardcoded PEM private key on line 81",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 81
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./tests/security-scanner.test.ts",
+      "message": "Possible hardcoded Anthropic API key on line 227",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 227
+    },
+    {
+      "category": "secrets",
+      "severity": "critical",
+      "file": "./.env",
+      "message": "Possible hardcoded Anthropic API key on line 3",
+      "recommendation": "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately.",
+      "line": 3
+    }
+  ],
+  "recommendations": [
+    "Rotate all exposed credentials immediately and enable secret scanning in CI (e.g. GitHub secret scanning).",
+    "Remove the literal credential and load it from an environment variable; rotate the exposed key immediately."
+  ],
+  "scannedPaths": [
+    ".claude"
+  ],
+  "generatedAt": "2026-07-16T15:10:08.194Z"
+}

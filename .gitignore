@@ -5,6 +5,7 @@ node_modules/
 # Build output
 dist/
 *.tsbuildinfo
+.next/
 
 # Environment — never commit secrets
 .env

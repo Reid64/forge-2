@@ -61,6 +61,8 @@ export function runExistingTests(projectPath: string): { testFilesFound: number;
 
 export async function testDynamicRoutes(projectPath: string, routes: Array<{type: string; route: string; methods?: string[]}>, skipDynamic: boolean): Promise<DynamicRouteResult[]> {
   if (skipDynamic) return [];
+  const isNextProject = existsSync(join(projectPath, 'next.config.js')) || existsSync(join(projectPath, 'next.config.ts'));
+  if (!isNextProject) { console.log('Dynamic route testing skipped — not a Next.js project'); return []; }
   const PORT = 3099; const BASE = `http://localhost:${PORT}`; const results: DynamicRouteResult[] = [];
   const dev = spawn('npx', ['next', 'dev', '--port', String(PORT)], { cwd: projectPath, stdio: 'pipe', detached: false });
   const ready = await new Promise<boolean>(res => {

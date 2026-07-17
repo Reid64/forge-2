@@ -1,0 +1,22 @@
+{
+  "buildId": "324652b0-b93f-4090-b72c-05ef1eebbba6",
+  "projectName": "forge-2",
+  "projectPath": "C:\\Users\\manag\\Documents\\forge-2",
+  "serializedAt": "2026-07-17T00:41:39.495Z",
+  "endReason": "FAILED",
+  "lastPromptExecuted": 2,
+  "currentPhase": "EXECUTE",
+  "currentRunNumber": 1,
+  "gitBranch": null,
+  "gitCommitSha": null,
+  "gitDirty": false,
+  "buildFingerprint": "2e75a318a8bac3e9e75dc0f60056751369e58df32e34477e6459aa76b532916c",
+  "runStats": {
+    "promptsExecuted": 2,
+    "promptsPassed": 1,
+    "promptsFailed": 1,
+    "firstPassRate": 0.5,
+    "durationMinutes": 18,
+    "startTime": "2026-07-17T00:23:41.968Z"
+  }
+}

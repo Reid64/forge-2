@@ -1,0 +1,88 @@
+{
+  "buildRunId": "324652b0-b93f-4090-b72c-05ef1eebbba6",
+  "project": "forge-2",
+  "startedAt": "2026-07-17T00:23:43.226Z",
+  "updatedAt": "2026-07-17T00:41:38.485Z",
+  "currentPrompt": {
+    "index": 2,
+    "id": "auth-setup",
+    "name": "Authentication & authorization",
+    "type": "auth",
+    "phase": "failed"
+  },
+  "totals": {
+    "completed": 1,
+    "failed": 1,
+    "remaining": 18,
+    "tokensEstimated": 11457,
+    "costEstimatedUsd": 0.504336,
+    "totalElapsedMs": 1074523
+  },
+  "lastSentinel": {
+    "passed": false,
+    "failedCheck": "file_delta"
+  },
+  "recentEvents": [
+    {
+      "timestamp": "2026-07-17T00:23:43.470Z",
+      "message": "prompt 1 'schema-migrations' (schema): start"
+    },
+    {
+      "timestamp": "2026-07-17T00:23:43.486Z",
+      "message": "prompt 1 'schema-migrations' (schema): assembled"
+    },
+    {
+      "timestamp": "2026-07-17T00:23:44.177Z",
+      "message": "prompt 1 'schema-migrations' (schema): executing"
+    },
+    {
+      "timestamp": "2026-07-17T00:29:13.973Z",
+      "message": "prompt 1 'schema-migrations' (schema): sentinel"
+    },
+    {
+      "timestamp": "2026-07-17T00:29:13.978Z",
+      "message": "Sentinel FAIL (unknown)"
+    },
+    {
+      "timestamp": "2026-07-17T00:29:15.277Z",
+      "message": "Build Brain: applying targeted fix (confidence 0.83)"
+    },
+    {
+      "timestamp": "2026-07-17T00:29:15.280Z",
+      "message": "prompt 1 'schema-migrations': Build Brain targeted recovery (confidence 0.83)"
+    },
+    {
+      "timestamp": "2026-07-17T00:31:31.224Z",
+      "message": "prompt 1 'schema-migrations' (schema): merged"
+    },
+    {
+      "timestamp": "2026-07-17T00:31:33.006Z",
+      "message": "prompt 2 'auth-setup' (auth): start"
+    },
+    {
+      "timestamp": "2026-07-17T00:31:33.021Z",
+      "message": "prompt 2 'auth-setup' (auth): assembled"
+    },
+    {
+      "timestamp": "2026-07-17T00:31:33.581Z",
+      "message": "prompt 2 'auth-setup' (auth): executing"
+    },
+    {
+      "timestamp": "2026-07-17T00:41:37.088Z",
+      "message": "prompt 2 'auth-setup' (auth): sentinel"
+    },
+    {
+      "timestamp": "2026-07-17T00:41:37.091Z",
+      "message": "Sentinel FAIL (file_delta)"
+    },
+    {
+      "timestamp": "2026-07-17T00:41:38.018Z",
+      "message": "prompt 2 'auth-setup' (auth): recovering"
+    },
+    {
+      "timestamp": "2026-07-17T00:41:38.255Z",
+      "message": "prompt 2 'auth-setup' (auth): failed"
+    }
+  ],
+  "brainInterventions": 1
+}
