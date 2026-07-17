@@ -3,7 +3,7 @@ import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { join, extname, dirname, resolve, relative } from 'node:path';
 import type { FileTreeResult, DependencyGraph, BrokenImport } from './types.js';
 
-const EXCLUDE = /node_modules|\.next|\.git|dist|build|\.cache/;
+const EXCLUDE = /node_modules|\.next|\.git|dist|build|\.cache|\.claude[\\/]worktrees/;
 
 export function scanDirectoryTree(projectPath: string): FileTreeResult {
   const files: FileTreeResult['files'] = [];

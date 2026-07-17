@@ -1,9 +1,49 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Session 5.2 — Vacuous-Build Defect — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE
+## Current Session: Systems 1-4 (Resurrection, Learning Extensions, Enterprise Test Suite, Integration Bus) — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-06 (dialtest "15/15 passed, zero files written" defect root-caused to 3 compounding bugs and fixed; schema unchanged at 2.2.1)
+## Last Updated: 2026-07-17 (Systems 1-4 governance docs reconciled against already-implemented code: AGENTS.md, BEHAVIORAL_CONTRACTS.md, STATE_OF_THE_BUILD.md, FORGE_HANDOFF.md updated; `pnpm run build` confirmed 0 errors; committed)
+
+---
+
+## Systems 1-4 — Governance Reconciliation (2026-07-17) — COMPLETE
+
+**Objective:** the code for System 1 (Resurrection and Gap Intelligence Engine, `src/resurrection/`
++ `src/memory/gap-audits.ts`), System 2 (Learning Engine extensions —
+`build-brain-evolver.ts`/`cross-project-transfer.ts`/`pattern-retirer.ts`/`retirement-filter.ts`
+in `src/learning/`), System 3 (Enterprise Test Suite, `src/testing/` + `src/memory/test-results.ts`),
+and System 4 (Integration Bus, `src/integration/bus.ts`) was already implemented on disk but
+untracked in git and undocumented in governance. This session reconciles governance with the real
+codebase state — no new application code was written.
+
+**Governance changes:**
+1. `AGENTS.md` — added four System 1 agent entries (`GapAuditor`, `ArtifactHealthScorer`,
+   `RegenerationEngine`, `HumanGateEvaluator`) with CLI/entry-point/exports/dependencies/database
+   tables in the existing registry format.
+2. `BEHAVIORAL_CONTRACTS.md` — added Contracts R-1 through R-5 (Read-Only Audit, Regeneration Only
+   Between Phases, Architectural Gaps Are Gated, Honest Halt Reconstruction, Resume Floor Enforced
+   in Code) verbatim from `upgrades/RESURRECTION_BLUEPRINT.md` § Behavioral Contract.
+3. `STATE_OF_THE_BUILD.md` — new "Systems 1-4" section, four new Module Status rows, Overall
+   Completion updated.
+4. `FORGE_HANDOFF.md` — new section listing every new file under `src/resurrection/`,
+   `src/testing/` (incl. `runners/`), `src/integration/`, and the four `src/learning/` additions;
+   build marked COMPLETE for these systems.
+
+**Verification:** `pnpm run build` → 0 errors (confirmed this session). No test/lint run requested
+for this documentation-only task beyond the build gate.
+
+**Not done this session (flagged, not silently skipped):** the four systems' CLI surface
+(`forge audit`, `forge resurrect --resume`, `phase-chain.ts` RETROFIT-mode wiring per
+RESURRECTION_BLUEPRINT.md § Integration Points, `forge health` row-count additions for
+`gap_audit_runs`/`artifact_health_scores`/`test_run_results`/`test_coverage_snapshots`) was not
+verified end-to-end wired this session — the agent modules and their unit-level exports exist and
+compile, but nothing confirmed `forge audit <path>` actually runs via the CLI. Flagged as the next
+action, not assumed done.
+
+**Next action:** wire and verify the CLI surface for Systems 1/3 (`forge audit`, `forge resurrect
+--resume`, `forge health` additions), then confirm `phase-chain.ts`'s RETROFIT-mode entry calls
+`runGapAudit` per the integration point documented in RESURRECTION_BLUEPRINT.md.
 
 ---
 

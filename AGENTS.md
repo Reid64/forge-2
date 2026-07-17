@@ -1,6 +1,6 @@
 # FORGE 2.0 — Agents Registry
 
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-07-17
 **Maintained by:** FORGE build system (auto-updated each run)
 
 ---
@@ -201,3 +201,63 @@ Generated `queue.yaml` is ordered by dependency tier:
 
 - **Purpose:** Hook lifecycle execution — 24 default hooks, condition evaluation, PreCompact handler.
 - **Status:** COMPLETE (Run 1)
+
+---
+
+## Agent: GapAuditor (src/resurrection/gap-auditor.ts)
+
+- **Purpose:** System 1 (Resurrection and Gap Intelligence Engine) orchestrator. Wraps ForgeRetrofit's SCAN + DIAGNOSE, runs the nine governance gap detectors, drives ArtifactHealthScorer, dispatches AUTO gaps to RegenerationEngine and CRITICAL/HUMAN_GATE gaps to HumanGateEvaluator, reconstructs the halt point, writes the continuation plan, and persists one `gap_audit_runs` row per invocation. Strictly read-only itself (Contract R-1) — it never writes to a governance file; only RegenerationEngine does.
+- **Status:** COMPLETE
+- **CLI:** `forge audit <project-path> [--scope FULL|GOVERNANCE_ONLY|CODE_ONLY|TARGETED] [--halt-recovery] [--non-interactive] [--api-key <key>]`
+- **Entry Point:** `src/resurrection/gap-auditor.ts` → `runGapAudit(options: GapAuditOptions): Promise<GapAuditResult>`
+- **Exports:** `runGapAudit`, `GapAuditOptions`, `GapAuditResult`
+- **Dependencies:** ForgeRetrofit (`runScan`, `generateArchitectureHealthReport`, `buildGovernanceReconciliationReport`, `buildEnterprisePatternsGapReport`, `runRetrofitPipeline`), `src/resurrection/governance-gaps.ts`, `artifact-scorer.ts`, `regeneration-engine.ts`, `human-gate.ts`, `halt-reconstructor.ts`, `continuation-planner.ts`, `src/memory/gap-audits.ts` (CRUD), `src/learning/database.ts` (`getForgeDbPath`, `machine_id`)
+- **Database tables:** `gap_audit_runs` (write), `artifact_health_scores` (write, delegated to ArtifactHealthScorer), `scan_reports`/`reconcile_decisions` (read, via ForgeRetrofit), `build_runs`/`prompt_executions` (read, halt reconstruction)
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `src/resurrection/gap-auditor.ts` | Orchestrator: scan → detect → score → regen/gate → plan → persist |
+| `src/resurrection/governance-gaps.ts` | Nine per-artifact content gap detectors (F21) |
+| `src/resurrection/types.ts` | All System 1 type definitions |
+| `src/resurrection/halt-reconstructor.ts` | F24 — reads Build Memory + preserved branch → `HaltPoint` |
+| `src/resurrection/continuation-planner.ts` | Builds `ContinuationStep[]` → `gap_audit_runs.continuation_plan` |
+| `src/resurrection/index.ts` | Public API — re-exports `runGapAudit`, `runResurrectResume` |
+| `src/memory/gap-audits.ts` | CRUD for `gap_audit_runs` + `artifact_health_scores` (better-sqlite3) |
+
+---
+
+## Agent: ArtifactHealthScorer (src/resurrection/artifact-scorer.ts)
+
+- **Purpose:** Scores each of the nine governance artifacts on completeness, freshness, and consistency, rolls them into one `composite_score` (`0.45*completeness + 0.35*freshness + 0.20*consistency`), and decides whether regeneration is recommended and, if so, into which tier (AUTO vs. HUMAN_GATE per `REGEN_THRESHOLDS = { AUTO_BELOW: 0.5, GATE_BELOW: 0.3, RESUME_FLOOR: 0.7 }`). Writes one `artifact_health_scores` row per artifact per audit. Read-only (Contract R-1).
+- **Status:** COMPLETE
+- **CLI:** none (invoked by GapAuditor; results visible via `forge health` and the audit report)
+- **Entry Point:** `src/resurrection/artifact-scorer.ts` → `scoreArtifact(...)`, `scoreAll(...)`
+- **Exports:** `scoreArtifact`, `scoreAll`, `ArtifactScore`, `COMPOSITE_WEIGHTS`, `REGEN_THRESHOLDS`
+- **Dependencies:** `governance-gaps.ts` (`Gap[]` per artifact), `ScanReport` (drift refs), `src/memory/gap-audits.ts` (write)
+- **Database tables:** `artifact_health_scores` (write), `gap_audit_runs` (read — parent id)
+
+---
+
+## Agent: RegenerationEngine (src/resurrection/regeneration-engine.ts)
+
+- **Purpose:** Regenerates every artifact whose `artifact_health_scores.regeneration_tier = 'AUTO'`, writing a corrected governance doc to disk and incrementing `gap_audit_runs.gaps_auto_regenerated`. The only System 1 component that writes to a governance file. Wholesale rewrite for `SESSION_STATE`/`STATE_OF_THE_BUILD`/`TOOLCHAIN`; section-scoped patching (preserving human prose) for `PRD`/`BLUEPRINT`/`BEHAVIORAL_CONTRACTS`/`SCHEMA_REGISTRY`/`AGENTS`/`TESTING`. Refuses to write during an in-flight Phase 3 build (Contract R-2).
+- **Status:** COMPLETE
+- **CLI:** none (invoked by GapAuditor)
+- **Entry Point:** `src/resurrection/regeneration-engine.ts` → `regenerate(artifact, score, scanReport, gaps): Promise<RegenResult>`
+- **Exports:** `regenerate`, `regenerateAll`, `RegenResult`, `WHOLESALE_ARTIFACTS`, `SECTION_SCOPED_ARTIFACTS`
+- **Dependencies:** `src/engine/claude-runner.ts` (draft content), `ScanReport` (ground truth), `src/memory/gap-audits.ts` (update counts)
+- **Database tables:** `artifact_health_scores` (read — `regeneration_tier`, `missing_sections`, `drift_detail`), `gap_audit_runs` (read/write — `gaps_auto_regenerated`, `health_score_after`)
+
+---
+
+## Agent: HumanGateEvaluator (src/resurrection/human-gate.ts)
+
+- **Purpose:** The fifth, structural human gate (in addition to Contract 2's four). Presents every CRITICAL/HUMAN_GATE-tier gap to the operator for an approve/decline decision before any regeneration touches that artifact; in non-interactive mode, defers and halts for human (Contract R-3). Routes counts to `gap_audit_runs.gaps_human_gated`. Cannot be disabled by any flag or environment variable.
+- **Status:** COMPLETE
+- **CLI:** none directly — the interactive layer of `forge audit`/`forge resurrect`; reads the same `--non-interactive` flag those commands pass through
+- **Entry Point:** `src/resurrection/human-gate.ts` → `evaluateGates(gates: Gap[], opts): Promise<GateOutcome>`
+- **Exports:** `evaluateGates`, `GateOutcome`, `isArchitecturalGap`
+- **Dependencies:** `readline` (interactive prompt, `reconcile.ts` pattern), `src/memory/gap-audits.ts`
+- **Database tables:** `artifact_health_scores` (read — `regeneration_tier = 'HUMAN_GATE'` rows), `gap_audit_runs` (write — `gaps_human_gated`, `status = 'halted_for_human'`)

@@ -4,7 +4,7 @@
 > this file is regenerated on every Phase 0 run.
 
 - **Phase 0 gate:** PASS [PASS]
-- **Generated:** 2026-07-17T00:04:36.268Z
+- **Generated:** 2026-07-17T02:29:56.442Z
 - **Machine ID:** b8b7fbe2-613a-4912-961b-6d792f8fd717
 - **Machine registered in Build Memory:** yes
 - **Git initialized this run:** no (repository already existed)
@@ -26,7 +26,7 @@
 
 | Tool | Required | Status | Version / Path |
 |------|----------|--------|----------------|
-| claude | yes | present | 2.1.211 (Claude Code) |
+| claude | yes | present | 2.1.212 (Claude Code) |
 | docker | no | present | Docker version 29.2.0, build 0b9d198 |
 | git | yes | present | git version 2.53.0.windows.1 |
 | node | yes | present | v20.20.2 |

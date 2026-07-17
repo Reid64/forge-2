@@ -43,6 +43,7 @@ import type { ErrorPattern, Json, Resolution } from '../types/index.js';
 import { BuildMemory } from '../memory/index.js';
 import { hashPrompt } from './prompt-assembler.js';
 import { logLine } from '../tools/forge-logger.js';
+import { filterRetiredPatterns } from '../learning/retirement-filter.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -344,6 +345,9 @@ export async function rewritePrompt(
       patterns = [];
     }
   }
+  // Drop patterns a PatternRetirer has retired (pattern_retirement_log anti-join).
+  const memoryDb = BuildMemory.getClient();
+  if (memoryDb) patterns = filterRetiredPatterns(patterns, memoryDb);
   // Most-frequent first, so the highest-signal patterns drive precedents + prevention.
   const ordered = [...patterns].sort((a, b) => b.occurrence_count - a.occurrence_count);
 

@@ -109,6 +109,8 @@ import { scanDeadCode, formatDeadCodeReport } from '../tools/dead-code-scanner.j
 import type { DeadCodeReport } from '../tools/dead-code-scanner.js';
 import { runSixLawsCheck } from '../engine/governance-gate.js';
 import type { SixLawsResult } from '../analysis/six-laws-verifier.js';
+import { runTests } from '../testing/orchestrator.js';
+import { RunnerType, TriggerType, type TestOrchestratorOptions, type TestRunResult } from '../testing/types.js';
 import { BuildMemory } from '../memory/index.js';
 import { getLogger, logLine } from '../tools/forge-logger.js';
 import { initializeForgeMemory } from '../learning/database.js';
@@ -554,6 +556,22 @@ export interface SentinelOptions {
     /** Override Lighthouse runner (tests). */
     runLighthouse?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
   };
+  /**
+   * Post-PASS Enterprise Test Suite hook (TESTING_BLUEPRINT.md § TestOrchestrator, § Sentinel
+   * Integration). When supplied AND every check above has passed, Sentinel calls
+   * `runTests({ triggers: [POST_PROMPT], runners: [UNIT, INTEGRATION] })` against `projectPath`
+   * (default: this run's `projectPath`) and records each `TestRunResult` to Build Memory.
+   * TestOrchestrator is a non-fatal collaborator (Contract 4): a test failure is logged and
+   * surfaced, but never re-flips a passed Sentinel gate to failed. Omitted by default — opt-in,
+   * matching every other optional Sentinel check.
+   */
+  postPromptTests?: {
+    projectPath?: string;
+    buildRunId?: string | null;
+    promptId?: string | null;
+  };
+  /** Override the TestOrchestrator dispatcher (tests). Default: {@link runTests}. */
+  runPostPromptTests?: (options: TestOrchestratorOptions) => Promise<TestRunResult[]>;
   /** Progress reporter. Default logs to the console with a `[FORGE:sentinel]` prefix. */
   log?: (message: string) => void;
 }
@@ -3455,6 +3473,29 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   const failedCheck = checks.find((c) => !c.passed && !c.skipped)?.name ?? null;
   const passed = failedCheck === null;
   const diagnosticReport = renderDiagnosticReport(checks, failedCheck, projectPath);
+
+  // --- Post-PASS: Enterprise Test Suite (TestOrchestrator) ------------------------------------
+  // Fires only once every check above has passed. TestOrchestrator is a non-fatal collaborator
+  // (Contract 4) — its results are recorded to Build Memory and logged, but never re-flip `passed`.
+  if (passed && options.postPromptTests) {
+    const runPostPromptTests = options.runPostPromptTests ?? runTests;
+    try {
+      const testResults = await runPostPromptTests({
+        projectPath: options.postPromptTests.projectPath ?? projectPath,
+        buildRunId: options.postPromptTests.buildRunId ?? null,
+        promptId: options.postPromptTests.promptId ?? null,
+        triggers: [TriggerType.POST_PROMPT],
+        runners: [RunnerType.UNIT, RunnerType.INTEGRATION],
+      });
+      for (const r of testResults) {
+        log(
+          `TestOrchestrator: ${r.testSuite} — ${r.status} (${r.passed}/${r.passed + r.failed + r.skipped} tests, ${r.durationMs}ms)`
+        );
+      }
+    } catch (error) {
+      log(`WARNING: TestOrchestrator post-PASS hook threw (${describe(error)}) — not evaluated`);
+    }
+  }
 
   log(passed ? 'Sentinel: PASS ✅' : `Sentinel: FAIL ❌ (first failure: ${failedCheck})`);
   return { passed, checks, failedCheck, diagnosticReport };

@@ -60,6 +60,7 @@ import type { StackFingerprint } from '../tools/stack-detector.js';
 import { readCodebase } from '../tools/codebase-reader.js';
 import type { CodebaseSnapshot } from '../tools/codebase-reader.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
+import { transferKnowledge } from '../learning/cross-project-transfer.js';
 import { logLine } from '../tools/forge-logger.js';
 import { toAsciiGovernanceText } from '../tools/governance-text.js';
 import { detectVsCodePath } from '../tools/live-status.js';
@@ -389,9 +390,17 @@ const BLUEPRINT_CANONICAL_RULES = [
   '7. Governance documents are read-only during Phase 3 execution (Contract 3).',
 ];
 
-function renderBlueprint(design: ArchitectureDesign, fingerprint: StackFingerprint | undefined): Record<string, string> {
+function renderBlueprint(
+  design: ArchitectureDesign,
+  fingerprint: StackFingerprint | undefined,
+  crossProjectContext = ''
+): Record<string, string> {
+  const overview =
+    crossProjectContext.trim() === ''
+      ? renderSystemOverview(design)
+      : `${renderSystemOverview(design)}\n\n${crossProjectContext.trim()}`;
   return {
-    SYSTEM_OVERVIEW: renderSystemOverview(design),
+    SYSTEM_OVERVIEW: overview,
     TECH_STACK: renderTechStack(fingerprint),
     ARCHITECTURE_OVERVIEW: renderArchitectureOverview(design),
     PROJECT_STRUCTURE: renderProjectStructure(design),
@@ -1056,6 +1065,30 @@ export async function runPhase2Governance(
 
   log(`rendering governance package for "${projectName}" â†’ ${governanceDir}`);
 
+  // 0. CrossProjectKnowledgeTransfer (LEARNING_BLUEPRINT.md § Agent: CrossProjectKnowledgeTransfer)
+  // — pre-step PUSH of stack-compatible, non-retired insights from prior builds, injected into
+  // BLUEPRINT.md's system overview. Guarded: no stack fingerprint or an unreachable Build Memory
+  // degrades to no injection (Contract 4); this call never throws here (it only throws for the
+  // explicit single-source `--build-id` CLI path, not used on this automatic pre-step).
+  let crossProjectTransferBlock = '';
+  if (options.stackFingerprint) {
+    try {
+      const memoryDb = BuildMemory.getClient();
+      if (memoryDb) {
+        const transfer = transferKnowledge(projectPath, options.stackFingerprint, memoryDb);
+        crossProjectTransferBlock = transfer.contextBlock;
+        log(
+          `CrossProjectKnowledgeTransfer: ${transfer.transferred} insight(s) transferred ` +
+            `(${transfer.skippedIncompatible} incompatible, ${transfer.skippedRetired} retired)`
+        );
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      warnings.push(`CrossProjectKnowledgeTransfer skipped (${reason}).`);
+      log(`WARNING: CrossProjectKnowledgeTransfer skipped (${reason})`);
+    }
+  }
+
   // Shared placeholders present in every document.
   const common: Record<string, string> = {
     PROJECT_NAME: projectName,
@@ -1065,7 +1098,7 @@ export async function runPhase2Governance(
 
   // Per-document variable sets for the six DESIGN documents.
   const designVars: Record<GovernanceDocName, Record<string, string>> = {
-    'BLUEPRINT.md': { ...common, ...renderBlueprint(design, options.stackFingerprint) },
+    'BLUEPRINT.md': { ...common, ...renderBlueprint(design, options.stackFingerprint, crossProjectTransferBlock) },
     'SCHEMA_REGISTRY.md': { ...common, ...renderSchemaRegistry(design.database) },
     'AGENTS.md': { ...common, ...renderAgents(design.agents) },
     'BEHAVIORAL_CONTRACTS.md': { ...common, ...renderBehavioralContracts(design) },

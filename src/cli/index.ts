@@ -22,6 +22,7 @@
  *   resurrect <path>  Project Autopsy on a failed project (F10)
  *   estimate <path>   Cost/time estimate without building (F17)
  *   repair <path>     Repair a broken TypeScript repo (diagnose → cluster → queue → execute → verify)
+ *   verify <url>      Post-deploy HTTP health check: GET every src/app/api route against a live URL (F9)
  *
  * House style carried over from the phases: nothing here throws to the top level —
  * a failed command sets `process.exitCode` and prints a diagnostic. Build Memory
@@ -64,6 +65,7 @@ import { cmdCompile } from './compile-command.js';
 import { cmdGeneratePrompts } from './generate-prompts-command.js';
 import { tryRenderLiveStatus } from './status-command.js';
 import { diffQueueEntries, getQueueVersion, loadQueueEntriesFromFile } from '../tools/queue-versioning.js';
+import { runGapAudit, type AuditScope } from '../resurrection/index.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -84,6 +86,9 @@ import type {
   SelfCreatedAgent,
 } from '../types/index.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
+
+/** Default per-route latency budget for `forge verify` (F9), in milliseconds. */
+const DEFAULT_VERIFY_LATENCY_BUDGET_MS = 3000;
 
 /** The scheduler task types accepted by `forge schedule add --type`. */
 const SCHEDULED_TASK_TYPES: readonly ScheduledTaskType[] = [
@@ -1201,9 +1206,18 @@ async function findLatestAutopsyReport(reportsDir: string): Promise<string | nul
  * Phase 3 build queue directly from the autopsy report found in the project's
  * `reports/` directory, then executes it.
  */
-async function cmdResurrect(pathArg: string, opts: { autonomousRecovery?: boolean }): Promise<void> {
+async function cmdResurrect(
+  pathArg: string,
+  opts: { autonomousRecovery?: boolean; resume?: boolean; nonInteractive?: boolean }
+): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
+
+  if (opts.resume) {
+    await cmdResurrectResume(projectPath, projectName, { nonInteractive: opts.nonInteractive });
+    return;
+  }
+
   console.log(chalk.bold(`\nResurrecting ${projectName} at ${projectPath}`));
 
   // Phase 0 — environment gate. Resurrection skips the AgentShield security scan
@@ -1289,6 +1303,119 @@ async function cmdResurrect(pathArg: string, opts: { autonomousRecovery?: boolea
     printWarnings(learn.warnings);
   }
   console.log(chalk.green('\n✔ Resurrection complete.'));
+}
+
+/**
+ * `forge resurrect <path> --resume` — halt-recovery audit + resume from the exact halt point
+ * (RESURRECTION_BLUEPRINT.md §Integration Points › `src/cli/index.ts`). Runs a TARGETED gap
+ * audit to reconstruct the halt point and score governance health, enforces the resume floor in
+ * code (mean composite_score >= 0.70 and zero CRITICAL gaps — Contract R-5), then hands the
+ * reconstructed prompt index to the existing replay machinery so completed prompts 1..N are
+ * never re-run (R7).
+ */
+async function cmdResurrectResume(
+  projectPath: string,
+  projectName: string,
+  opts: { nonInteractive?: boolean }
+): Promise<void> {
+  console.log(chalk.bold(`\nResuming ${projectName} at ${projectPath} via halt-recovery audit`));
+
+  const audit = await runGapAudit({
+    projectPath,
+    scope: 'TARGETED',
+    trigger: 'halt_recovery',
+    haltRecovery: true,
+    nonInteractive: opts.nonInteractive ?? false,
+  });
+
+  console.log(
+    `  health: ${audit.healthScoreBefore?.toFixed(2) ?? 'n/a'} → ${audit.healthScoreAfter?.toFixed(2) ?? 'n/a'}  ` +
+      `resume eligible: ${audit.resumeEligible ? chalk.green('yes') : chalk.red('no')}`
+  );
+  if (audit.reportPath) console.log(chalk.dim(`  audit report: ${audit.reportPath}`));
+
+  if (!audit.resumeEligible) {
+    const criticalCount = audit.gaps.filter((g) => g.severity === 'CRITICAL').length;
+    fail(
+      `Resume blocked — the resume floor was not met (mean composite_score >= 0.70 and zero CRITICAL gaps required; ` +
+        `got ${(audit.healthScoreAfter ?? audit.healthScoreBefore ?? 0).toFixed(2)} with ${criticalCount} CRITICAL gap(s)). ` +
+        'Re-run `forge audit --halt-recovery` interactively (without --non-interactive) to clear any human gates.'
+    );
+    return;
+  }
+
+  const haltPoint = audit.haltPoint;
+  if (!haltPoint || haltPoint.buildRunId === null || haltPoint.promptIndex === null) {
+    fail('Resume blocked — the gap audit could not reconstruct a halt point (no halted/non-terminal build found for this project in Build Memory).');
+    return;
+  }
+
+  const build = await BuildMemory.builds.getBuild(haltPoint.buildRunId);
+  if (!build) {
+    fail(`Resume blocked — build ${haltPoint.buildRunId} referenced by the reconstructed halt point was not found in Build Memory.`);
+    return;
+  }
+
+  const fromPromptIndex = haltPoint.promptIndex;
+  const checkpointTag = checkpointTagFor(build.id, fromPromptIndex - 1);
+  console.log(
+    chalk.bold(
+      `  resuming build ${build.id} at prompt ${fromPromptIndex}` +
+        (haltPoint.promptName ? ` ('${haltPoint.promptName}')` : '')
+    ) + (haltPoint.failingCheck ? chalk.dim(`, which failed check "${haltPoint.failingCheck}"`) : '')
+  );
+
+  await runReplay(build, { originalBuildRunId: build.id, fromCheckpointTag: checkpointTag, fromPromptIndex });
+}
+
+/**
+ * `forge audit <project-path>` — governance-vs-code gap audit (System 1: GapAuditor). Wraps
+ * ForgeRetrofit's scan + DIAGNOSE, scores each governance artifact, regenerates AUTO-tier gaps,
+ * and gates architectural (CRITICAL/HUMAN_GATE) gaps for human approval.
+ */
+async function cmdAudit(
+  pathArg: string,
+  opts: { scope?: string; haltRecovery?: boolean; nonInteractive?: boolean; apiKey?: string }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const projectName = basename(projectPath) || 'project';
+  const scope = (opts.scope as AuditScope | undefined) ?? 'FULL';
+  console.log(chalk.bold(`\nAuditing ${projectName} at ${projectPath}`) + chalk.dim(`  (scope: ${scope})`));
+
+  const result = await runGapAudit({
+    projectPath,
+    scope,
+    trigger: 'manual',
+    haltRecovery: opts.haltRecovery ?? false,
+    nonInteractive: opts.nonInteractive ?? false,
+    apiKey: opts.apiKey,
+  });
+
+  const critical = result.gaps.filter((g) => g.severity === 'CRITICAL').length;
+  const major = result.gaps.filter((g) => g.severity === 'MAJOR').length;
+  const minor = result.gaps.filter((g) => g.severity === 'MINOR').length;
+  console.log(
+    `  gaps: ${chalk.bold(String(result.gaps.length))} total ` +
+      `(${chalk.red(String(critical) + ' critical')}, ${chalk.yellow(String(major) + ' major')}, ${chalk.dim(String(minor) + ' minor')})`
+  );
+  console.log(
+    `  health: ${result.healthScoreBefore?.toFixed(2) ?? 'n/a'} → ${result.healthScoreAfter?.toFixed(2) ?? 'n/a'}  ` +
+      `resume eligible: ${result.resumeEligible ? chalk.green('yes') : chalk.red('no')}`
+  );
+  if (result.haltPoint?.buildRunId) {
+    console.log(
+      chalk.dim(
+        `  halt point: build ${result.haltPoint.buildRunId} prompt ${result.haltPoint.promptIndex ?? '?'} ` +
+          `(${result.haltPoint.promptName ?? 'unnamed'}${result.haltPoint.failingCheck ? `, failed "${result.haltPoint.failingCheck}"` : ''})`
+      )
+    );
+  }
+  if (result.reportPath) console.log(chalk.dim(`  report: ${result.reportPath}`));
+
+  if (result.status === 'halted_for_human') {
+    fail('Audit halted for human — architectural gaps await approval (re-run `forge audit` interactively, without --non-interactive, to clear the gate).');
+    return;
+  }
 }
 
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
@@ -1813,7 +1940,22 @@ async function main(): Promise<void> {
     .description('Autopsy a failed project and rebuild it straight from the report (skips Phase 1A/1B)')
     .argument('<path>', 'target project directory')
     .option('--autonomous-recovery', 'enable Autonomous Recovery Mode (Contract 14) during the rebuild', false)
-    .action((pathArg: string, opts: { autonomousRecovery?: boolean }) => cmdResurrect(pathArg, opts));
+    .option('--resume', 'Halt-recovery audit + resume from the exact halt point of the last halted build, instead of a full autopsy rebuild', false)
+    .option('--non-interactive', 'With --resume: defer human-gated gaps and halt for human instead of prompting interactively', false)
+    .action((pathArg: string, opts: { autonomousRecovery?: boolean; resume?: boolean; nonInteractive?: boolean }) => cmdResurrect(pathArg, opts));
+
+  program
+    .command('audit')
+    .description('Audit governance-vs-code gaps, score artifact health, regenerate safe gaps, gate architectural ones')
+    .argument('<project-path>', 'Absolute path to the project to audit')
+    .option('--scope <scope>', 'FULL | GOVERNANCE_ONLY | CODE_ONLY | TARGETED', 'FULL')
+    .option('--halt-recovery', 'Reconstruct the exact halt point of the last halted build', false)
+    .option('--non-interactive', 'Defer (never auto-approve) human-gated gaps and halt for human', false)
+    .option('--api-key <key>', 'Anthropic API key for regeneration drafting')
+    .action(
+      (p: string, opts: { scope?: string; haltRecovery?: boolean; nonInteractive?: boolean; apiKey?: string }) =>
+        cmdAudit(p, opts)
+    );
 
   program
     .command('estimate')
@@ -1985,6 +2127,57 @@ async function main(): Promise<void> {
     });
 
   program
+    .command('test')
+    .description('Run the FORGE Enterprise Test Suite (TestOrchestrator) against a project')
+    .option('--project <path>', 'target project directory (default cwd)')
+    .option('--trigger <trigger>', 'post-prompt|pre-deploy|scheduled|manual', 'manual')
+    .option('--runners <list>', 'comma-separated: unit,integration,api,e2e,security,performance,dependency', 'unit,integration')
+    .action(async (opts: { project?: string; trigger?: string; runners?: string }) => {
+      try {
+        const { runTests } = await import('../testing/orchestrator.js');
+        const { RunnerType, TriggerType } = await import('../testing/types.js');
+        const projectPath = resolve(opts.project ?? process.cwd());
+
+        const triggerKey = (opts.trigger ?? 'manual').toUpperCase().replace(/-/g, '_');
+        const trigger = (TriggerType as Record<string, string>)[triggerKey] as (typeof TriggerType)[keyof typeof TriggerType] | undefined;
+        if (!trigger) {
+          console.error(chalk.red(`✖ Unknown --trigger "${opts.trigger}". Expected one of: post-prompt, pre-deploy, scheduled, manual.`));
+          process.exitCode = 1;
+          return;
+        }
+
+        const runnerKeys = (opts.runners ?? 'unit,integration').split(',').map((r) => r.trim().toUpperCase()).filter((r) => r !== '');
+        const runners: Array<(typeof RunnerType)[keyof typeof RunnerType]> = [];
+        for (const key of runnerKeys) {
+          const runner = (RunnerType as Record<string, string>)[key] as (typeof RunnerType)[keyof typeof RunnerType] | undefined;
+          if (!runner) {
+            console.error(chalk.red(`✖ Unknown runner "${key}". Expected one of: ${Object.keys(RunnerType).join(', ')}.`));
+            process.exitCode = 1;
+            return;
+          }
+          runners.push(runner);
+        }
+
+        console.log(chalk.bold(`\nFORGE TestOrchestrator — ${projectPath}\n`));
+        const results = await runTests({
+          projectPath,
+          buildRunId: null,
+          promptId: null,
+          triggers: [trigger],
+          runners,
+        });
+
+        const failedSuites = results.filter((r) => r.status === 'failed' || r.status === 'error');
+        console.log('');
+        console.log(`  ${results.length} suite(s) run — ${chalk.green(String(results.length - failedSuites.length))} ok, ${chalk.red(String(failedSuites.length))} failed`);
+        if (failedSuites.length > 0) process.exitCode = 1;
+      } catch (err: unknown) {
+        console.error(chalk.red('✖ forge test failed:'), err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    });
+
+  program
     .command('compose')
     .description('Compose a FORGE execution queue from governance documents (BLUEPRINT.md, SCHEMA_REGISTRY.md, AGENTS.md)')
     .argument('<project-path>', 'Absolute path to the project with governance docs')
@@ -2060,6 +2253,22 @@ async function main(): Promise<void> {
       try {
         const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
         const resolved = resolve(projectPath);
+
+        spinner.text = 'Running pre-deploy gate (build + lint)...';
+        const { runPreDeployGate } = await import('../deploy/pre-deploy-gate.js');
+        const gateResult = await runPreDeployGate(resolved);
+        if (!gateResult.passed) {
+          spinner.stop();
+          console.log(chalk.red('[FAIL] PRE-DEPLOY GATE: blocked'));
+          for (const check of gateResult.checks.filter((c) => c.exitCode !== 0)) {
+            console.error(chalk.red(`  ${check.command} exited ${check.exitCode ?? 'unknown'}`));
+          }
+          console.error(chalk.yellow('See STATE_OF_THE_BUILD.md for the full BLOCKER report.'));
+          process.exitCode = 1;
+          return;
+        }
+        console.log(chalk.green('[PASS] PRE-DEPLOY GATE: clean'));
+
         spinner.stop();
         const buildReadyPath = join(resolved, '.forge', 'BUILD_READY.md');
         if (existsSync(buildReadyPath)) {
@@ -2086,6 +2295,43 @@ async function main(): Promise<void> {
       } catch (err: unknown) {
         spinner.fail('DEPLOY failed');
         console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command('verify')
+    .description('Post-deploy HTTP health check (F9): GET every src/app/api route against a live preview/production URL')
+    .argument('<preview-url>', 'base URL to verify routes against (e.g. a Vercel preview or production deployment)')
+    .option('--project <path>', 'target project directory (default cwd)')
+    .option('--latency-budget-ms <ms>', 'per-route response-time budget', String(DEFAULT_VERIFY_LATENCY_BUDGET_MS))
+    .action(async (previewUrl: string, opts: { project?: string; latencyBudgetMs?: string }) => {
+      const projectPath = resolve(opts.project ?? process.cwd());
+      const latencyBudgetMs = Number.parseInt(opts.latencyBudgetMs ?? String(DEFAULT_VERIFY_LATENCY_BUDGET_MS), 10);
+      console.log(chalk.bold(`\nforge verify — ${projectPath}`));
+      console.log(chalk.dim(`  URL: ${previewUrl}`));
+      try {
+        const { runDeployVerification } = await import('../deploy/verify-runner.js');
+        const result = await runDeployVerification({ projectPath, baseUrl: previewUrl, latencyBudgetMs });
+        if (result.routes.length === 0) {
+          console.log(chalk.yellow('  no API routes found under src/app/api — nothing to verify.'));
+        }
+        for (const r of result.routes) {
+          if (r.verdict === 'PASSED') {
+            console.log(chalk.green(`  [PASS] VERIFY: ${r.route} ${r.statusCode ?? '—'} ${r.latencyMs}ms`));
+          } else {
+            console.log(chalk.red(`  [FAIL] VERIFY: ${r.route} ${r.statusCode ?? 'ERR'} ${r.latencyMs}ms`));
+          }
+        }
+        console.log('');
+        if (result.passed) {
+          console.log(chalk.green('✔ verification-passed'));
+        } else {
+          console.log(chalk.red('✖ verification-failed'));
+          process.exitCode = 1;
+        }
+      } catch (err: unknown) {
+        console.error(chalk.red('✖ forge verify failed:'), err instanceof Error ? err.message : err);
         process.exitCode = 1;
       }
     });

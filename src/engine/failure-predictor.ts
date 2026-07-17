@@ -41,6 +41,7 @@ import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { BuildRun, ErrorPattern, JsonObject } from '../types/index.js';
 import { BuildMemory } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
+import { filterRetiredPatterns } from '../learning/retirement-filter.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -261,7 +262,9 @@ export async function predictFailure(
     log(`WARNING: pattern fetch failed (${describe(error)}) — treating as zero patterns`);
     candidates = [];
   }
-  const matchingPatterns = candidates
+  const memoryDb = BuildMemory.getClient();
+  const survivingCandidates = memoryDb ? filterRetiredPatterns(candidates, memoryDb) : candidates;
+  const matchingPatterns = survivingCandidates
     .filter((p) => patternMatchesStack(p, stack))
     .sort((a, b) => b.occurrence_count - a.occurrence_count);
 

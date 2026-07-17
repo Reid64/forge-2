@@ -177,3 +177,35 @@ When multiple machines are building:
 - Git branch names include machine_id: forge/{build-id}/{machine-id}/prompt-{index}
 - Build Memory is the single source of truth for build state
 - If Build Memory is unreachable, machine operates in standalone mode and syncs when reconnected
+
+## System 1 — Resurrection Contracts
+
+Source: `upgrades/RESURRECTION_BLUEPRINT.md` § Behavioral Contract (resurrection-specific, prose style of BEHAVIORAL_CONTRACTS.md). Reproduced verbatim.
+
+### Contract R-1: Read-Only Audit
+`GapAuditor` and `ArtifactHealthScorer` are read-only. The audit may read any file in the target
+project and any Build Memory row, but the only System 1 component that writes to a governance file
+is `RegenerationEngine`, and only under Contract R-2. An audit that modifies a file is a defect.
+
+### Contract R-2: Regeneration Only Between Phases
+`RegenerationEngine` may write a governance doc only when the target project is not in an in-flight
+Phase 3 build. During Phase 3, governance docs are immutable (Contract 3). Regeneration checks the
+build state before every write and refuses if a build is in flight, recording the refusal — never
+silently skipping and never silently writing.
+
+### Contract R-3: Architectural Gaps Are Gated
+Any gap matching a CRITICAL condition (schema table missing with no migration; absent governance
+doc; `BEHAVIORAL_CONTRACTS`-vs-code contradiction on Contract 1–20) is routed to
+`HumanGateEvaluator` and never auto-regenerated. In non-interactive mode the gate defers and halts
+for human; it never auto-approves. This gate is structural and non-configurable, following
+Contract 2's four-gate philosophy.
+
+### Contract R-4: Honest Halt Reconstruction
+Every field of `halt_point_reference` is read from Build Memory or the preserved git branch. A
+field that cannot be read is stored `null`, never fabricated (Iron Law 3). A partial halt point is
+a valid result; a fabricated one is a defect.
+
+### Contract R-5: Resume Floor Enforced in Code
+`forge resurrect --resume` and `phase-chain.ts` RETROFIT entry enforce the resume floor (mean
+`composite_score >= 0.70` and `gaps_critical = 0`) in code before handing any resume point to the
+Phase 3 executor. The floor is a gate, not operator advice.

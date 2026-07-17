@@ -336,86 +336,151 @@ const QUEUE_VERSIONING_SCHEMA_SQL = `
 `;
 
 /**
- * GapAuditor tables (schema bump 2.2.1 -> 2.3.0). `gap_audit_runs` — one row per
- * `forge audit` invocation; `artifact_health_scores` — one row per governance
- * artifact per audit run, FK'd to gap_audit_runs(id) ON DELETE CASCADE. See
- * governance/SCHEMA_REGISTRY.md and supabase/migrations/00{1,2,3}_*.sql for the
- * authoritative column/index definitions this mirrors.
+ * Systems 1-3 tables (schema bump 2.2.1 -> 2.3.0). Column/index/CHECK definitions are
+ * copied VERBATIM from `upgrades/SCHEMA_ADDITIONS.md` §1-§6 — that document is the
+ * authoritative schema contract for these six tables; no column here may drift from it.
  */
-const GAP_AUDITOR_SCHEMA_SQL = `
+const SYSTEMS_1_3_SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS gap_audit_runs (
-      id                      TEXT PRIMARY KEY,
-      machine_id              TEXT NOT NULL,
-      project_path            TEXT NOT NULL,
-      audit_trigger           TEXT NOT NULL CHECK (audit_trigger IN ('halt_recovery','scheduled','manual','pre_resume')),
-      audit_scope             TEXT NOT NULL DEFAULT 'FULL' CHECK (audit_scope IN ('FULL','TARGETED','CODE_ONLY','GOVERNANCE_ONLY')),
-      status                  TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed','halted_for_human')),
-      artifacts_audited       INTEGER NOT NULL DEFAULT 0,
-      gaps_found_total        INTEGER NOT NULL DEFAULT 0,
-      gaps_minor              INTEGER NOT NULL DEFAULT 0,
-      gaps_major              INTEGER NOT NULL DEFAULT 0,
-      gaps_critical           INTEGER NOT NULL DEFAULT 0,
-      gaps_auto_regenerated   INTEGER NOT NULL DEFAULT 0,
-      gaps_human_gated        INTEGER NOT NULL DEFAULT 0,
-      health_score_before     REAL,
-      health_score_after      REAL,
-      halt_point_reference    TEXT,
-      continuation_plan       TEXT,
-      scan_report_path        TEXT,
-      build_run_id            TEXT,
-      phase_at_audit          INTEGER,
-      resume_eligible         INTEGER NOT NULL DEFAULT 0 CHECK (resume_eligible IN (0,1)),
-      resume_blocked_reason   TEXT,
-      error_message           TEXT,
-      duration_ms             INTEGER,
-      created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-      completed_at            TEXT
+      id                     TEXT PRIMARY KEY,
+      project_name           TEXT NOT NULL,
+      project_path           TEXT NOT NULL,
+      build_run_id           TEXT,
+      audit_trigger          TEXT NOT NULL CHECK(audit_trigger IN ('manual','scheduled','retrofit_entry','halt_recovery','post_build')),
+      scope                  TEXT NOT NULL CHECK(scope IN ('FULL','GOVERNANCE_ONLY','CODE_ONLY','TARGETED')),
+      status                 TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running','completed','failed','halted_for_human')),
+      started_at             TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at           TEXT,
+      duration_ms            INTEGER,
+      artifacts_audited      TEXT NOT NULL DEFAULT '[]',
+      gaps_found_total       INTEGER NOT NULL DEFAULT 0,
+      gaps_minor             INTEGER NOT NULL DEFAULT 0,
+      gaps_major             INTEGER NOT NULL DEFAULT 0,
+      gaps_critical          INTEGER NOT NULL DEFAULT 0,
+      gaps_auto_regenerated  INTEGER NOT NULL DEFAULT 0,
+      gaps_human_gated       INTEGER NOT NULL DEFAULT 0,
+      halt_point_reference   TEXT,
+      continuation_plan      TEXT,
+      health_score_before    REAL,
+      health_score_after     REAL,
+      report_path            TEXT,
+      machine_id             TEXT NOT NULL,
+      created_at             TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_machine_id ON gap_audit_runs(machine_id);
-    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_build_run_id ON gap_audit_runs(build_run_id) WHERE build_run_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_project_path ON gap_audit_runs(project_path);
+    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_project ON gap_audit_runs(project_name, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_status ON gap_audit_runs(status);
-    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_audit_trigger ON gap_audit_runs(audit_trigger);
-    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_created_at ON gap_audit_runs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_gap_audit_runs_build ON gap_audit_runs(build_run_id);
 
     CREATE TABLE IF NOT EXISTS artifact_health_scores (
-      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-      audit_run_id              TEXT NOT NULL,
-      machine_id                TEXT NOT NULL,
-      artifact_name             TEXT NOT NULL CHECK (artifact_name IN ('PRD','SCHEMA_REGISTRY','AGENTS','BEHAVIORAL_CONTRACTS','BLUEPRINT','TOOLCHAIN','SESSION_STATE','STATE_OF_THE_BUILD','TESTING')),
-      artifact_path             TEXT,
-      exists_on_disk            INTEGER NOT NULL DEFAULT 0 CHECK (exists_on_disk IN (0,1)),
-      last_modified_days        REAL,
-      completeness_score        REAL NOT NULL DEFAULT 0.0 CHECK (completeness_score >= 0.0 AND completeness_score <= 1.0),
-      freshness_score           REAL NOT NULL DEFAULT 0.0 CHECK (freshness_score >= 0.0 AND freshness_score <= 1.0),
-      consistency_score         REAL NOT NULL DEFAULT 0.0 CHECK (consistency_score >= 0.0 AND consistency_score <= 1.0),
-      composite_score           REAL NOT NULL DEFAULT 0.0 CHECK (composite_score >= 0.0 AND composite_score <= 1.0),
-      gaps_minor                INTEGER NOT NULL DEFAULT 0,
-      gaps_major                INTEGER NOT NULL DEFAULT 0,
-      gaps_critical             INTEGER NOT NULL DEFAULT 0,
-      missing_sections          TEXT,
-      placeholder_count         INTEGER NOT NULL DEFAULT 0,
-      drift_detected            INTEGER NOT NULL DEFAULT 0 CHECK (drift_detected IN (0,1)),
+      id                        TEXT PRIMARY KEY,
+      gap_audit_run_id          TEXT NOT NULL,
+      artifact_name             TEXT NOT NULL CHECK(artifact_name IN ('PRD','SCHEMA_REGISTRY','AGENTS','BEHAVIORAL_CONTRACTS','BLUEPRINT','TOOLCHAIN','SESSION_STATE','STATE_OF_THE_BUILD','TESTING')),
+      exists_on_disk            INTEGER NOT NULL DEFAULT 0 CHECK(exists_on_disk IN (0,1)),
+      completeness_score        REAL NOT NULL DEFAULT 0 CHECK(completeness_score >= 0.0 AND completeness_score <= 1.0),
+      freshness_score           REAL NOT NULL DEFAULT 0 CHECK(freshness_score >= 0.0 AND freshness_score <= 1.0),
+      consistency_score         REAL NOT NULL DEFAULT 0 CHECK(consistency_score >= 0.0 AND consistency_score <= 1.0),
+      composite_score           REAL NOT NULL DEFAULT 0 CHECK(composite_score >= 0.0 AND composite_score <= 1.0),
+      drift_detected            INTEGER NOT NULL DEFAULT 0 CHECK(drift_detected IN (0,1)),
       drift_detail              TEXT,
-      regeneration_tier         TEXT NOT NULL DEFAULT 'NONE' CHECK (regeneration_tier IN ('NONE','AUTO','HUMAN_GATE')),
-      regeneration_mode         TEXT CHECK (regeneration_mode IS NULL OR regeneration_mode IN ('FULL_FILE','SECTION_SCOPED')),
-      health_score_before       REAL,
-      health_score_after        REAL,
-      regenerated_at            TEXT,
-      gate_status               TEXT CHECK (gate_status IS NULL OR gate_status IN ('pending','approved','declined','deferred')),
-      gate_presented_at         TEXT,
-      gate_resolved_at          TEXT,
-      gate_prompt_text          TEXT,
-      created_at                TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (audit_run_id) REFERENCES gap_audit_runs(id) ON DELETE CASCADE
+      missing_sections          TEXT NOT NULL DEFAULT '[]',
+      placeholder_count         INTEGER NOT NULL DEFAULT 0,
+      regeneration_recommended  INTEGER NOT NULL DEFAULT 0 CHECK(regeneration_recommended IN (0,1)),
+      regeneration_tier         TEXT CHECK(regeneration_tier IN ('AUTO','HUMAN_GATE') OR regeneration_tier IS NULL),
+      scored_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+      machine_id                TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_audit_run_id ON artifact_health_scores(audit_run_id);
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_machine_id ON artifact_health_scores(machine_id);
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_artifact_name ON artifact_health_scores(artifact_name);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_health_scores_run_artifact ON artifact_health_scores(audit_run_id, artifact_name);
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_regeneration_tier ON artifact_health_scores(regeneration_tier);
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_drift_detected ON artifact_health_scores(drift_detected) WHERE drift_detected = 1;
-    CREATE INDEX IF NOT EXISTS idx_artifact_health_scores_composite_score ON artifact_health_scores(composite_score);
+    CREATE INDEX IF NOT EXISTS idx_artifact_health_audit ON artifact_health_scores(gap_audit_run_id);
+    CREATE INDEX IF NOT EXISTS idx_artifact_health_name ON artifact_health_scores(artifact_name);
+    CREATE INDEX IF NOT EXISTS idx_artifact_health_score ON artifact_health_scores(composite_score ASC);
+
+    CREATE TABLE IF NOT EXISTS evolution_promotions (
+      id                            TEXT PRIMARY KEY,
+      pending_evolution_id          TEXT NOT NULL,
+      evolution_type                TEXT NOT NULL CHECK(evolution_type IN ('HOOK','TEMPLATE','RULE','THRESHOLD','CONFIG','GATE')),
+      confidence_at_promotion       REAL NOT NULL CHECK(confidence_at_promotion >= 0.0 AND confidence_at_promotion <= 1.0),
+      confidence_threshold_applied  REAL NOT NULL CHECK(confidence_threshold_applied >= 0.0 AND confidence_threshold_applied <= 1.0),
+      promotion_method              TEXT NOT NULL CHECK(promotion_method IN ('AUTO','HUMAN_APPROVED','HUMAN_OVERRIDE_REJECTED')),
+      evidence_build_count          INTEGER NOT NULL DEFAULT 0,
+      pre_promotion_success_rate    REAL,
+      post_promotion_success_rate   REAL,
+      monitoring_window_builds      INTEGER NOT NULL DEFAULT 10,
+      rollback_triggered            INTEGER NOT NULL DEFAULT 0 CHECK(rollback_triggered IN (0,1)),
+      rollback_reason               TEXT,
+      promoted_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at                   TEXT,
+      machine_id                    TEXT NOT NULL,
+      created_at                    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_evolution_promotions_pending ON evolution_promotions(pending_evolution_id);
+    CREATE INDEX IF NOT EXISTS idx_evolution_promotions_method ON evolution_promotions(promotion_method);
+    CREATE INDEX IF NOT EXISTS idx_evolution_promotions_rollback ON evolution_promotions(rollback_triggered) WHERE rollback_triggered = 1;
+
+    CREATE TABLE IF NOT EXISTS pattern_retirement_log (
+      id                                  TEXT PRIMARY KEY,
+      pattern_table                       TEXT NOT NULL CHECK(pattern_table IN ('fix_patterns','error_patterns','skill_library','design_patterns','governance_rules')),
+      pattern_id                          TEXT NOT NULL,
+      pattern_fingerprint                 TEXT NOT NULL,
+      retirement_reason                   TEXT NOT NULL CHECK(retirement_reason IN ('ZERO_SUCCESS_RATE','STALE_UNUSED','SUPERSEDED','CONTRADICTS_NEWER_PATTERN','MANUAL')),
+      times_applied_before_retirement      INTEGER NOT NULL DEFAULT 0,
+      times_succeeded_before_retirement    INTEGER NOT NULL DEFAULT 0,
+      success_rate_at_retirement           REAL NOT NULL DEFAULT 0,
+      last_seen_before_retirement          TEXT,
+      superseded_by_pattern_id             TEXT,
+      action_taken                        TEXT NOT NULL DEFAULT 'SOFT_RETIRE' CHECK(action_taken IN ('SOFT_RETIRE','HARD_DELETE')),
+      retired_at                          TEXT NOT NULL DEFAULT (datetime('now')),
+      machine_id                          TEXT NOT NULL,
+      created_at                          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pattern_retirement_table_id ON pattern_retirement_log(pattern_table, pattern_id);
+    CREATE INDEX IF NOT EXISTS idx_pattern_retirement_reason ON pattern_retirement_log(retirement_reason);
+    CREATE INDEX IF NOT EXISTS idx_pattern_retirement_fingerprint ON pattern_retirement_log(pattern_fingerprint);
+
+    CREATE TABLE IF NOT EXISTS test_run_results (
+      id                    TEXT PRIMARY KEY,
+      build_run_id          TEXT,
+      project_name          TEXT NOT NULL,
+      trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
+      test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE')),
+      runner                TEXT NOT NULL DEFAULT 'vitest',
+      status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
+      prompt_index          INTEGER,
+      tests_total           INTEGER NOT NULL DEFAULT 0,
+      tests_passed          INTEGER NOT NULL DEFAULT 0,
+      tests_failed          INTEGER NOT NULL DEFAULT 0,
+      tests_skipped         INTEGER NOT NULL DEFAULT 0,
+      duration_ms           INTEGER NOT NULL DEFAULT 0,
+      failure_summary       TEXT,
+      report_path           TEXT,
+      exit_code             INTEGER,
+      started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at          TEXT,
+      machine_id            TEXT NOT NULL,
+      created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_test_run_results_build ON test_run_results(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_test_run_results_suite ON test_run_results(test_suite, status);
+    CREATE INDEX IF NOT EXISTS idx_test_run_results_project ON test_run_results(project_name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_test_run_results_status ON test_run_results(status);
+
+    CREATE TABLE IF NOT EXISTS test_coverage_snapshots (
+      id                     TEXT PRIMARY KEY,
+      build_run_id           TEXT,
+      project_name           TEXT NOT NULL,
+      test_run_result_id     TEXT NOT NULL,
+      coverage_type          TEXT NOT NULL CHECK(coverage_type IN ('LINE','BRANCH','FUNCTION','STATEMENT')),
+      coverage_pct           REAL NOT NULL CHECK(coverage_pct >= 0.0 AND coverage_pct <= 100.0),
+      lines_total            INTEGER NOT NULL DEFAULT 0,
+      lines_covered          INTEGER NOT NULL DEFAULT 0,
+      files_below_threshold  TEXT NOT NULL DEFAULT '[]',
+      threshold_required     REAL NOT NULL DEFAULT 0.80 CHECK(threshold_required >= 0.0 AND threshold_required <= 1.0),
+      threshold_met          INTEGER NOT NULL DEFAULT 0 CHECK(threshold_met IN (0,1)),
+      delta_vs_previous      REAL,
+      captured_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      machine_id             TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_test_coverage_project ON test_coverage_snapshots(project_name, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_test_coverage_run ON test_coverage_snapshots(test_run_result_id);
+    CREATE INDEX IF NOT EXISTS idx_test_coverage_type ON test_coverage_snapshots(coverage_type);
 `;
 
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
@@ -435,9 +500,13 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'scheduled_tasks',
   // Prompt-library versioning (Session 3 — Autonomy)
   'queue_versions',
-  // GapAuditor (schema 2.3.0)
+  // Systems 1-3 (schema 2.3.0) — SCHEMA_ADDITIONS.md §1-§6
   'gap_audit_runs',
   'artifact_health_scores',
+  'evolution_promotions',
+  'pattern_retirement_log',
+  'test_run_results',
+  'test_coverage_snapshots',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -721,20 +790,22 @@ export function initializeForgeMemory(dbPath?: string): void {
   } catch {
     /* column already present — idempotent across repeated init calls */
   }
-  // 2.2.1 -> 2.3.0 (GapAuditor): gap_audit_runs + artifact_health_scores, tracking
-  // forge audit runs and per-artifact governance health scoring.
+  // 2.2.1 -> 2.3.0 (Systems 1-3): gap_audit_runs, artifact_health_scores,
+  // evolution_promotions, pattern_retirement_log, test_run_results,
+  // test_coverage_snapshots — SCHEMA_ADDITIONS.md §1-§6, verbatim.
   //
-  // Column-set correction: an earlier draft of this schema (before SCHEMA_REGISTRY.md
-  // finalized it) shipped different column names on artifact_health_scores
-  // (gaps_minor_count, regeneration_status, human_gate_prompt, ...). Both tables are
-  // runtime-only — rows are written by GapAuditor at audit time, which hasn't shipped —
-  // so a drop-and-recreate against the draft schema is safe (no data-loss risk).
-  const artifactCols = db.pragma('table_info(artifact_health_scores)') as Array<{ name: string }>;
-  if (artifactCols.some((c) => c.name === 'gaps_minor_count')) {
+  // Column-set correction: two earlier drafts of gap_audit_runs/artifact_health_scores
+  // (before SCHEMA_ADDITIONS.md finalized them) shipped different column names
+  // (audit_scope instead of scope, audit_run_id instead of gap_audit_run_id, no
+  // project_name, ...). Both tables are runtime-only — rows are written by GapAuditor,
+  // which hasn't shipped yet — so a drop-and-recreate against a draft schema is safe
+  // (no data-loss risk).
+  const gapAuditCols = db.pragma('table_info(gap_audit_runs)') as Array<{ name: string }>;
+  if (gapAuditCols.length > 0 && !gapAuditCols.some((c) => c.name === 'project_name')) {
     db.exec('DROP TABLE IF EXISTS artifact_health_scores');
     db.exec('DROP TABLE IF EXISTS gap_audit_runs');
   }
-  db.exec(GAP_AUDITOR_SCHEMA_SQL);
+  db.exec(SYSTEMS_1_3_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

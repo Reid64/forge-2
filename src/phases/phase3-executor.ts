@@ -1,27 +1,27 @@
-/**
- * FORGE 2.0 — Phase 3: Build Executor (the main build loop, queue.yaml s5-p05).
+﻿/**
+ * FORGE 2.0 â€” Phase 3: Build Executor (the main build loop, queue.yaml s5-p05).
  *
  * Phase 3 is where FORGE actually BUILDS. It consumes the approved `queue.yaml` (Queue
  * Generator s4-p02) and walks the prompts in dependency order, driving each one through the
  * engine pieces the prior s5 prompts authored. For EACH prompt (BEHAVIORAL_CONTRACTS Contract
- * 1 — Phase 4 runs after EVERY Phase 3 prompt), the loop performs the s5-p05 sequence:
+ * 1 â€” Phase 4 runs after EVERY Phase 3 prompt), the loop performs the s5-p05 sequence:
  *
  *   a. Check the prompt's dependencies have completed (the schedule is topological, so they
- *      precede it — a missing/failed dependency SKIPS the dependent rather than mis-building).
+ *      precede it â€” a missing/failed dependency SKIPS the dependent rather than mis-building).
  *   b. Run the failure-predictor (Contract 8) for `{ promptType, stackFingerprint, index }`.
- *   c. Assemble the prompt (Contract 7 — never hardcoded) via the prompt-assembler, injecting
+ *   c. Assemble the prompt (Contract 7 â€” never hardcoded) via the prompt-assembler, injecting
  *      the relevant governance excerpts + Build Memory warnings + the PREVIOUS prompt's Sentinel
- *      status; then, if the predicted failure probability > 0.4, rewrite it (Contract 9) — the
+ *      status; then, if the predicted failure probability > 0.4, rewrite it (Contract 9) â€” the
  *      rewriter operates ON the assembled prompt (it prepends a restructured approach), so
  *      assembly necessarily precedes the rewrite even though the spec lists them c-then-d.
  *   d. Create the Contract-10 feature branch `forge/{build}/prompt-{i}-{name}` (git-manager).
  *   e. Execute the prompt through the claude-runner (`claude -p --dangerously-skip-permissions`,
  *      Contract 5) in the TARGET project root (Contract 6), then commit the work to the branch.
- *   f. Log a `prompt_executions` row to Build Memory (Contract 4 — guarded; never blocks).
+ *   f. Log a `prompt_executions` row to Build Memory (Contract 4 â€” guarded; never blocks).
  *   g. Run the Phase 4 Sentinel (the five Contract-13 health checks).
- *   h. PASS → merge the branch to main + lightweight checkpoint tag (Contracts 10/11). FAIL →
+ *   h. PASS â†’ merge the branch to main + lightweight checkpoint tag (Contracts 10/11). FAIL â†’
  *      if Autonomous Recovery Mode is on, run the Contract-14 self-heal loop; if it recovers,
- *      merge + tag; otherwise HALT the build (Contract 13) — the feature branch is preserved
+ *      merge + tag; otherwise HALT the build (Contract 13) â€” the feature branch is preserved
  *      and main is rolled back to the last checkpoint (Contract 12), with a halt report written.
  *   i. Update STATE_OF_THE_BUILD.md from the live progress (BLUEPRINT Canonical Rule 9).
  *
@@ -30,17 +30,17 @@
  *
  * SEQUENTIAL is the default (s5-p05): the executor walks the parallel-scheduler's topological
  * `order`. The scheduler also exposes the dependency WAVES + declared parallel groups for a
- * future parallel executor — but parallel fan-out is "Phase 2 of FORGE 2.0 usage", not built here.
+ * future parallel executor â€” but parallel fan-out is "Phase 2 of FORGE 2.0 usage", not built here.
  *
  * NON-FATAL house style: every collaborator (claude-runner, git-manager, Sentinel, the predictor,
- * the assembler, the rewriter, all Build Memory CRUD) already NEVER throws — they report failure
+ * the assembler, the rewriter, all Build Memory CRUD) already NEVER throws â€” they report failure
  * in their result. The loop additionally wraps each prompt so one unexpected error can never abort
- * the whole build uncaught (Iron Law 3 — report the real outcome, never fabricate a pass). Build
+ * the whole build uncaught (Iron Law 3 â€” report the real outcome, never fabricate a pass). Build
  * Memory being unreachable degrades to stateless mode (Contract 4), it does not block the build.
  * Every collaborator is INJECTABLE so the executor unit-tests with no `claude`, no git, and no DB.
  * `runPhase3Executor` never rejects.
  *
- * BOUNDARY: the executor operates on the TARGET project directory (`projectPath`) — claude runs
+ * BOUNDARY: the executor operates on the TARGET project directory (`projectPath`) â€” claude runs
  * there, git runs there, Sentinel inspects it. It never touches FORGE's own governance files
  * (Iron Law 1); the only files it writes in the target are the work claude produces, the state
  * documents (Canonical Rule 9), and, on a halt, the halt report.
@@ -48,22 +48,22 @@
  * REPLAY (F12 / BLUEPRINT Build Replay): set `options.replay` to re-execute an existing build
  * from a checkpoint forward. The executor (1) creates a NEW build_run linked back to the original
  * (the linkage rides in `toolchain_manifest._forge_replay`, since SCHEMA_REGISTRY's build_runs has
- * no dedicated parent column and the registry is read-only — Iron Law 1); (2) hard-resets main to
+ * no dedicated parent column and the registry is read-only â€” Iron Law 1); (2) hard-resets main to
  * the supplied Contract-11 checkpoint tag (git-manager rollback); (3) reloads the governance
- * package from CURRENT disk (it may have been edited since the original build — the whole point of
+ * package from CURRENT disk (it may have been edited since the original build â€” the whole point of
  * a replay); (4) re-walks the queue, CARRYING every prompt before the resume index (those are
- * already present in the checkpoint — recorded as `skipped` with a replay note and treated as
+ * already present in the checkpoint â€” recorded as `skipped` with a replay note and treated as
  * satisfied dependencies) and re-executing the resume index forward exactly like a fresh build.
  * The new build's branches/tags use the NEW build id, so a replay never collides with the original.
  *
  * DRY RUN (F11 / Dry Run Mode): set `options.dryRun` to SIMULATE without executing. Phase 3 in dry
  * run assembles EVERY prompt (real assembler) and runs the failure-predictor on each, but never
- * touches claude/git/Sentinel — zero build-execution tokens are consumed. It then runs the
+ * touches claude/git/Sentinel â€” zero build-execution tokens are consumed. It then runs the
  * cost-estimator for the full build and emits a {@link SimulationReport} on the result: the
  * predicted prompt plan, the prompts predicted to error (probability > the rewrite threshold), the
  * predicted dollar cost + wall-clock time (with confidence bands), and the token estimate. Phases
  * 0/1/2 (the real environment check, design generation, and governance generation) run BEFORE
- * Phase 3 regardless — they are the executor's inputs (the queue + governance it consumes) and are
+ * Phase 3 regardless â€” they are the executor's inputs (the queue + governance it consumes) and are
  * the orchestrator's responsibility; they are real in a dry run because they consume no build
  * tokens. The executor accepts the Phase 1 `features` (for the cost estimate) and, lacking them,
  * derives an approximate scope from the queue so the report is always complete (with a warning).
@@ -160,7 +160,7 @@ export type PromptDisposition =
   | 'completed' // executed, Sentinel passed (or auto-recovered), merged + checkpointed
   | 'failed' // executed but Sentinel failed and could not be recovered (build then halts)
   | 'skipped' // a dependency did not complete, or dry-run
-  | 'halted'; // not reached — an earlier prompt halted the build
+  | 'halted'; // not reached â€” an earlier prompt halted the build
 
 /** The outcome of a single prompt's pass through the loop. */
 export interface PromptOutcome {
@@ -182,7 +182,7 @@ export interface PromptOutcome {
   wasRewritten: boolean;
   /**
    * True when the claude-runner subprocess itself timed out or exited abnormally on this
-   * prompt (session/cap exhaustion) — as opposed to Sentinel finding a genuine defect in
+   * prompt (session/cap exhaustion) â€” as opposed to Sentinel finding a genuine defect in
    * code that finished running. `--auto-resume` (`src/engine/auto-resume.ts`) uses this to
    * distinguish a resumable timeout from a real Sentinel HALT it must never steamroll.
    */
@@ -197,7 +197,7 @@ export interface PromptOutcome {
   tokensEstimated: number;
   /** Wall-clock duration of this prompt, in ms (Session 5 finding #12/#7). */
   durationMs: number;
-  /** The Sentinel result (null when not run — skipped/dry-run). */
+  /** The Sentinel result (null when not run â€” skipped/dry-run). */
   sentinel: SentinelResult | null;
   /** The Autonomous Recovery result, when recovery was attempted. */
   recovery: AutoRecoveryResult | null;
@@ -213,7 +213,7 @@ export type Phase3Status = 'completed' | 'failed' | 'halted' | 'dry_run';
  * reloaded governance. Supplied via {@link Phase3Options.replay}.
  */
 export interface ReplayOptions {
-  /** The `build_runs.id` of the build being replayed — the new build links back to it. */
+  /** The `build_runs.id` of the build being replayed â€” the new build links back to it. */
   originalBuildRunId: string;
   /**
    * The Contract-11 lightweight checkpoint tag to hard-reset main to before re-executing
@@ -222,7 +222,7 @@ export interface ReplayOptions {
   fromCheckpointTag: string;
   /**
    * 1-based position in the executed order to RESUME from. Every prompt before this index is
-   * assumed already present in the checkpoint — it is carried (not re-executed) and counts as a
+   * assumed already present in the checkpoint â€” it is carried (not re-executed) and counts as a
    * satisfied dependency. The resume index and everything after it execute as in a fresh build.
    */
   fromPromptIndex: number;
@@ -267,7 +267,7 @@ export interface SimulationReport {
   prompts: SimulationPromptPlan[];
   /** The prompts predicted to error / be rewritten (probability > the rewrite threshold). */
   predictedErrors: Array<{ index: number; id: string; promptType: PromptType; probability: number }>;
-  /** Expected number of failing prompts = Σ per-prompt probability (the per-queue estimate). */
+  /** Expected number of failing prompts = Î£ per-prompt probability (the per-queue estimate). */
   expectedFailureCount: number;
   /** Token estimate summed from the assembled prompts (precise to this queue). */
   assembledTokenEstimate: number;
@@ -277,7 +277,7 @@ export interface SimulationReport {
   predictedCostUsd: MetricEstimate | null;
   /** Predicted wall-clock time with a band + human string (from the cost estimate), or null. */
   predictedTimeMs: (MetricEstimate & { human: string }) | null;
-  /** Non-fatal observations specific to the simulation (approximate scope, estimator degrade, …). */
+  /** Non-fatal observations specific to the simulation (approximate scope, estimator degrade, â€¦). */
   warnings: string[];
   generatedAt: string;
 }
@@ -309,7 +309,7 @@ export interface Phase3Result {
   replayOf: ReplayLinkage | null;
   /** The Dry Run Mode simulation report (F11), present only when `dryRun` was set; else null. */
   simulation: SimulationReport | null;
-  /** Non-fatal observations (queue parse warnings, stateless degrade, …). */
+  /** Non-fatal observations (queue parse warnings, stateless degrade, â€¦). */
   warnings: string[];
   generatedAt: string;
 }
@@ -321,7 +321,7 @@ export interface RerunPromptFn {
 
 /** Options for {@link runPhase3Executor}. */
 export interface Phase3Options {
-  /** Target project root — claude runs here, git runs here, Sentinel inspects here (Contract 6). */
+  /** Target project root â€” claude runs here, git runs here, Sentinel inspects here (Contract 6). */
   projectPath: string;
   /**
    * The build queue. Supply `entries` directly (tests / a pre-parsed queue), else the executor
@@ -344,7 +344,7 @@ export interface Phase3Options {
   governanceHash?: string | null;
   /** Enable Contract-14 Autonomous Recovery (opt-in per build). Default false. */
   autonomousRecoveryMode?: boolean;
-  /** Simulate only — assemble + predict, but do NOT run claude/git/Sentinel. Default false. */
+  /** Simulate only â€” assemble + predict, but do NOT run claude/git/Sentinel. Default false. */
   dryRun?: boolean;
   /**
    * Build Replay (F12): when set, this run resumes the {@link ReplayOptions.originalBuildRunId}
@@ -354,7 +354,7 @@ export interface Phase3Options {
   /**
    * 1-based prompt index to start execution from (the `--start-at` CLI flag). When supplied,
    * all prompts whose 1-based position is less than `startAt` are marked as satisfied
-   * dependencies and skipped — no claude/git/Sentinel is invoked for them, and queue.yaml
+   * dependencies and skipped â€” no claude/git/Sentinel is invoked for them, and queue.yaml
    * and governance files are NOT modified. If `startAt` exceeds the total number of prompts,
    * the executor returns a failed result before executing anything.
    */
@@ -368,7 +368,7 @@ export interface Phase3Options {
   mainBranch?: string;
   /**
    * Per-prompt claude timeout (ms). Default: per-prompt-type budget from `forge_config.json`'s
-   * `build.timeoutMinutes` / `build.longTimeoutMinutes` (Session 5 finding #14) — `test`/`deploy`
+   * `build.timeoutMinutes` / `build.longTimeoutMinutes` (Session 5 finding #14) â€” `test`/`deploy`
    * prompts get the long budget, everything else gets the default. Setting this OVERRIDES the
    * per-type budget uniformly for every prompt (kept for tests / a manual global override).
    */
@@ -384,7 +384,7 @@ export interface Phase3Options {
   // -- injectable collaborators (tests) -------------------------------------
   /**
    * Override the claude execution. Default: {@link runClaude}. The optional third argument is
-   * the per-prompt-type timeout budget (ms) the loop computed (Session 5 finding #14) — an
+   * the per-prompt-type timeout budget (ms) the loop computed (Session 5 finding #14) â€” an
    * injected override may ignore it (existing 2-arg fakes remain valid).
    */
   runClaudeImpl?: (prompt: string, cwd: string, timeoutMs?: number) => Promise<ClaudeRunResult>;
@@ -477,7 +477,7 @@ export interface Phase3Options {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** The governance documents the assembler may inject — read into the doc map for assembly. */
+/** The governance documents the assembler may inject â€” read into the doc map for assembly. */
 export const GOVERNANCE_DOC_NAMES: readonly string[] = [
   'BLUEPRINT.md',
   'SCHEMA_REGISTRY.md',
@@ -505,7 +505,7 @@ const DEFAULT_TIMEOUT_BUDGET_CONFIG: TimeoutBudgetConfig = { timeoutMinutes: 15,
 
 /**
  * Read `<projectPath>/forge_config.json`'s `build.timeoutMinutes` / `build.longTimeoutMinutes`
- * (falling back to the built-in defaults for a missing file/field — never throws). Read directly
+ * (falling back to the built-in defaults for a missing file/field â€” never throws). Read directly
  * rather than via `src/cli/config.ts` to keep phases free of a dependency on the cli layer.
  */
 async function loadTimeoutBudgetConfig(projectPath: string): Promise<TimeoutBudgetConfig> {
@@ -534,7 +534,7 @@ function makeTimeoutBudgetResolver(config: TimeoutBudgetConfig): (promptType: Pr
 
 /**
  * Force a "silent timeout" (claude timed out, but Sentinel still reports PASS on whatever code
- * happened to exist) to read as a failure — Sentinel proves the code doesn't obviously break, not
+ * happened to exist) to read as a failure â€” Sentinel proves the code doesn't obviously break, not
  * that the prompt's work happened (Session 5 finding #14). A no-op when Sentinel already failed
  * for its own reason (that failure already stands on its own).
  */
@@ -546,17 +546,17 @@ function forceFailOnTimeout(
   index: number
 ): SentinelResult {
   if (!sentinel.passed) return sentinel;
-  // Unquoted "prompt type X" (not `'X'`) deliberately — normalizeErrorSignature strips quoted
+  // Unquoted "prompt type X" (not `'X'`) deliberately â€” normalizeErrorSignature strips quoted
   // literals, which would erase the prompt type and collapse every timeout onto one signature.
   // Session 5 finding #15 needs a signature that stays distinct PER prompt type (timeout+type).
   const timeoutNote =
-    `claude-runner TIMEOUT after ${Math.round(timeoutMs / 1000)}s for prompt type ${entry.prompt_type} — ` +
+    `claude-runner TIMEOUT after ${Math.round(timeoutMs / 1000)}s for prompt type ${entry.prompt_type} â€” ` +
     'Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.';
   log(`prompt ${index} '${entry.id}': ${timeoutNote}`);
   return {
     ...sentinel,
     passed: false,
-    diagnosticReport: `${timeoutNote}\n\n--- Sentinel's checks (informational only — not authoritative given the timeout) ---\n${sentinel.diagnosticReport}`,
+    diagnosticReport: `${timeoutNote}\n\n--- Sentinel's checks (informational only â€” not authoritative given the timeout) ---\n${sentinel.diagnosticReport}`,
   };
 }
 
@@ -564,7 +564,7 @@ function forceFailOnTimeout(
  * Force a Sentinel PASS to read as a FAILURE whenever the claude run itself did not succeed and it
  * wasn't a timeout ({@link forceFailOnTimeout} already handles that case with its own message).
  * Session 5.2 root cause: a claude run that exits non-zero, never spawns, or (per claude-runner's
- * updated contract) exits 0 with completely empty stdout produced NO real work — yet Sentinel could
+ * updated contract) exits 0 with completely empty stdout produced NO real work â€” yet Sentinel could
  * still report PASS (validating a stale/wrong/empty project). A prompt whose own execution didn't
  * succeed must NEVER be allowed to merge on the back of a Sentinel PASS, no matter what Sentinel's
  * checks found. A no-op when Sentinel already failed for its own reason, or when the run succeeded.
@@ -580,20 +580,20 @@ function forceFailOnClaudeFailure(
   if (run.success || run.timedOut) return sentinel;
   const note =
     `claude did not complete prompt type ${entry.prompt_type} (exit ${run.exitCode ?? 'null'}` +
-    `${run.stdout.trim() === '' ? ', empty stdout' : ''}) — Sentinel reported PASS, but a run that ` +
+    `${run.stdout.trim() === '' ? ', empty stdout' : ''}) â€” Sentinel reported PASS, but a run that ` +
     'did not succeed proves nothing about whether the work happened.';
   log(`prompt ${index} '${entry.id}': ${note}`);
   return {
     ...sentinel,
     passed: false,
-    diagnosticReport: `${note}\n\n--- Sentinel's checks (informational only — not authoritative given the failed run) ---\n${sentinel.diagnosticReport}`,
+    diagnosticReport: `${note}\n\n--- Sentinel's checks (informational only â€” not authoritative given the failed run) ---\n${sentinel.diagnosticReport}`,
   };
 }
 
 /**
  * Best-effort project-boundary scan (Session 5.2 Task 3): claude's print-mode stdout is prose, not
  * a structured tool-call log, so this is a heuristic net over the ONE signal the runner exposes
- * today — it is NOT a guarantee every out-of-bounds write is caught. Flags absolute-looking paths
+ * today â€” it is NOT a guarantee every out-of-bounds write is caught. Flags absolute-looking paths
  * (Windows `C:\...` or POSIX `/...`, with a file extension to cut noise) that fall outside
  * `projectPath`; excludes URLs. A hit marks the prompt failed (Task 3: "violations log loudly and
  * mark the prompt failed").
@@ -604,7 +604,7 @@ export function findOutOfBoundsPaths(stdout: string, projectPath: string): strin
   if (!stdout) return [];
   const normalizedRoot = projectPath.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
   const found = new Set<string>();
-  // Strip whole URLs FIRST — otherwise the POSIX-path alternative can match a URL's path segment
+  // Strip whole URLs FIRST â€” otherwise the POSIX-path alternative can match a URL's path segment
   // (e.g. the `/docs.png` inside `https://example.com/docs.png`) as a false positive, since that
   // slash isn't preceded by `:` or `/` and so isn't caught by the pattern's own lookbehind.
   const withoutUrls = stdout.replace(/\b\w+:\/\/\S+/g, ' ');
@@ -659,8 +659,8 @@ function asContextInjection(v: unknown): ContextInjection {
  * Coerce a single raw YAML mapping into a {@link QueueEntry}. Tolerant of the Queue
  * Generator's emitted shape (snake_case `context_injection`, flow-list dependencies, `|`
  * block description). Returns `null` (with a warning) when `raw` isn't a mapping or has no
- * id — shared by {@link parseQueueYaml} (one queue.yaml = a list of these) and
- * {@link parseSingleQueueEntryYaml} (`forge compile`'s one-entry-per-file prompt library —
+ * id â€” shared by {@link parseQueueYaml} (one queue.yaml = a list of these) and
+ * {@link parseSingleQueueEntryYaml} (`forge compile`'s one-entry-per-file prompt library â€”
  * see `src/cli/compile-command.ts`), so the tolerant-coercion rules live in exactly one place.
  */
 export function coerceQueueEntry(
@@ -669,19 +669,19 @@ export function coerceQueueEntry(
   warn: (message: string) => void
 ): QueueEntry | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    warn(`${label} is not a mapping — skipped.`);
+    warn(`${label} is not a mapping â€” skipped.`);
     return null;
   }
   const o = raw as Record<string, unknown>;
   const id = asString(o.id).trim();
   if (id === '') {
-    warn(`${label} has no id — skipped.`);
+    warn(`${label} has no id â€” skipped.`);
     return null;
   }
   const rawType = asString(o.prompt_type).trim();
   const promptType = (PROMPT_TYPES.has(rawType) ? rawType : 'feature') as PromptType;
   if (!PROMPT_TYPES.has(rawType)) {
-    warn(`${label} ('${id}') has unknown prompt_type '${rawType}' — defaulted to 'feature'.`);
+    warn(`${label} ('${id}') has unknown prompt_type '${rawType}' â€” defaulted to 'feature'.`);
   }
   const entry: QueueEntry = {
     id,
@@ -704,9 +704,9 @@ export function coerceQueueEntry(
 
 /**
  * The VS Code integration layer's build-level pre-run gate (checked ONCE before any prompt
- * executes — never per-prompt). Declared as a top-level `pre_run_checks:` block in queue.yaml
+ * executes â€” never per-prompt). Declared as a top-level `pre_run_checks:` block in queue.yaml
  * ALONGSIDE the prompt list (queue.yaml then becomes `{ prompts: [...], pre_run_checks: {...} }`
- * rather than a bare list — the classic bare-list shape keeps working with no `pre_run_checks`).
+ * rather than a bare list â€” the classic bare-list shape keeps working with no `pre_run_checks`).
  */
 export interface PreRunChecks {
   /** Require a running VS Code (`Code.exe`) process before the build starts. */
@@ -729,7 +729,7 @@ function asPreRunChecks(v: unknown): PreRunChecks | null {
  * Parse queue.yaml text into {@link QueueEntry}[]. Accepts either shape: the classic bare list of
  * prompts, or `{ prompts: [...], pre_run_checks: {...} }` (the VS Code integration layer's opt-in
  * pre-run gate). A malformed entry is skipped with a warning rather than throwing. Returns the
- * entries + warnings + the parsed `pre_run_checks` block (`null` when absent — the bare-list shape
+ * entries + warnings + the parsed `pre_run_checks` block (`null` when absent â€” the bare-list shape
  * never has one).
  */
 export function parseQueueYaml(
@@ -740,7 +740,7 @@ export function parseQueueYaml(
   try {
     doc = parseYaml(yamlText);
   } catch (error) {
-    warnings.push(`queue.yaml is not valid YAML (${describe(error)}) — no prompts parsed.`);
+    warnings.push(`queue.yaml is not valid YAML (${describe(error)}) â€” no prompts parsed.`);
     return { entries: [], warnings, preRunChecks: null };
   }
 
@@ -753,7 +753,7 @@ export function parseQueueYaml(
     rawEntries = o.prompts as unknown[];
     preRunChecks = asPreRunChecks(o.pre_run_checks);
   } else {
-    warnings.push('queue.yaml did not parse to a list of prompts — no prompts parsed.');
+    warnings.push('queue.yaml did not parse to a list of prompts â€” no prompts parsed.');
     return { entries: [], warnings, preRunChecks: null };
   }
 
@@ -767,7 +767,7 @@ export function parseQueueYaml(
 }
 
 /**
- * Parse a SINGLE-entry prompt-library YAML file (`forge compile`'s `prompts/**\/*.yaml` —
+ * Parse a SINGLE-entry prompt-library YAML file (`forge compile`'s `prompts/**\/*.yaml` â€”
  * one queue entry per file, a plain mapping rather than a list) into a {@link QueueEntry}.
  * `label` (typically the file's path relative to the prompts directory) is used in warnings.
  * Returns `{ entry: null, warnings }` on malformed YAML / a non-mapping / a missing id.
@@ -781,7 +781,7 @@ export function parseSingleQueueEntryYaml(
   try {
     doc = parseYaml(yamlText);
   } catch (error) {
-    warnings.push(`${label} is not valid YAML (${describe(error)}) — skipped.`);
+    warnings.push(`${label} is not valid YAML (${describe(error)}) â€” skipped.`);
     return { entry: null, warnings };
   }
   const entry = coerceQueueEntry(doc, label, (m) => warnings.push(m));
@@ -799,7 +799,7 @@ async function defaultLoadGovernanceDocs(governanceDir: string): Promise<Record<
     try {
       docs[name] = await readFile(join(governanceDir, name), 'utf8');
     } catch {
-      /* missing doc — the assembler records it as a visible note (Contract 7). */
+      /* missing doc â€” the assembler records it as a visible note (Contract 7). */
     }
   }
   return docs;
@@ -870,12 +870,12 @@ function twoDigit(n: number): string {
 /**
  * Write one `[HH:mm:ss] [LEVEL] message` line to stdout, colorized to match forge.ps1's `Log`
  * function (green PASS, red FAIL/ERROR, cyan GATE, yellow WARN, white INFO). This is a distinct,
- * purpose-built console renderer for human operators watching a live build — separate from `log`
+ * purpose-built console renderer for human operators watching a live build â€” separate from `log`
  * (Build Memory / death-forensics / pino), which every collaborator above already feeds.
  */
 function renderProgress(level: ProgressLevel, message: string): void {
   const now = new Date();
-  const ts = `${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
+  const ts = `${now.getFullYear()}-${twoDigit(now.getMonth()+1)}-${twoDigit(now.getDate())} ${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
   const color = ANSI_COLOR[level];
   process.stdout.write(`${color}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
 }
@@ -884,7 +884,7 @@ function renderProgress(level: ProgressLevel, message: string): void {
  * Redirect `console.log/warn/error` to `buildLogPath` for the duration of Phase 3. The learning
  * engine (`[FORGE Learning]`, `[SESSION]` lines) calls these directly rather than going through
  * `forge-logger`, so they'd otherwise interleave raw text with `renderProgress`'s
- * `[HH:mm:ss] [LEVEL]` lines — the only thing that belongs on stdout during a build. Returns a
+ * `[HH:mm:ss] [LEVEL]` lines â€” the only thing that belongs on stdout during a build. Returns a
  * restore function; callers must invoke it before every return out of Phase 3.
  */
 function installQuietConsole(buildLogPath: string | null): () => void {
@@ -914,13 +914,13 @@ function installQuietConsole(buildLogPath: string | null): () => void {
 
 /**
  * Run Phase 3 against `projectPath`: walk the build queue in dependency order, driving each
- * prompt through predict → assemble → (rewrite) → branch → claude → Sentinel → merge/checkpoint
+ * prompt through predict â†’ assemble â†’ (rewrite) â†’ branch â†’ claude â†’ Sentinel â†’ merge/checkpoint
  * or halt/auto-recover, logging to Build Memory throughout (queue.yaml s5-p05). Sequential is
- * the default. Always resolves — every collaborator is guarded and the loop never throws.
+ * the default. Always resolves â€” every collaborator is guarded and the loop never throws.
  */
 export async function runPhase3Executor(options: Phase3Options): Promise<Phase3Result> {
   // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines for the lifetime of this
-  // call — every pino line any collaborator emits (this module included) is diverted to
+  // call â€” every pino line any collaborator emits (this module included) is diverted to
   // `.forge/build.log` from the very first instruction, before any other code runs, so nothing
   // can slip a line onto stdout ahead of this gate going up. Restored in the `finally` below.
   const releaseQuietLogging = beginQuietLogging('.forge/build.log');
@@ -938,7 +938,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // Persistent log tee (Session 5 finding #12): the dialtest deaths left no forensics because
   // console history was the ONLY record. Every log line this build emits is also appended to
-  // <project>/.forge/logs/build_<timestamp>.log — a real file that survives a closed terminal.
+  // <project>/.forge/logs/build_<timestamp>.log â€” a real file that survives a closed terminal.
   // Skipped for dry runs (nothing executes; no build worth a persistent log).
   let buildLogPath: string | null = null;
   if (!dryRun) {
@@ -947,7 +947,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       mkdirSync(logsDir, { recursive: true });
       buildLogPath = join(logsDir, `build_${generatedAt.replace(/[:.]/g, '-')}.log`);
     } catch {
-      buildLogPath = null; // best-effort — a build must never fail because its log file couldn't open
+      buildLogPath = null; // best-effort â€” a build must never fail because its log file couldn't open
     }
   }
   // Feed every Phase 3 progress line into the death-forensics ring buffer (Session 5 finding
@@ -966,9 +966,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   };
 
   // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines during a build (matching
-  // FORGE 1.0's forge.ps1 output). Everything else this run's collaborators emit — pino JSON from
+  // FORGE 1.0's forge.ps1 output). Everything else this run's collaborators emit â€” pino JSON from
   // `log`/hook-manager/the predictor (diverted above, at function entry) and raw console.log from
-  // the learning engine (diverted here) — is kept off stdout. Both restores MUST run before every
+  // the learning engine (diverted here) â€” is kept off stdout. Both restores MUST run before every
   // return out of this function.
   const restoreConsole = buildLogPath ? installQuietConsole(buildLogPath) : (() => {});
   const releaseStdoutQuietMode = (): void => {
@@ -978,14 +978,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // Stale-lock recovery (Session 5 finding #13): a forge_running.lock left behind by a build
   // that died before reaching its own cleanup means a PRIOR run silently died. Detect it, log
-  // it loudly, clear it, and continue — a dead lock must never block a new build. Skipped for
+  // it loudly, clear it, and continue â€” a dead lock must never block a new build. Skipped for
   // dry runs (they never acquire the lock in the first place).
   if (!dryRun) {
     const staleLock = checkStaleLock(projectPath, log);
     if (staleLock.stale) {
       warnings.push(
         `Recovered from a stale forge_running.lock (prior build ${staleLock.buildRunId ?? '(unknown)'}, ` +
-          `pid ${staleLock.pid ?? '?'} not running) — a previous FORGE run died silently.`
+          `pid ${staleLock.pid ?? '?'} not running) â€” a previous FORGE run died silently.`
       );
     }
   }
@@ -1048,8 +1048,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   let entries: QueueEntry[] = options.entries ?? [];
   // Session 5.1 hotfix: hash of the queue.yaml this build actually ran against, persisted on the
   // build_run below so a later --auto-resume can confirm it's resuming against the SAME queue
-  // (`src/engine/auto-resume.ts` › computeResumeStartAt). Only set when a real queue.yaml was
-  // read from disk — a caller supplying `options.entries` directly (tests, in-memory queues) has
+  // (`src/engine/auto-resume.ts` â€º computeResumeStartAt). Only set when a real queue.yaml was
+  // read from disk â€” a caller supplying `options.entries` directly (tests, in-memory queues) has
   // no on-disk file for a resume to compare against, so it stays null.
   let queueHashForBuild: string | null = null;
   // VS Code integration layer (queue.yaml pre-run gate): the optional `pre_run_checks` block,
@@ -1061,7 +1061,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     try {
       yamlText = await readFile(queuePath, 'utf8');
     } catch (error) {
-      warnings.push(`Could not read queue.yaml at ${queuePath} (${describe(error)}) — nothing to execute.`);
+      warnings.push(`Could not read queue.yaml at ${queuePath} (${describe(error)}) â€” nothing to execute.`);
       log(`WARNING: could not read ${queuePath} (${describe(error)})`);
     }
     if (yamlText !== null) {
@@ -1094,7 +1094,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     }
   }
 
-  // VS Code integration layer: queue.yaml's optional `pre_run_checks` gate — a build-level check
+  // VS Code integration layer: queue.yaml's optional `pre_run_checks` gate â€” a build-level check
   // run ONCE before any prompt executes (never per-prompt). Skipped for dry runs (nothing executes)
   // and when the queue declares no `pre_run_checks` block.
   if (!dryRun && preRunChecks) {
@@ -1105,7 +1105,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       releaseStdoutQuietMode();
       return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg], generatedAt };
     }
-    log(`pre-run gate: queue.yaml pre_run_checks (${Object.keys(preRunChecks).join(', ')}) — all checks passed.`);
+    log(`pre-run gate: queue.yaml pre_run_checks (${Object.keys(preRunChecks).join(', ')}) â€” all checks passed.`);
   }
 
   log(
@@ -1113,13 +1113,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       `${schedule.order.length} prompt(s), ${schedule.longestChain} wave(s), ` +
       `max parallelism ${schedule.maxParallelism}. Sequential execution.` +
       (replay ? ` Resuming build ${replay.originalBuildRunId} from prompt ${replay.fromPromptIndex} (${replay.fromCheckpointTag}).` : '') +
-      (startAt !== undefined ? ` Skipping prompts 1–${startAt - 1}; execution begins at prompt ${startAt}.` : '')
+      (startAt !== undefined ? ` Skipping prompts 1â€“${startAt - 1}; execution begins at prompt ${startAt}.` : '')
   );
 
-  // 2. Create the build_run (status running). Guarded — degrades to stateless (Contract 4). For a
+  // 2. Create the build_run (status running). Guarded â€” degrades to stateless (Contract 4). For a
   //    replay the new build links back to the original via a `_forge_replay` block in the
   //    toolchain_manifest jsonb (build_runs has no dedicated parent column and SCHEMA_REGISTRY is
-  //    read-only — Iron Law 1), so the lineage is queryable without a schema change.
+  //    read-only â€” Iron Law 1), so the lineage is queryable without a schema change.
   const toolchainManifest: JsonObject = {
     ...(options.toolchainManifest ?? {}),
     ...(replay
@@ -1151,20 +1151,20 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     });
     buildRunId = created?.id ?? null;
   } catch (error) {
-    log(`WARNING: createBuild degraded (${describe(error)}) — running stateless`);
+    log(`WARNING: createBuild degraded (${describe(error)}) â€” running stateless`);
   }
-  if (buildRunId === null) warnings.push('Build Memory unreachable — running in stateless mode (Contract 4).');
+  if (buildRunId === null) warnings.push('Build Memory unreachable â€” running in stateless mode (Contract 4).');
 
   if (!dryRun) {
     renderProgress(
       'GATE',
-      `Phase 3 START — project "${projectName}", build ${buildRunId ?? '(stateless)'}, ` +
+      `Phase 3 START â€” project "${projectName}", build ${buildRunId ?? '(stateless)'}, ` +
         `${schedule.order.length} prompt(s), started ${generatedAt}`
     );
   }
 
   // Tag every log line emitted for the rest of this build with the build id + project, so any
-  // module FORGE drives (assembler, sentinel, claude-runner, …) carries `build_run_id`/`project`
+  // module FORGE drives (assembler, sentinel, claude-runner, â€¦) carries `build_run_id`/`project`
   // automatically (forge-logger mixin). Per-prompt `prompt_id` is layered on at each call site
   // below via runWithBuildContext, and the whole context is cleared before returning.
   setLogContext({ ...(buildRunId ? { buildRunId } : {}), project: projectName });
@@ -1187,7 +1187,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
             toolchain_manifest: { ...toolchainManifest, _forge_interrupted: { reason, at: nowIso() } },
           });
         } catch {
-          /* best-effort — this runs during process death */
+          /* best-effort â€” this runs during process death */
         }
       },
     });
@@ -1195,14 +1195,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // 2b. Replay rollback (F12, step 2): hard-reset main to the original build's checkpoint BEFORE
   //     reloading governance, so the repo is at the resume point and governance is read fresh from
-  //     current disk (step 3 — it may have been edited since the original build). Non-fatal: a
-  //     failed rollback replays from the current HEAD with a warning (Iron Law 3 — real outcome).
+  //     current disk (step 3 â€” it may have been edited since the original build). Non-fatal: a
+  //     failed rollback replays from the current HEAD with a warning (Iron Law 3 â€” real outcome).
   if (replay && !dryRun) {
     const rollback = git.rollbackToCheckpoint(replay.fromCheckpointTag);
     if (rollback.success) {
       log(`Replay: ${mainBranch} reset to checkpoint '${replay.fromCheckpointTag}'.`);
     } else {
-      const note = `Replay: rollback to checkpoint '${replay.fromCheckpointTag}' failed (${rollback.error ?? 'unknown'}) — replaying from current HEAD.`;
+      const note = `Replay: rollback to checkpoint '${replay.fromCheckpointTag}' failed (${rollback.error ?? 'unknown'}) â€” replaying from current HEAD.`;
       warnings.push(note);
       log(`WARNING: ${note}`);
     }
@@ -1216,15 +1216,15 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
 
   // Codebase RAG (queue.yaml extension to Contract 7): index the ENTIRE target codebase on build
   // start into an in-memory vector store, so before each prompt the executor can retrieve the 10
-  // most relevant existing files and inject their structural summaries — grounding Claude in what
+  // most relevant existing files and inject their structural summaries â€” grounding Claude in what
   // already exists so it does not duplicate or conflict with it. Rebuilt after each SUCCESSFUL
   // prompt (below) so the next retrieval reflects the files that prompt just wrote. Non-fatal: a
-  // degraded index simply injects nothing (Contract 4 posture). Skipped in a dry run — nothing is
+  // degraded index simply injects nothing (Contract 4 posture). Skipped in a dry run â€” nothing is
   // executed or rebuilt, and injecting RAG would perturb the simulation's prompt hashes/tokens.
   const rag = dryRun ? null : await CodebaseRag.create(projectPath, { log: (m) => log(`rag: ${m}`) });
   if (rag) log(`Codebase RAG indexed ${rag.fileCount} existing source file(s) for context injection.`);
 
-  // Decomposition record sink (pattern learning) — wired here so the default closes over the now-known
+  // Decomposition record sink (pattern learning) â€” wired here so the default closes over the now-known
   // buildRunId; no-op in stateless mode (Contract 4). Injectable via options.recordDecomposition.
   const recordDecomposition: NonNullable<Phase3Options['recordDecomposition']> =
     options.recordDecomposition ?? ((record) => defaultRecordDecomposition(projectName, machineId, buildRunId, record));
@@ -1247,14 +1247,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   );
   const liveStatus = new LiveStatusWriter(projectPath, projectName, buildRunId, schedule.order.length);
 
-  // Learning engine — non-critical, failures are caught internally
+  // Learning engine â€” non-critical, failures are caught internally
   await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
 
   // Learning Engine: SessionStart hook
   try {
     const { handleSessionStart } = await import('../learning/session-hooks.js');
     const sessionStartResult = await handleSessionStart(buildRunId ?? machineId, projectPath, projectName);
-    if (sessionStartResult.contextBlock) console.log(sessionStartResult.contextBlock);
+    if (sessionStartResult.contextBlock) appendFileSync(buildLogPath ?? ".forge/build.log", sessionStartResult.contextBlock + "\n", "utf8");
   } catch { /* non-fatal -- learning engine is always optional */ }
 
   // 3. Walk the prompts in dependency order.
@@ -1311,11 +1311,11 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     deathState.currentPromptId = entry.id;
 
     // a0. Replay carry (F12): prompts before the resume index are already present in the
-    //     checkpoint — record them as carried (skipped, not re-executed) and treat them as
+    //     checkpoint â€” record them as carried (skipped, not re-executed) and treat them as
     //     satisfied dependencies so the resume index downstream resolves. A carried schema prompt
     //     means schema is live in the repo, so Sentinel's schema-drift check stays active.
     if (replay && index < replay.fromPromptIndex) {
-      const note = `Replay — carried from checkpoint (prompt ${index} < resume index ${replay.fromPromptIndex}), not re-executed.`;
+      const note = `Replay â€” carried from checkpoint (prompt ${index} < resume index ${replay.fromPromptIndex}), not re-executed.`;
       outcomes.push(skippedOutcome(entry, index, note));
       completedIds.add(entry.id);
       if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
@@ -1328,7 +1328,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     //     git, Sentinel, or any governance / queue files (contrast with replay carry which
     //     implies a checkpoint exists on disk).
     if (startAt !== undefined && index < startAt) {
-      const note = `Skipped — --start-at ${startAt}: prompt ${index} is before the requested start index.`;
+      const note = `Skipped â€” --start-at ${startAt}: prompt ${index} is before the requested start index.`;
       outcomes.push(skippedOutcome(entry, index, note));
       completedIds.add(entry.id);
       if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
@@ -1336,13 +1336,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       continue;
     }
     if (startAt !== undefined && index === startAt) {
-      log(`[--start-at] resuming execution at prompt ${index}/${schedule.order.length} '${entry.id}' (prompts 1–${startAt - 1} were skipped)`);
+      log(`[--start-at] resuming execution at prompt ${index}/${schedule.order.length} '${entry.id}' (prompts 1â€“${startAt - 1} were skipped)`);
     }
 
-    // a. Dependency gate — the order is topological, so an unmet dependency means it failed/skipped.
+    // a. Dependency gate â€” the order is topological, so an unmet dependency means it failed/skipped.
     const unmet = entry.dependencies.filter((d) => !completedIds.has(d) && entries.some((e) => e.id === d));
     if (unmet.length > 0) {
-      const note = `Skipped — unmet dependency(ies): ${unmet.join(', ')} did not complete.`;
+      const note = `Skipped â€” unmet dependency(ies): ${unmet.join(', ')} did not complete.`;
       outcomes.push(skippedOutcome(entry, index, note));
       log(`prompt ${index}/${schedule.order.length} '${entry.id}': ${note}`);
       continue;
@@ -1389,9 +1389,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       templateHash: outcome.promptHash,
     });
 
-    // BuildBrainEvolver (LEARNING_BLUEPRINT.md § Agent: BuildBrainEvolver) — post-Sentinel
+    // BuildBrainEvolver (LEARNING_BLUEPRINT.md Â§ Agent: BuildBrainEvolver) â€” post-Sentinel
     // rewrite-effectiveness observation, per Phase 3 prompt (Contract 1: Phase 4 runs after
-    // EVERY Phase 3 prompt). Guarded — Build Memory unreachable degrades to a no-op; a
+    // EVERY Phase 3 prompt). Guarded â€” Build Memory unreachable degrades to a no-op; a
     // skipped/dry-run outcome never reaches here (both `continue` earlier in the loop), so
     // `outcome.sentinel` is always populated for a real execution.
     try {
@@ -1399,7 +1399,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       if (memoryClient && outcome.sentinel) {
         observeRewriteOutcome(entry.id, outcome.wasRewritten, outcome.sentinel.passed, memoryClient);
       }
-    } catch { /* non-fatal — Contract 4 */ }
+    } catch { /* non-fatal â€” Contract 4 */ }
 
     // Learning Engine: PostToolUse hook
     try {
@@ -1445,16 +1445,16 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     if (outcome.disposition === 'completed') {
       completedIds.add(entry.id);
     } else if (outcome.disposition === 'failed') {
-      // h/j: Sentinel failed and recovery did not restore green → HALT (Contract 13).
+      // h/j: Sentinel failed and recovery did not restore green â†’ HALT (Contract 13).
       halted = true;
       haltedAt = { index, id: entry.id };
       haltReason =
         outcome.recovery?.reason ??
         `Sentinel failed at prompt ${index} '${entry.id}' (${outcome.sentinel?.failedCheck ?? 'unknown'}) ` +
           'and was not auto-recovered.';
-      // Integration Bus (System 4): recovery is exhausted — fan this failure out to System 1
+      // Integration Bus (System 4): recovery is exhausted â€” fan this failure out to System 1
       // (targeted gap audit), System 2 (rewrite-effectiveness observation), and System 3
-      // (baseline test run). Non-fatal — bus.ts never throws, but wrapped defensively anyway.
+      // (baseline test run). Non-fatal â€” bus.ts never throws, but wrapped defensively anyway.
       try {
         await onSentinelFailure(outcome.sentinel?.failedCheck ?? 'unknown', entry.id, buildRunId ?? '', projectPath);
       } catch (error) {
@@ -1506,7 +1506,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   }).catch(() => {});
 
   // 5. Dry Run Mode (F11): assemble the simulation report from the per-prompt dry-run pass + the
-  //    cost-estimator. Only on a dry run — a real build executed and needs no simulation.
+  //    cost-estimator. Only on a dry run â€” a real build executed and needs no simulation.
   // handleSessionEnd fires in the finally block below so it always runs.
   try {
   let simulation: SimulationReport | null = null;
@@ -1532,7 +1532,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     : null;
 
   log(
-    `Phase 3 ${status.toUpperCase()} — ${completedPrompts} completed, ${failedPrompts} failed, ` +
+    `Phase 3 ${status.toUpperCase()} â€” ${completedPrompts} completed, ${failedPrompts} failed, ` +
       `${skippedPrompts} skipped of ${schedule.order.length}; ~${totalTokens} tokens.` +
       (halted ? ` HALTED at prompt ${haltedAt?.index} '${haltedAt?.id}'.` : '') +
       (simulation
@@ -1544,7 +1544,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   if (!dryRun) {
     renderProgress(
       status === 'completed' ? 'PASS' : status === 'halted' ? 'FAIL' : status === 'failed' ? 'FAIL' : 'WARN',
-      `Phase 3 ${status.toUpperCase()} — ${completedPrompts}/${schedule.order.length} completed, ` +
+      `Phase 3 ${status.toUpperCase()} â€” ${completedPrompts}/${schedule.order.length} completed, ` +
         `${failedPrompts} failed, ${skippedPrompts} skipped; ~${totalTokens} tokens.` +
         (halted ? ` HALTED at prompt ${haltedAt?.index} '${haltedAt?.id}'.` : '')
     );
@@ -1558,7 +1558,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     );
   }
 
-  // Build finished — drop the ambient build/prompt context so a later build (or a test running
+  // Build finished â€” drop the ambient build/prompt context so a later build (or a test running
   // multiple builds in one process) starts clean.
   clearLogContext();
 
@@ -1580,7 +1580,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     generatedAt,
   };
   } finally {
-    // Learning Engine: SessionEnd — always fires (including on unexpected throw).
+    // Learning Engine: SessionEnd â€” always fires (including on unexpected throw).
     try {
       const { handleSessionEnd } = await import('../learning/session-hooks.js');
       await handleSessionEnd({
@@ -1595,14 +1595,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       });
     } catch { /* non-fatal */ }
 
-    // Build finished (normally or via a caught error) — release the run lock and stop
+    // Build finished (normally or via a caught error) â€” release the run lock and stop
     // attributing process-level deaths to this build; the NEXT build re-installs its own state.
     if (!dryRun) {
       releaseRunLock(projectPath);
       clearDeathForensicsState();
     }
 
-    // Restore stdout LAST — handleSessionEnd (above) still has more [SESSION]/[FORGE Learning]
+    // Restore stdout LAST â€” handleSessionEnd (above) still has more [SESSION]/[FORGE Learning]
     // console output to emit, and it must land in the log file too, not on stdout.
     releaseStdoutQuietMode();
   }
@@ -1617,7 +1617,7 @@ interface LoopContext {
   projectPath: string;
   projectName: string;
   governanceDirName: string;
-  /** Total scheduled prompts (`schedule.order.length`) — the "N" in CHANGESET.md's "prompt i/N". */
+  /** Total scheduled prompts (`schedule.order.length`) â€” the "N" in CHANGESET.md's "prompt i/N". */
   totalPrompts: number;
   buildRunId: string | null;
   machineId: string;
@@ -1626,10 +1626,10 @@ interface LoopContext {
   dryRun: boolean;
   governanceDocs: Record<string, string>;
   git: GitManager;
-  /** The configured main branch (Contract 10) — Claude must NEVER run while checked out on this. */
+  /** The configured main branch (Contract 10) â€” Claude must NEVER run while checked out on this. */
   mainBranch: string;
   runClaudeImpl: (prompt: string, cwd: string, timeoutMs?: number) => Promise<ClaudeRunResult>;
-  /** Per-prompt-type timeout budget (ms) — `test`/`deploy` get the long budget (Session 5 finding #14). */
+  /** Per-prompt-type timeout budget (ms) â€” `test`/`deploy` get the long budget (Session 5 finding #14). */
   timeoutBudgetMsFor: (promptType: PromptType) => number;
   predictImpl: (input: {
     promptType: PromptType;
@@ -1677,7 +1677,7 @@ interface LoopContext {
   writeHaltReport: (report: string) => Promise<void>;
   /**
    * Normalized failure signatures Build Brain has already tried (and failed) to recover this
-   * build — shared/mutated across prompts so `analyzeSentinelFailure` never proposes the same
+   * build â€” shared/mutated across prompts so `analyzeSentinelFailure` never proposes the same
    * broken fix twice in one run (Task 2's "escalate when the same fix already failed this build").
    */
   failedSignaturesThisBuild: Set<string>;
@@ -1685,7 +1685,7 @@ interface LoopContext {
   brainInterventions: { count: number };
   /** governance_rules ids auto-elevated during this build (Task 1.3's build-completion insight). */
   elevatedRuleIds: Set<string>;
-  /** Live build-status writer (Task 3 — Session 4). Always present; a disk failure just no-ops. */
+  /** Live build-status writer (Task 3 â€” Session 4). Always present; a disk failure just no-ops. */
   liveStatus: LiveStatusWriter;
   log: (message: string) => void;
   /** Hook manager for pre_prompt / post_prompt lifecycle events. */
@@ -1711,7 +1711,7 @@ function sentinelOptionsFor(
 }
 
 /**
- * Execute one prompt through the full s5-p05 loop (steps b–j) and return its {@link PromptOutcome}.
+ * Execute one prompt through the full s5-p05 loop (steps bâ€“j) and return its {@link PromptOutcome}.
  * Wrapped so an unexpected error in any collaborator never aborts the build (Iron Law 3).
  */
 async function executePrompt(
@@ -1724,8 +1724,8 @@ async function executePrompt(
   const { log } = ctx;
   // Session 5 finding #12/#7: per-prompt elapsed duration, for console/live-status/prompt_executions.
   const promptStartedAt = Date.now();
-  log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) — start`);
-  renderProgress('INFO', `Prompt ${index}/${ctx.totalPrompts} — ${entry.name}`);
+  log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) â€” start`);
+  renderProgress('INFO', `Prompt ${index}/${ctx.totalPrompts} â€” ${entry.name}`);
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
   try {
@@ -1736,7 +1736,7 @@ async function executePrompt(
       promptIndex: index,
     });
 
-    // b1. PRE-PROMPT HOOK — fire before assembly so hooks can gate or annotate the prompt.
+    // b1. PRE-PROMPT HOOK â€” fire before assembly so hooks can gate or annotate the prompt.
     // A 'deny' result skips the prompt (non-fatal: build continues to the next entry).
     const preHookResults = await ctx.hookManager
       .fireEvent('pre_prompt', {
@@ -1749,18 +1749,18 @@ async function executePrompt(
       .catch(() => [{ action: 'allow' as const }]);
     if (preHookResults[0]?.action === 'deny') {
       const denyReason = preHookResults[0]?.reason ?? 'no reason given';
-      log(`prompt ${index} '${entry.id}': pre_prompt hook denied — ${denyReason}; skipping`);
+      log(`prompt ${index} '${entry.id}': pre_prompt hook denied â€” ${denyReason}; skipping`);
       return skippedOutcome(entry, index, `pre_prompt hook denied: ${denyReason}`);
     }
 
     // c0. Codebase RAG (Contract 7 extension): retrieve the 10 existing files most relevant to this
     //     task and render them as an injectable block, so the assembled prompt tells Claude what
     //     already exists (avoids duplicate/conflicting code). Empty when nothing is relevant or the
-    //     index degraded — the assembler then injects nothing.
+    //     index degraded â€” the assembler then injects nothing.
     const relevantFilesBlock = ctx.rag ? ctx.rag.contextBlock(entry.description).block : '';
 
     // c/d. Assemble (Contract 7), then rewrite if the predictor flags high risk (Contract 9).
-    // `projectPath` (Session 5.2 Task 3 — project-boundary guard) states the absolute root so the
+    // `projectPath` (Session 5.2 Task 3 â€” project-boundary guard) states the absolute root so the
     // assembled prompt tells claude explicitly where all file operations must stay confined.
     const assembled = await ctx.assembleImpl({
       entry,
@@ -1792,8 +1792,8 @@ async function executePrompt(
       log(`prompt ${index} '${entry.id}': rewritten (p=${prediction.probability.toFixed(3)} > 0.4)`);
     }
 
-    // b2. APPLY INSTINCTS — augment the (possibly rewritten) prompt with learned fix rules.
-    // Relevant instincts (confidence ≥ 0.5, keyword overlap ≥ 2) are appended as a block.
+    // b2. APPLY INSTINCTS â€” augment the (possibly rewritten) prompt with learned fix rules.
+    // Relevant instincts (confidence â‰¥ 0.5, keyword overlap â‰¥ 2) are appended as a block.
     if (ctx.instincts.length > 0) {
       const augmented = applyInstincts(promptText, ctx.instincts);
       if (augmented !== promptText) {
@@ -1802,7 +1802,7 @@ async function executePrompt(
       }
     }
 
-    // b3. MODEL ROUTING — classify prompt complexity, select the optimal Claude model,
+    // b3. MODEL ROUTING â€” classify prompt complexity, select the optimal Claude model,
     // and record the estimated cost for this prompt (telemetry; never blocks execution).
     const modelSelection = selectModelForEntry(entry);
     const complexity = classifyPromptComplexity(promptText);
@@ -1827,23 +1827,23 @@ async function executePrompt(
     const branchName = branch.branchName;
     if (!branch.success) {
       throw new Error(
-        `feature branch creation failed — aborting prompt: git checkout -b ${branchName} failed ` +
+        `feature branch creation failed â€” aborting prompt: git checkout -b ${branchName} failed ` +
           `(${branch.error ?? 'unknown error'})`
       );
     }
-    // Verify the checkout actually landed on the feature branch — a `success: true` result with
+    // Verify the checkout actually landed on the feature branch â€” a `success: true` result with
     // exit 0 does not, by itself, prove HEAD moved off main (e.g. a branch that already existed).
     const currentBranch = ctx.git.getCurrentBranch();
     if (!currentBranch.success || currentBranch.branch === null) {
       throw new Error(
-        `feature branch creation failed — aborting prompt: could not verify current branch after ` +
+        `feature branch creation failed â€” aborting prompt: could not verify current branch after ` +
           `checkout (${currentBranch.error ?? 'unknown error'})`
       );
     }
     if (currentBranch.branch === ctx.mainBranch) {
       throw new Error(
-        `feature branch creation failed — aborting prompt: still on '${ctx.mainBranch}' after ` +
-          `checkout -b ${branchName} — refusing to run claude on ${ctx.mainBranch}`
+        `feature branch creation failed â€” aborting prompt: still on '${ctx.mainBranch}' after ` +
+          `checkout -b ${branchName} â€” refusing to run claude on ${ctx.mainBranch}`
       );
     }
 
@@ -1861,7 +1861,7 @@ async function executePrompt(
     });
 
     // The Sentinel options are built first because a DECOMPOSED prompt runs the Sentinel BETWEEN its
-    // atomic sub-steps — the same options drive those inter-step checks and the final gate.
+    // atomic sub-steps â€” the same options drive those inter-step checks and the final gate.
     const sentinelOptions = sentinelOptionsFor(
       ctx,
       schemaPromptsHaveRun || entry.prompt_type === 'schema',
@@ -1875,7 +1875,7 @@ async function executePrompt(
     //     with a Sentinel check between each; a failing sub-step retries IN ISOLATION rather than
     //     re-running the whole prompt. The decomposer commits each sub-step, returns an aggregate run
     //     + the final Sentinel result, and records the decomposition shape to Build Memory (pattern
-    //     learning) — so the rest of this loop (final Sentinel gate, merge, record) is UNCHANGED. A
+    //     learning) â€” so the rest of this loop (final Sentinel gate, merge, record) is UNCHANGED. A
     //     description that does not split runs exactly as a single prompt (the decomposer is a no-op).
     let run: ClaudeRunResult;
     let sentinel: SentinelResult;
@@ -1889,19 +1889,19 @@ async function executePrompt(
         promptText,
         {
           runClaude: async (p) => {
-            renderProgress('INFO', `Claude exec start — timeout ${Math.round(timeoutMs / 1000)}s`);
+            renderProgress('INFO', `Claude exec start â€” timeout ${Math.round(timeoutMs / 1000)}s`);
             const execStartedAt = Date.now();
             const r = await ctx.runClaudeImpl(p, ctx.projectPath, timeoutMs);
             renderProgress(
               'INFO',
-              `Claude exit ${r.exitCode ?? 'null'}${r.timedOut ? ' (TIMEOUT)' : ''} — ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
+              `Claude exit ${r.exitCode ?? 'null'}${r.timedOut ? ' (TIMEOUT)' : ''} â€” ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
             );
             return r;
           },
           runSentinel: () => ctx.runSentinelImpl(sentinelOptions),
           commit: (message) => {
             const c = ctx.git.commitAll(message);
-            if (!c.success) log(`prompt ${index} '${entry.id}': sub-step commit failed — ${c.error ?? 'unknown'}`);
+            if (!c.success) log(`prompt ${index} '${entry.id}': sub-step commit failed â€” ${c.error ?? 'unknown'}`);
           },
           recordDecomposition: (record) => ctx.recordDecomposition(record),
           log,
@@ -1914,7 +1914,7 @@ async function executePrompt(
       // whole-prompt re-run); fall back only if it executed nothing (never, for a >threshold prompt).
       sentinel = decomposition.finalSentinel ?? (await ctx.runSentinelImpl(sentinelOptions));
       if (!run.success) {
-        log(`prompt ${index} '${entry.id}': decomposed run not green — ${decomposition.note}`);
+        log(`prompt ${index} '${entry.id}': decomposed run not green â€” ${decomposition.note}`);
       }
     } else {
       // Hard enforcement (not just verification): force HEAD onto the feature branch immediately
@@ -1922,50 +1922,50 @@ async function executePrompt(
       const preRunCheckout = ctx.git.checkout(branchName);
       if (!preRunCheckout.success) {
         throw new Error(
-          `feature branch creation failed — aborting prompt: git checkout ${branchName} before claude ` +
+          `feature branch creation failed â€” aborting prompt: git checkout ${branchName} before claude ` +
             `run failed (${preRunCheckout.error ?? 'unknown error'})`
         );
       }
-      renderProgress('INFO', `Claude exec start — timeout ${Math.round(timeoutMs / 1000)}s`);
+      renderProgress('INFO', `Claude exec start â€” timeout ${Math.round(timeoutMs / 1000)}s`);
       const execStartedAt = Date.now();
       run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
       renderProgress(
         'INFO',
-        `Claude exit ${run.exitCode ?? 'null'}${run.timedOut ? ' (TIMEOUT)' : ''} — ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
+        `Claude exit ${run.exitCode ?? 'null'}${run.timedOut ? ' (TIMEOUT)' : ''} â€” ${((Date.now() - execStartedAt) / 1000).toFixed(1)}s`
       );
-      // Hard enforcement: force HEAD back onto the feature branch immediately after claude returns —
+      // Hard enforcement: force HEAD back onto the feature branch immediately after claude returns â€”
       // this catches any case where claude drifted HEAD back to main (e.g. a stray `git checkout main`)
       // before Sentinel runs, rather than merely detecting the drift.
       const postRunCheckout = ctx.git.checkout(branchName);
       if (!postRunCheckout.success) {
         throw new Error(
-          `feature branch creation failed — aborting prompt: git checkout ${branchName} after claude ` +
+          `feature branch creation failed â€” aborting prompt: git checkout ${branchName} after claude ` +
             `run failed (${postRunCheckout.error ?? 'unknown error'})`
         );
       }
       // Verify claude's run didn't leave HEAD on main (e.g. via a stray `git checkout main`) before
-      // committing — commitAll operates on whatever branch is currently checked out, so a drift back
+      // committing â€” commitAll operates on whatever branch is currently checked out, so a drift back
       // to main here would otherwise land a direct commit on main in violation of Contract 10.
       const branchBeforeCommit = ctx.git.getCurrentBranch();
       if (!branchBeforeCommit.success || branchBeforeCommit.branch === null) {
         throw new Error(
-          `feature branch creation failed — aborting prompt: could not verify current branch before ` +
+          `feature branch creation failed â€” aborting prompt: could not verify current branch before ` +
             `commit (${branchBeforeCommit.error ?? 'unknown error'})`
         );
       }
       if (branchBeforeCommit.branch === ctx.mainBranch) {
         throw new Error(
-          `feature branch creation failed — aborting prompt: HEAD drifted back to '${ctx.mainBranch}' ` +
-            `before commit — refusing to commit claude's work directly to ${ctx.mainBranch}`
+          `feature branch creation failed â€” aborting prompt: HEAD drifted back to '${ctx.mainBranch}' ` +
+            `before commit â€” refusing to commit claude's work directly to ${ctx.mainBranch}`
         );
       }
-      // FORGE owns git add + commit after claude exits — claude never needs to commit anything
+      // FORGE owns git add + commit after claude exits â€” claude never needs to commit anything
       // itself. `commitAll` runs `git add -A` then `git commit`; a clean tree (nothing staged) is
       // reported as `nothingToCommit: true` with `success: true`, so that case is skipped silently
       // rather than logged as a failure.
       const commit = ctx.git.commitAll(entry.name);
       if (!commit.success) {
-        log(`prompt ${index} '${entry.id}': commit failed — ${commit.error ?? 'unknown'}`);
+        log(`prompt ${index} '${entry.id}': commit failed â€” ${commit.error ?? 'unknown'}`);
       }
       if (!run.success) {
         log(`prompt ${index} '${entry.id}': claude exited ${run.exitCode ?? 'null'}${run.timedOut ? ' (TIMEOUT)' : ''}`);
@@ -1978,29 +1978,29 @@ async function executePrompt(
       sentinel = await ctx.runSentinelImpl(sentinelOptions);
     }
 
-    renderProgress('GATE', `Sentinel — ${sentinel.checks.length} check(s)`);
+    renderProgress('GATE', `Sentinel â€” ${sentinel.checks.length} check(s)`);
     for (const check of sentinel.checks) {
       const verdict = check.skipped ? 'SKIP' : check.passed ? 'PASS' : 'FAIL';
       renderProgress(
         check.skipped ? 'WARN' : check.passed ? 'PASS' : 'FAIL',
-        `  ${check.name} — ${verdict}${verdict === 'FAIL' ? ` (${check.detail})` : ''}`
+        `  ${check.name} â€” ${verdict}${verdict === 'FAIL' ? ` (${check.detail})` : ''}`
       );
     }
 
-    // Session 5.2 Task 3: project-boundary guard — best-effort scan of claude's own stdout for
+    // Session 5.2 Task 3: project-boundary guard â€” best-effort scan of claude's own stdout for
     // absolute paths outside the project root. A violation forces this run to read as failed,
     // which then cascades through forceFailOnClaudeFailure below exactly like any other failure.
     const outOfBounds = findOutOfBoundsPaths(run.stdout, ctx.projectPath);
     if (outOfBounds.length > 0) {
       log(
-        `prompt ${index} '${entry.id}': PROJECT-BOUNDARY VIOLATION — claude's output references ` +
+        `prompt ${index} '${entry.id}': PROJECT-BOUNDARY VIOLATION â€” claude's output references ` +
           `path(s) outside the project root (${ctx.projectPath}): ${outOfBounds.slice(0, 5).join(', ')}` +
           `${outOfBounds.length > 5 ? ` (+${outOfBounds.length - 5} more)` : ''}`
       );
       run = { ...run, success: false };
     }
 
-    // Session 5 finding #14: a claude TIMEOUT is a failure regardless of what Sentinel finds —
+    // Session 5 finding #14: a claude TIMEOUT is a failure regardless of what Sentinel finds â€”
     // Sentinel only proves the code that exists doesn't obviously break, not that the prompt's
     // work actually happened. A "silent" timeout (Sentinel reports PASS on a timed-out run) is
     // overridden to a failure so every downstream reader (live status, Build Brain, the learning
@@ -2008,16 +2008,16 @@ async function executePrompt(
     // honest outcome instead of a misleading green.
     if (run.timedOut) sentinel = forceFailOnTimeout(sentinel, timeoutMs, entry, log, index);
     // Session 5.2: any other claude failure (bad exit code, spawn error, empty stdout, or the
-    // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure —
+    // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure â€”
     // never let a prompt whose own execution didn't succeed merge on the back of a Sentinel PASS.
     sentinel = forceFailOnClaudeFailure(sentinel, run, entry, log, index);
 
-    // One automatic retry at 2x the budget before failing outright (autonomous recovery only) —
+    // One automatic retry at 2x the budget before failing outright (autonomous recovery only) â€”
     // a single timeout is often just an undersized budget for THIS prompt, not a real defect.
     if (run.timedOut && ctx.autonomousRecoveryMode) {
       const retryTimeoutMs = timeoutMs * 2;
       log(
-        `prompt ${index} '${entry.id}': claude TIMEOUT — retrying once with 2x budget ` +
+        `prompt ${index} '${entry.id}': claude TIMEOUT â€” retrying once with 2x budget ` +
           `(${Math.round(retryTimeoutMs / 1000)}s) before failing (Session 5 finding #14)`
       );
       await ctx.liveStatus.promptPhase(
@@ -2029,7 +2029,7 @@ async function executePrompt(
         `[FORGE] timeout-retry ${entry.prompt_type}: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run with 2x timeout budget.`
       );
       if (!retryCommit.success) {
-        log(`prompt ${index} '${entry.id}': timeout-retry commit failed — ${retryCommit.error ?? 'unknown'}`);
+        log(`prompt ${index} '${entry.id}': timeout-retry commit failed â€” ${retryCommit.error ?? 'unknown'}`);
       }
       let retrySentinel = await ctx.runSentinelImpl(sentinelOptions);
       if (retryRun.timedOut) retrySentinel = forceFailOnTimeout(retrySentinel, retryTimeoutMs, entry, log, index);
@@ -2038,14 +2038,14 @@ async function executePrompt(
       sentinel = retrySentinel;
       log(
         `prompt ${index} '${entry.id}': timeout retry ` +
-          `${sentinel.passed ? 'succeeded — Sentinel green' : `still failing (${retryRun.timedOut ? 'timed out again' : sentinel.failedCheck ?? 'unknown'})`}.`
+          `${sentinel.passed ? 'succeeded â€” Sentinel green' : `still failing (${retryRun.timedOut ? 'timed out again' : sentinel.failedCheck ?? 'unknown'})`}.`
       );
     }
 
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'sentinel' });
     await ctx.liveStatus.sentinelResult({ passed: sentinel.passed, failedCheck: sentinel.failedCheck });
 
-    // e1. POST-PROMPT HOOK — fire after execution, before Sentinel. Non-fatal.
+    // e1. POST-PROMPT HOOK â€” fire after execution, before Sentinel. Non-fatal.
     await ctx.hookManager
       .fireEvent('post_prompt', {
         projectPath: ctx.projectPath,
@@ -2058,23 +2058,23 @@ async function executePrompt(
       })
       .catch(() => {});
 
-    // e2. COMMIT PROMPT CHANGES — structured commit tracking this prompt's output.
+    // e2. COMMIT PROMPT CHANGES â€” structured commit tracking this prompt's output.
     // Non-fatal: if nothing was staged (prior commitAll already committed), this is a no-op.
     let commitHash: string | null = null;
     try {
       commitHash = await ctx.git.commitPromptChanges(entry.id, entry.prompt_type, 'post-run');
     } catch (commitErr) {
-      log(`prompt ${index} '${entry.id}': commitPromptChanges non-fatal — ${describe(commitErr)}`);
+      log(`prompt ${index} '${entry.id}': commitPromptChanges non-fatal â€” ${describe(commitErr)}`);
     }
 
     // Capture the files this branch changed (for the prompt_execution record).
     const changed = filesChanged(ctx);
 
-    // h1. BUILD BRAIN — when Sentinel fails, seed/update the learning tables (Task 1's write
-    // loop — every failure is a signal, matched or not) then consult accumulated knowledge
+    // h1. BUILD BRAIN â€” when Sentinel fails, seed/update the learning tables (Task 1's write
+    // loop â€” every failure is a signal, matched or not) then consult accumulated knowledge
     // (error_patterns, resolutions, fix_patterns, governance_rules) for a TARGETED recovery
     // prompt, rather than a generic retry. A successful brain fix is applied immediately and
-    // does NOT count against autonomous-recovery's max_retries. Non-fatal throughout — Build
+    // does NOT count against autonomous-recovery's max_retries. Non-fatal throughout â€” Build
     // Brain unavailable/erroring falls back to the existing autonomous-recovery / escalation path.
     // `sentinel.passed` already reflects the finding-#14 timeout override above, so a plain
     // `!sentinel.passed` correctly covers both a genuine Sentinel failure and a silent timeout.
@@ -2090,7 +2090,7 @@ async function executePrompt(
         promptType: entry.prompt_type,
         projectName: ctx.projectName,
         stackFingerprint: ctx.stackFingerprint,
-      }).catch((err) => log(`prompt ${index} '${entry.id}': recordFailureObserved non-fatal — ${describe(err)}`));
+      }).catch((err) => log(`prompt ${index} '${entry.id}': recordFailureObserved non-fatal â€” ${describe(err)}`));
 
       try {
         brainDiagnosis = await analyzeSentinelFailure(sentinel, entry, {
@@ -2100,7 +2100,7 @@ async function executePrompt(
           priorFailedSignaturesThisBuild: [...ctx.failedSignaturesThisBuild],
         });
       } catch (brainErr) {
-        log(`prompt ${index} '${entry.id}': Build Brain unavailable — ${describe(brainErr)}`);
+        log(`prompt ${index} '${entry.id}': Build Brain unavailable â€” ${describe(brainErr)}`);
         brainDiagnosis = null;
       }
 
@@ -2115,7 +2115,7 @@ async function executePrompt(
         );
         log(
           `prompt ${index} '${entry.id}': Build Brain matched a known fix ` +
-            `(confidence ${brainDiagnosis.confidence.toFixed(2)}) — applying targeted recovery`
+            `(confidence ${brainDiagnosis.confidence.toFixed(2)}) â€” applying targeted recovery`
         );
         const fixRun = await ctx.runClaudeImpl(brainDiagnosis.recoveryPrompt, ctx.projectPath, timeoutMs);
         let recovered = false;
@@ -2126,13 +2126,13 @@ async function executePrompt(
           const fixedSentinel = await ctx.runSentinelImpl(sentinelOptions);
           recovered = fixedSentinel.passed;
           if (recovered) {
-            log(`prompt ${index} '${entry.id}': Build Brain fix succeeded — sentinel now green`);
+            log(`prompt ${index} '${entry.id}': Build Brain fix succeeded â€” sentinel now green`);
             sentinel = fixedSentinel;
           } else {
-            log(`prompt ${index} '${entry.id}': Build Brain fix applied but sentinel still failing — proceeding to normal recovery`);
+            log(`prompt ${index} '${entry.id}': Build Brain fix applied but sentinel still failing â€” proceeding to normal recovery`);
           }
         } else {
-          log(`prompt ${index} '${entry.id}': Build Brain fix claude run failed — proceeding to normal recovery`);
+          log(`prompt ${index} '${entry.id}': Build Brain fix claude run failed â€” proceeding to normal recovery`);
         }
         if (!recovered) ctx.failedSignaturesThisBuild.add(brainDiagnosis.signature);
         await recordRecoveryOutcome({
@@ -2149,7 +2149,7 @@ async function executePrompt(
           .then((r) => {
             if (r.elevatedRuleId) ctx.elevatedRuleIds.add(r.elevatedRuleId);
           })
-          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal — ${describe(err)}`));
+          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal â€” ${describe(err)}`));
       }
     }
 
@@ -2158,7 +2158,7 @@ async function executePrompt(
     let note: string;
 
     // BULLETPROOF GUARD (unconditional): if the most recently produced Sentinel result already
-    // passed, this prompt is done — full stop. Recovery (Contract 14) exists ONLY to rescue a
+    // passed, this prompt is done â€” full stop. Recovery (Contract 14) exists ONLY to rescue a
     // FAILING Sentinel; it must be structurally unreachable whenever `sentinel.passed === true`.
     // This check is repeated at every point below where `sentinel` could feed a recovery call, so
     // no future refactor of the branches beneath it can accidentally route a green Sentinel into
@@ -2167,7 +2167,7 @@ async function executePrompt(
       // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
       mergeAndTag(ctx, index);
       disposition = 'completed';
-      note = 'Sentinel passed — merged to main and checkpointed.';
+      note = 'Sentinel passed â€” merged to main and checkpointed.';
     } else if (ctx.autonomousRecoveryMode) {
       // j. Autonomous Recovery (Contract 14): re-run the prompt + Sentinel, up to 2 attempts. Uses
       // Build Brain's targeted recoveryPrompt instead of the identical original prompt when one is
@@ -2184,12 +2184,12 @@ async function executePrompt(
         return { success: r.success, output: `${r.stdout}\n${r.stderr}` };
       };
       // Reaching `runRecoveryImpl` at all already requires the outer guard above to have found
-      // `sentinel.passed === false` — the type system enforces that (TS proves the reverse check
+      // `sentinel.passed === false` â€” the type system enforces that (TS proves the reverse check
       // here is unreachable), so this call site can never fire on a green Sentinel.
       recovery = await ctx.runRecoveryImpl(sentinel, rerunPrompt, sentinelOptions, promptExecutionId);
       sentinel = recovery.finalSentinel;
       // Second guard: the disposition is decided from `sentinel.passed` (the actual, current
-      // Sentinel verdict recovery just produced), not merely from `recovery.recovered` — a passing
+      // Sentinel verdict recovery just produced), not merely from `recovery.recovered` â€” a passing
       // Sentinel result can never be reported as a failed prompt, regardless of what any other
       // field on the recovery result says.
       if (sentinel.passed === true) {
@@ -2197,7 +2197,7 @@ async function executePrompt(
         disposition = 'completed';
         note = recovery.recovered
           ? `Auto-recovered: ${recovery.reason}`
-          : 'Sentinel passed after recovery — merged to main and checkpointed.';
+          : 'Sentinel passed after recovery â€” merged to main and checkpointed.';
       } else {
         disposition = 'failed';
         note = `Sentinel failed; auto-recovery did not restore green: ${recovery.reason}`;
@@ -2218,11 +2218,11 @@ async function executePrompt(
           .then((r) => {
             if (r.elevatedRuleId) ctx.elevatedRuleIds.add(r.elevatedRuleId);
           })
-          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal — ${describe(err)}`));
+          .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal â€” ${describe(err)}`));
       }
     } else {
       disposition = 'failed';
-      note = `Sentinel failed (${sentinel.failedCheck ?? 'unknown'}) — Autonomous Recovery disabled, escalating (Contract 14).`;
+      note = `Sentinel failed (${sentinel.failedCheck ?? 'unknown'}) â€” Autonomous Recovery disabled, escalating (Contract 14).`;
     }
 
     await ctx.liveStatus.promptPhase({
@@ -2246,7 +2246,7 @@ async function executePrompt(
 
     // Post-finalization: dead code scan on changed files + every-10th smoke tests.
 
-    // DEAD CODE SCAN — scan the whole src tree but report only findings in changed files.
+    // DEAD CODE SCAN â€” scan the whole src tree but report only findings in changed files.
     // Non-fatal: scan failures are logged and do not affect the prompt's disposition.
     const changedPaths = [...changed.created, ...changed.modified];
     if (changedPaths.length > 0) {
@@ -2259,17 +2259,17 @@ async function executePrompt(
           const total = unusedImports.length + unusedVars.length + unusedExports.length;
           if (total > 0) {
             log(
-              `prompt ${index} '${entry.id}': dead-code scan — ${total} issue(s) in changed files ` +
+              `prompt ${index} '${entry.id}': dead-code scan â€” ${total} issue(s) in changed files ` +
                 `(imports: ${unusedImports.length}, vars: ${unusedVars.length}, exports: ${unusedExports.length})`
             );
           }
         })
         .catch((scanErr) => {
-          log(`prompt ${index} '${entry.id}': dead-code scan non-fatal — ${describe(scanErr)}`);
+          log(`prompt ${index} '${entry.id}': dead-code scan non-fatal â€” ${describe(scanErr)}`);
         });
     }
 
-    // SMOKE TESTS every 10th prompt — run after completion (regardless of pass/fail for visibility).
+    // SMOKE TESTS every 10th prompt â€” run after completion (regardless of pass/fail for visibility).
     // Uses shouldRunTests frequency guard and runSmokeTests (compile + build + 3 page probes).
     if (shouldRunTests(index)) {
       runSmokeTests(ctx.projectPath)
@@ -2280,8 +2280,8 @@ async function executePrompt(
           );
           if (!smokeResult.passed) {
             const failing = smokeResult.results.filter((r) => !r.passed);
-            log(`prompt ${index} '${entry.id}': smoke failures — ${failing.map((r) => r.file).join(', ')}`);
-            // Session 5 finding #6: smoke-test failures are a learning signal too — one
+            log(`prompt ${index} '${entry.id}': smoke failures â€” ${failing.map((r) => r.file).join(', ')}`);
+            // Session 5 finding #6: smoke-test failures are a learning signal too â€” one
             // error_patterns/fix_patterns row PER failing check, not just Sentinel failures.
             for (const r of failing) {
               recordSmokeTestFailureObserved({
@@ -2289,17 +2289,17 @@ async function executePrompt(
                 errorText: r.error ?? r.output ?? 'smoke check failed',
                 projectName: ctx.projectName,
                 stackFingerprint: ctx.stackFingerprint,
-              }).catch((err) => log(`prompt ${index} '${entry.id}': recordSmokeTestFailureObserved non-fatal — ${describe(err)}`));
+              }).catch((err) => log(`prompt ${index} '${entry.id}': recordSmokeTestFailureObserved non-fatal â€” ${describe(err)}`));
             }
           }
         })
         .catch((smokeErr) => {
-          log(`prompt ${index} '${entry.id}': smoke tests non-fatal — ${describe(smokeErr)}`);
+          log(`prompt ${index} '${entry.id}': smoke tests non-fatal â€” ${describe(smokeErr)}`);
         });
     }
 
     // Rebuild the Codebase RAG index after a SUCCESSFUL prompt (Contract 7 extension), so the next
-    // prompt's retrieval reflects the files this one just wrote/merged. Non-fatal — on failure the
+    // prompt's retrieval reflects the files this one just wrote/merged. Non-fatal â€” on failure the
     // previous index is kept (CodebaseRag.rebuild never throws).
     if (disposition === 'completed' && ctx.rag) {
       await ctx.rag.rebuild();
@@ -2310,23 +2310,23 @@ async function executePrompt(
       ? `, decomposed into ${decomposition.subPrompts.length} sub-prompt(s)`
       : '';
     await ctx.updateStateProgress(
-      `[FORGE Phase 3] prompt ${index} '${entry.id}' (${entry.prompt_type}): ${disposition.toUpperCase()} — ` +
+      `[FORGE Phase 3] prompt ${index} '${entry.id}' (${entry.prompt_type}): ${disposition.toUpperCase()} â€” ` +
         `Sentinel ${sentinel.passed ? 'PASS' : `FAIL(${sentinel.failedCheck ?? '?'})`}${wasRewritten ? ', rewritten' : ''}${decompSuffix}.`
     );
     if (decomposition?.decomposed) note = `${note} (${decomposition.note})`;
 
     const durationMs = Date.now() - promptStartedAt;
-    log(`prompt ${index} '${entry.id}': ${disposition} — ${note} (${humanDuration(durationMs)})`);
+    log(`prompt ${index} '${entry.id}': ${disposition} â€” ${note} (${humanDuration(durationMs)})`);
     if (disposition === 'completed') {
       renderProgress(
         'PASS',
-        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' — PASS` +
-          `${commitHash ? ` (${commitHash.slice(0, 7)})` : ''} — ${humanDuration(durationMs)}`
+        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' â€” PASS` +
+          `${commitHash ? ` (${commitHash.slice(0, 7)})` : ''} â€” ${humanDuration(durationMs)}`
       );
     } else {
       renderProgress(
         'FAIL',
-        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' — FAIL (${sentinel.failedCheck ?? 'unknown check'}) — ${humanDuration(durationMs)}`
+        `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' â€” FAIL (${sentinel.failedCheck ?? 'unknown check'}) â€” ${humanDuration(durationMs)}`
       );
     }
     return {
@@ -2350,7 +2350,7 @@ async function executePrompt(
     };
   } catch (error) {
     // Defensive: the collaborators never throw, but if one does, fail this prompt (don't crash).
-    // Not a claude-runner timeout (the error happened in FORGE's own orchestration) — timedOut: false.
+    // Not a claude-runner timeout (the error happened in FORGE's own orchestration) â€” timedOut: false.
     const durationMs = Date.now() - promptStartedAt;
     const note = `Unexpected error executing prompt ${index} '${entry.id}': ${describe(error)}`;
     ctx.log(`ERROR: ${note}`);
@@ -2400,7 +2400,7 @@ async function dryRunPrompt(
       previousSentinel,
     });
     promptHash = assembled.hash;
-    // Rough token estimate from the assembled prompt length (≈ chars / 4), else the queue figure.
+    // Rough token estimate from the assembled prompt length (â‰ˆ chars / 4), else the queue figure.
     tokens = Math.max(entry.estimated_tokens, Math.ceil(assembled.prompt.length / 4));
   } catch (error) {
     ctx.log(`dry-run prompt ${index} '${entry.id}': ${describe(error)}`);
@@ -2422,11 +2422,11 @@ async function dryRunPrompt(
     durationMs: 0,
     sentinel: null,
     recovery: null,
-    note: `Dry run — assembled + predicted (p=${probability === null ? 'n/a' : probability.toFixed(3)}), not executed.`,
+    note: `Dry run â€” assembled + predicted (p=${probability === null ? 'n/a' : probability.toFixed(3)}), not executed.`,
   };
 }
 
-/** Every prompt type — used to seed the per-type count record. */
+/** Every prompt type â€” used to seed the per-type count record. */
 const ALL_PROMPT_TYPES: readonly PromptType[] = [
   'schema',
   'auth',
@@ -2443,7 +2443,7 @@ const ALL_PROMPT_TYPES: readonly PromptType[] = [
  * cost-estimator. The per-prompt plan + per-prompt failure probabilities come from THIS queue's
  * assembled prompts (precise); the dollar/time/failure bands come from `estimateBuildCost` grounded
  * in Build Memory history. When no Phase 1 `features` list is supplied, an approximate scope is
- * derived from the queue's per-type counts (with a warning). Never throws — a degraded estimate
+ * derived from the queue's per-type counts (with a warning). Never throws â€” a degraded estimate
  * leaves `costEstimate`/`predictedCostUsd`/`predictedTimeMs` null and records a warning.
  */
 async function buildSimulationReport(input: {
@@ -2487,7 +2487,7 @@ async function buildSimulationReport(input: {
   if (input.features && input.features.length > 0) {
     costInput = { stackFingerprint: input.stackFingerprint, features: input.features };
   } else {
-    warnings.push('No Phase 1 feature list supplied — cost estimate derived approximately from the queue.');
+    warnings.push('No Phase 1 feature list supplied â€” cost estimate derived approximately from the queue.');
     costInput = {
       stackFingerprint: input.stackFingerprint,
       features: [],
@@ -2552,7 +2552,7 @@ function skippedOutcome(entry: QueueEntry, index: number, note: string): PromptO
 // ---------------------------------------------------------------------------
 
 /**
- * Whether a VS Code (`Code.exe`) process is currently running. Windows-only check (`tasklist`) —
+ * Whether a VS Code (`Code.exe`) process is currently running. Windows-only check (`tasklist`) â€”
  * on any other platform, or when the check itself errors, this degrades to `true` (never block a
  * build over an unsupported/unavailable check; that is a different failure than "VS Code isn't
  * open"). Only a tasklist run that actually completes and finds no `Code.exe` returns `false`.
@@ -2563,7 +2563,7 @@ function isVsCodeRunning(log: (message: string) => void): boolean {
     const output = execSync('tasklist /FI "IMAGENAME eq Code.exe"', { encoding: 'utf8', windowsHide: true });
     return /Code\.exe/i.test(output);
   } catch (error) {
-    log(`pre-run gate: tasklist check failed (${describe(error)}) — treating vs_code_open as satisfied`);
+    log(`pre-run gate: tasklist check failed (${describe(error)}) â€” treating vs_code_open as satisfied`);
     return true;
   }
 }
@@ -2596,7 +2596,7 @@ function checkPreRunGates(
 // git helpers
 // ---------------------------------------------------------------------------
 
-/** The build id used in branch/tag names — the build_run id, else a stable fallback. */
+/** The build id used in branch/tag names â€” the build_run id, else a stable fallback. */
 function buildIdOf(ctx: LoopContext): string {
   return ctx.buildRunId ?? `local-${ctx.machineId}`;
 }
@@ -2605,11 +2605,11 @@ function buildIdOf(ctx: LoopContext): string {
 function mergeAndTag(ctx: LoopContext, index: number): void {
   const merge = ctx.git.mergeToMain();
   if (!merge.success) {
-    ctx.log(`prompt ${index}: merge to ${merge.targetBranch} failed — ${merge.error ?? 'unknown'}`);
+    ctx.log(`prompt ${index}: merge to ${merge.targetBranch} failed â€” ${merge.error ?? 'unknown'}`);
     return;
   }
   const tag = ctx.git.tagCheckpoint(buildIdOf(ctx), index);
-  if (!tag.success) ctx.log(`prompt ${index}: checkpoint tag failed — ${tag.error ?? 'unknown'}`);
+  if (!tag.success) ctx.log(`prompt ${index}: checkpoint tag failed â€” ${tag.error ?? 'unknown'}`);
 }
 
 /** Read the files this branch changed relative to main (for the prompt_execution record). */
@@ -2631,10 +2631,10 @@ function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]
 
 /**
  * VS Code integration layer: append one prompt's structured entry to `<projectPath>/CHANGESET.md`
- * — created if absent, NEVER overwritten — right after that prompt's Claude Code run + commit and
+ * â€” created if absent, NEVER overwritten â€” right after that prompt's Claude Code run + commit and
  * before Sentinel evaluates it, so a reviewer always has a durable, human-readable record of
  * exactly what the run touched. Also refreshes SESSION_STATE.md's IDE STATUS "last changeset date"
- * field (via {@link syncIdeStatus}). Guarded — a write failure is logged and swallowed.
+ * field (via {@link syncIdeStatus}). Guarded â€” a write failure is logged and swallowed.
  */
 async function appendChangeset(
   ctx: LoopContext,
@@ -2646,7 +2646,7 @@ async function appendChangeset(
   const section = (label: string, list: string[]): string =>
     [`### ${label}`, '', ...(list.length > 0 ? list.map((f) => `- ${f}`) : ['- (none)']), ''].join('\n');
   const entryText = [
-    `## ${timestamp} — ${entry.name} (prompt ${index}/${ctx.totalPrompts})`,
+    `## ${timestamp} â€” ${entry.name} (prompt ${index}/${ctx.totalPrompts})`,
     '',
     section('Files Created', files.created),
     section('Files Modified', files.modified),
@@ -2664,10 +2664,10 @@ async function appendChangeset(
 }
 
 /**
- * On build completion (Task 1.3 — Session 4), write cross_project_insights for the three
+ * On build completion (Task 1.3 â€” Session 4), write cross_project_insights for the three
  * build-level compounding signals that don't fit a single prompt's `prompt_executions` row:
  * any decomposition that occurred, any prompt_type with >1 Sentinel failure this build, and any
- * governance rule the write loop auto-elevated this build. Guarded — never throws; a Build
+ * governance rule the write loop auto-elevated this build. Guarded â€” never throws; a Build
  * Memory outage just means these insights are skipped (Contract 4).
  */
 async function recordBuildCompletionInsights(input: {
@@ -2712,7 +2712,7 @@ async function recordBuildCompletionInsights(input: {
         applicable_fingerprints: fingerprints,
         description:
           `Prompt type(s) with repeated (>1) Sentinel failures this build: ` +
-          `${repeatedTypes.map(([t, n]) => `${t}×${n}`).join(', ')}. Consider reviewing that stage's governance/template.`,
+          `${repeatedTypes.map(([t, n]) => `${t}Ã—${n}`).join(', ')}. Consider reviewing that stage's governance/template.`,
         evidence: { failuresByType: Object.fromEntries(repeatedTypes) },
       });
     } catch (error) {
@@ -2753,14 +2753,14 @@ async function rollbackAndReport(
     const tag = checkpointTagName(buildIdOf(ctx), index - 1);
     const rollback = ctx.git.rollbackToCheckpoint(tag);
     if (!rollback.success) {
-      ctx.log(`halt: rollback to ${tag} failed — ${rollback.error ?? 'unknown'} (feature branch preserved regardless)`);
+      ctx.log(`halt: rollback to ${tag} failed â€” ${rollback.error ?? 'unknown'} (feature branch preserved regardless)`);
     } else {
       ctx.log(`halt: main reset to last checkpoint ${tag}; feature branch ${outcome.branchName ?? '(none)'} preserved`);
     }
   }
 
   const report = [
-    '# FORGE Phase 3 — HALT',
+    '# FORGE Phase 3 â€” HALT',
     '',
     `- **Halted at:** prompt ${index} '${entry.id}' (${entry.prompt_type})`,
     `- **Reason:** ${haltReason}`,
@@ -2869,12 +2869,12 @@ async function finalizePromptExecution(
 }
 
 // ---------------------------------------------------------------------------
-// State + halt-report writers (defaults — injectable)
+// State + halt-report writers (defaults â€” injectable)
 // ---------------------------------------------------------------------------
 
 /**
  * Default STATE_OF_THE_BUILD.md progress update (Canonical Rule 9): append a timestamped
- * progress line under the governance dir. Guarded — a write failure is non-fatal (it never
+ * progress line under the governance dir. Guarded â€” a write failure is non-fatal (it never
  * blocks the build). STATE_OF_THE_BUILD.md is deliberately NOT in Sentinel's protected set.
  */
 async function defaultUpdateStateProgress(governanceDir: string, line: string): Promise<void> {
@@ -2882,14 +2882,14 @@ async function defaultUpdateStateProgress(governanceDir: string, line: string): 
   try {
     await appendFile(target, toAsciiGovernanceText(`\n> ${nowIso()} ${line}\n`), 'utf8');
   } catch {
-    /* non-fatal — the state document update must never block the build */
+    /* non-fatal â€” the state document update must never block the build */
   }
 }
 
 /**
  * Default decomposition-record sink: write the decomposition SHAPE to `cross_project_insights` as an
- * `optimization` insight (Phase 5 pattern learning — which prompt kinds need splitting, how reliably
- * the splits land). No-op in stateless mode (no build to attach to). Guarded/non-fatal (Contract 4 —
+ * `optimization` insight (Phase 5 pattern learning â€” which prompt kinds need splitting, how reliably
+ * the splits land). No-op in stateless mode (no build to attach to). Guarded/non-fatal (Contract 4 â€”
  * a Build Memory write never blocks the build).
  */
 async function defaultRecordDecomposition(
@@ -2922,7 +2922,7 @@ async function defaultRecordDecomposition(
       },
     });
   } catch {
-    /* non-fatal — Build Memory write must never block the build (Contract 4) */
+    /* non-fatal â€” Build Memory write must never block the build (Contract 4) */
   }
 }
 
@@ -2939,7 +2939,7 @@ async function defaultWriteHaltReport(projectPath: string, report: string): Prom
 
 /**
  * Read and concatenate the SKILL.md files for the given skill names.
- * Missing skill files are skipped with a warning (non-fatal — Contract 4 posture).
+ * Missing skill files are skipped with a warning (non-fatal â€” Contract 4 posture).
  */
 async function loadSkillContent(skills: string[], skillsDir: string, log: (m: string) => void): Promise<string> {
   const parts: string[] = [];
@@ -2949,7 +2949,7 @@ async function loadSkillContent(skills: string[], skillsDir: string, log: (m: st
       const content = await readFile(skillPath, 'utf8');
       parts.push(content.trim());
     } catch (error) {
-      log(`WARNING: skill '${skill}' not found at ${skillPath} (${describe(error)}) — skipped`);
+      log(`WARNING: skill '${skill}' not found at ${skillPath} (${describe(error)}) â€” skipped`);
     }
   }
   return parts.join('\n\n');
@@ -2963,3 +2963,5 @@ function basenameOf(p: string): string {
 }
 
 export default runPhase3Executor;
+
+

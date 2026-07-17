@@ -1,6 +1,6 @@
 # forge-2 — DESIGN SYSTEM (FORGE × UI/UX Pro Max)
 
-- **Generated:** 2026-07-17T00:04:37.301Z
+- **Generated:** 2026-07-17T02:29:56.548Z
 - **Product-type query:** forge-2 The Resurrection and Gap Intelligence Engine is the governance layer that lets FORGE resume any build — its own or another operator's — without
 - **Source:** UI/UX Pro Max design intelligence (`search.py --design-system --persist`)
 
@@ -20,7 +20,7 @@
 ---
 
 **Project:** forge-2
-**Generated:** 2026-07-16 19:04:37
+**Generated:** 2026-07-16 21:29:56
 **Category:** Job Board/Recruitment
 
 ---

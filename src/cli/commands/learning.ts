@@ -2,10 +2,15 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { initializeForgeMemory, getConnection, getForgeDbPath, getMachineId } from '../../learning/database.js';
 import { getGovernanceRules, getPendingEvolutions, getForgeMemory } from '../../learning/queries.js';
 import { syncForgeMemory, loadSyncConfig, getLastSyncTimestamp } from '../../learning/sync.js';
 import { VALID_TABLES, type FixPattern } from '../../learning/types.js';
+import { transferKnowledge } from '../../learning/cross-project-transfer.js';
+import { emitProposals } from '../../learning/build-brain-evolver.js';
+import { promoteEligible } from '../../learning/evolution-promoter.js';
+import { detectStack } from '../../tools/stack-detector.js';
 
 export function registerLearningCommands(program: Command): void {
   const learn = program
@@ -229,6 +234,122 @@ export function registerLearningCommands(program: Command): void {
         }
       } catch (err) {
         console.error(chalk.red('✖ Failed to load rules:'), err);
+      }
+    });
+
+  // ── forge learn transfer ──────────────────────────────────────────────────
+  // CrossProjectKnowledgeTransfer (LEARNING_BLUEPRINT.md § Agent: CrossProjectKnowledgeTransfer) —
+  // PUSH stack-compatible, non-retired cross_project_insights into <project-path>'s build.
+  learn
+    .command('transfer')
+    .description('Transfer stack-compatible cross-project insights into a build (CrossProjectKnowledgeTransfer)')
+    .argument('<project-path>', 'Absolute path to the target project (its detected stack is the match target)')
+    .option('--dry-run', 'report what would be transferred; write nothing', false)
+    .option('--build-id <id>', 'restrict transfer to insights sourced from one specific build')
+    .action(async (projectPath: string, opts: { dryRun?: boolean; buildId?: string }) => {
+      try {
+        const dbPath = getForgeDbPath();
+        if (!existsSync(dbPath)) {
+          console.log(chalk.yellow('Learning database not found. Run: forge learn init'));
+          return;
+        }
+        const db = getConnection(dbPath);
+        const resolvedPath = resolve(projectPath);
+        const targetStack = await detectStack(resolvedPath);
+
+        const result = transferKnowledge(resolvedPath, targetStack, db, {
+          dryRun: opts.dryRun ?? false,
+          ...(opts.buildId ? { buildId: opts.buildId } : {}),
+        });
+
+        console.log(chalk.bold(`\n🔀 CrossProjectKnowledgeTransfer — ${resolvedPath}\n`));
+        const stackLabel = [targetStack.language, targetStack.framework, targetStack.database]
+          .filter((v): v is string => typeof v === 'string' && v !== '')
+          .join(' / ');
+        console.log(`  Target stack: ${chalk.cyan(stackLabel || 'unknown')}`);
+        console.log(`  Transferred:  ${chalk.green(String(result.transferred))} insight(s)`);
+        console.log(`  Skipped:      ${result.skippedIncompatible} incompatible, ${result.skippedRetired} retired`);
+        if (opts.dryRun) console.log(chalk.gray('  (dry run — applied_count not incremented)'));
+        for (const w of result.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
+        if (result.contextBlock !== '') {
+          console.log(chalk.bold('\n  Context block:\n'));
+          console.log(result.contextBlock);
+        }
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red('✖ Transfer refused:'), err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    });
+
+  // ── forge learn evolve ────────────────────────────────────────────────────
+  // BuildBrainEvolver (LEARNING_BLUEPRINT.md § Agent: BuildBrainEvolver) — analyze one build's
+  // Contract-9 rewrite-effectiveness observations (prompt_executions.was_rewritten /
+  // sentinel_passed) and emit any TEMPLATE evolution proposals into pending_evolutions. Never
+  // edits src/engine/prompt-rewriter.ts — proposals only (Learning Iron Law L5).
+  learn
+    .command('evolve')
+    .description("Analyze a build's prompt-rewrite effectiveness and emit TEMPLATE evolution proposals (BuildBrainEvolver)")
+    .argument('<build-id>', 'The build_runs.id to analyze')
+    .action((buildId: string) => {
+      try {
+        const dbPath = getForgeDbPath();
+        if (!existsSync(dbPath)) {
+          console.log(chalk.yellow('Learning database not found. Run: forge learn init'));
+          return;
+        }
+        const db = getConnection(dbPath);
+        const proposals = emitProposals(buildId, db);
+
+        console.log(chalk.bold(`\n🧬 BuildBrainEvolver — build ${buildId}\n`));
+        if (proposals.length === 0) {
+          console.log(chalk.gray('No new rewrite-effectiveness pattern found (or already proposed for this build).'));
+          return;
+        }
+        for (const p of proposals) {
+          const confidenceColor = p.confidence >= 0.7 ? chalk.green : p.confidence >= 0.4 ? chalk.yellow : chalk.red;
+          console.log(`  [${chalk.cyan(p.evolution_type)}] ${p.proposed_change}`);
+          console.log(`    Confidence: ${confidenceColor((p.confidence * 100).toFixed(0) + '%')}  |  Impact: ${p.estimated_impact}`);
+        }
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red('✖ BuildBrainEvolver failed:'), err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    });
+
+  // ── forge learn promote ───────────────────────────────────────────────────
+  // EvolutionPromoter (LEARNING_BLUEPRINT.md § Agent: EvolutionPromoter) — auto-promote every
+  // pending_evolutions row whose confidence clears PROMOTION_THRESHOLD (and isn't a GATE), and
+  // run monitoring-window rollback bookkeeping for already-promoted rows.
+  learn
+    .command('promote')
+    .description('Auto-promote high-confidence pending evolutions and run rollback monitoring (EvolutionPromoter)')
+    .action(() => {
+      try {
+        const dbPath = getForgeDbPath();
+        if (!existsSync(dbPath)) {
+          console.log(chalk.yellow('Learning database not found. Run: forge learn init'));
+          return;
+        }
+        const db = getConnection(dbPath);
+        const results = promoteEligible(db);
+
+        console.log(chalk.bold('\n🚀 EvolutionPromoter\n'));
+        if (results.length === 0) {
+          console.log(chalk.gray('No pending evolutions cleared the promotion bar this run.'));
+          return;
+        }
+        for (const r of results) {
+          console.log(
+            `  [${chalk.cyan(r.evolutionType)}] promoted (confidence ${(r.confidenceAtPromotion * 100).toFixed(0)}%)`
+          );
+          console.log(`    ${r.effectApplied}`);
+        }
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red('✖ EvolutionPromoter failed:'), err instanceof Error ? err.message : err);
+        process.exitCode = 1;
       }
     });
 }

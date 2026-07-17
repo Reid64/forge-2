@@ -10,6 +10,64 @@ section 3 ("Next action") as the starting task unless the user says otherwise.
 
 ---
 
+## 0. Systems 1-4 — Resurrection, Learning Extensions, Enterprise Test Suite, Integration Bus — COMPLETE (2026-07-17)
+
+Independent of the dialtest attempt 5 thread below (sections 1-4), Systems 1-4 from
+`upgrades/RESURRECTION_BLUEPRINT.md` (System 1), `upgrades/LEARNING_BLUEPRINT.md` (System 2),
+`upgrades/TESTING_BLUEPRINT.md` (System 3), and the cross-system Integration Bus (System 4,
+documented inline in `src/integration/bus.ts`) are **COMPLETE** — all code was implemented and
+compiles clean (`pnpm run build` → 0 errors). Governance docs (`AGENTS.md`,
+`BEHAVIORAL_CONTRACTS.md` Contracts R-1–R-5, `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md`) were
+reconciled against this code in the same session that wrote this handoff section. See
+`STATE_OF_THE_BUILD.md` § "Systems 1-4" for full detail per system.
+
+**New files this build:**
+
+`src/resurrection/` (System 1 — Resurrection and Gap Intelligence Engine):
+- `index.ts` — public API, re-exports `runGapAudit`, `runResurrectResume`
+- `types.ts` — all System 1 type definitions
+- `gap-auditor.ts` — `GapAuditor` orchestrator (`forge audit` entry point)
+- `governance-gaps.ts` — nine per-artifact content gap detectors (F21)
+- `artifact-scorer.ts` — `ArtifactHealthScorer`, the `composite_score` formula
+- `regeneration-engine.ts` — `RegenerationEngine`, AUTO-tier wholesale/section-scoped regeneration
+- `human-gate.ts` — `HumanGateEvaluator`, the 5th structural human gate
+- `halt-reconstructor.ts` — F24 halt-point reconstruction from Build Memory + preserved git branch
+- `continuation-planner.ts` — builds `ContinuationStep[]` → `gap_audit_runs.continuation_plan`
+
+`src/testing/` (System 3 — Enterprise Test Suite):
+- `orchestrator.ts` — `TestOrchestrator` dispatcher (`runTests`)
+- `types.ts` — shared testing types
+- `runners/` — 17 files: `unit.ts`/`unit-runner.ts`, `integration.ts`/`integration-runner.ts`,
+  `api.ts`/`api-runner.ts`, `e2e.ts`/`e2e-runner.ts`, `security.ts`/`security-runner.ts`,
+  `performance.ts`/`performance-runner.ts`, `dependency.ts`/`dependency-runner.ts`, plus shared
+  `vitest-shared.ts`, `exec.ts`, `persist.ts`, `types.ts`
+
+`src/integration/` (System 4 — Integration Bus):
+- `bus.ts` — `onSentinelFailure`, `onEvolutionPromoted`, `onContractConfirmed`
+
+`src/learning/` additions (System 2 — Learning Engine extensions, on top of the existing COMPLETE
+Learning Engine from Run 1):
+- `build-brain-evolver.ts` — `BuildBrainEvolver`, watches Contract-9 rewrite effectiveness, proposes
+  `pending_evolutions` (propose-only, Learning Iron Law L5)
+- `cross-project-transfer.ts` — `CrossProjectKnowledgeTransfer`, pushes stack-compatible
+  `cross_project_insights` into new builds, hard fingerprint matching (Learning Iron Law L7)
+- `pattern-retirer.ts` — `PatternRetirer`, weekly sweep retiring stale/zero-success `error_patterns`
+  into `pattern_retirement_log`
+- `retirement-filter.ts` — shared anti-join filter excluding retired patterns from consumers
+
+Also new (supporting the above, not separately itemized per the task scope but present on disk):
+`src/memory/gap-audits.ts` (CRUD for `gap_audit_runs`/`artifact_health_scores`), `src/memory/
+test-results.ts` (CRUD for `test_run_results`/`test_coverage_snapshots`), `src/engine/scheduler.ts`
+(drives `PatternRetirer`'s weekly sweep).
+
+**Not yet verified this session:** the CLI surface (`forge audit`, `forge resurrect --resume`,
+`phase-chain.ts` RETROFIT-mode wiring into `runGapAudit`, `forge health` row-count additions for
+the four new tables) — the modules compile and export the documented API, but no one has run
+`forge audit <path>` end-to-end yet. See `SESSION_STATE.md` § "Systems 1-4 — Governance
+Reconciliation" for the flagged next action.
+
+---
+
 ## 1. FORGE 2.0 status: 5 sessions + 5.2/5.3 hotfixes complete
 
 Commit chain: `d878693` → `6bdb319` → `a99e968` → `60603e3` → `f4d467d` → `b9eccc6` → `51e1eb6` → `22301a0` → `a8383f9`

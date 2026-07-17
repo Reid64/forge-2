@@ -75,6 +75,7 @@ import {
 } from '../tools/design-system-generator.js';
 import type { DesignSystemOptions } from '../tools/design-system-generator.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
+import { transferKnowledge } from '../learning/cross-project-transfer.js';
 import { logLine } from '../tools/forge-logger.js';
 import { extractJsonObject as extractJson, JSON_ONLY_DIRECTIVE } from '../tools/json-extraction.js';
 import type { BrandIdentity, CrossProjectInsight, DesignPattern, JsonObject } from '../types/index.js';
@@ -2184,12 +2185,36 @@ export async function runPhase1bArchitect(
   const singleTenant = detectSingleTenantDeclaration(prd);
   if (singleTenant) log('PRD explicitly declares single-tenant — Six Laws Law 1 scaffolding will be skipped');
 
+  // 0c. CrossProjectKnowledgeTransfer (LEARNING_BLUEPRINT.md § Agent: CrossProjectKnowledgeTransfer)
+  // — PUSH stack-compatible, non-retired insights from prior builds into this build's prompt
+  // assembly, as a pre-step ahead of Build Memory grounding below. Guarded: no stack fingerprint
+  // or an unreachable Build Memory degrades to no injection (Contract 4) — this call never
+  // throws here (it only throws for the explicit single-source `--build-id` CLI path).
+  let crossProjectTransferBlock = '';
+  if (options.stackFingerprint) {
+    try {
+      const memoryDb = BuildMemory.getClient();
+      if (memoryDb) {
+        const transfer = transferKnowledge(projectPath, options.stackFingerprint, memoryDb);
+        crossProjectTransferBlock = transfer.contextBlock;
+        log(
+          `CrossProjectKnowledgeTransfer: ${transfer.transferred} insight(s) transferred ` +
+            `(${transfer.skippedIncompatible} incompatible, ${transfer.skippedRetired} retired)`
+        );
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      warnings.push(`CrossProjectKnowledgeTransfer skipped (${detail}).`);
+      log(`WARNING: CrossProjectKnowledgeTransfer skipped (${detail})`);
+    }
+  }
+
   // 1. Build Memory grounding (proven patterns + applicable insights). Guarded.
   log('querying Build Memory for proven patterns and applicable insights');
   const grounding = await gatherGrounding(options.stackFingerprint);
   log(`grounding: ${grounding.insights.length} insight(s), ${grounding.patterns.length} pattern(s)`);
 
-  // 2. Assemble the shared base context (PRD + grounding + immutable constraints).
+  // 2. Assemble the shared base context (PRD + grounding + transferred insights + immutable constraints).
   const constraintsBlock = constrained && manifest ? renderConstraints(manifest) : '';
   if (constrained) log('ConstraintManifest supplied — designing only extensions over the immutable surface');
   const baseContext = [
@@ -2198,6 +2223,7 @@ export async function runPhase1bArchitect(
     prd.trim() === '' ? '_(empty PRD)_' : prd.trim(),
     '',
     renderGrounding(grounding),
+    crossProjectTransferBlock,
     constraintsBlock,
   ].join('\n');
 

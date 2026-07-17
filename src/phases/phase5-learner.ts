@@ -54,6 +54,9 @@ import {
   extractInstincts,
   extractSkills,
 } from '../analysis/instinct-extractor.js';
+import { emitProposals } from '../learning/build-brain-evolver.js';
+import { registerPromoterPhase5Hook, type PromotionResult } from '../learning/evolution-promoter.js';
+import type { PendingEvolution } from '../learning/types.js';
 import { onSessionEnd } from '../memory/session-hooks.js';
 import {
   extractPatterns,
@@ -131,6 +134,10 @@ export interface Phase5Result {
   skillFiles: string[];
   /** Step 9 — count of additional cross-project insights created for new patterns. */
   additionalInsights: number;
+  /** Step 9.5 — BuildBrainEvolver TEMPLATE proposals emitted from this build's rewrite-effectiveness observations. */
+  evolutionProposals: PendingEvolution[];
+  /** Step 11 — EvolutionPromoter: pending_evolutions auto-promoted this pass (LEARNING_BLUEPRINT.md § EvolutionPromoter). */
+  evolutionPromotions: PromotionResult[];
   /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
@@ -375,6 +382,8 @@ function buildSummaryReport(
   governanceRules: GovernanceRule[],
   skillFiles: string[],
   additionalInsights: number,
+  evolutionProposals: PendingEvolution[],
+  evolutionPromotions: PromotionResult[],
   warnings: string[],
   generatedAt: string
 ): string {
@@ -474,6 +483,18 @@ function buildSummaryReport(
 
   lines.push('## 9. Additional Cross-Project Insights');
   lines.push(`- Insights created: ${additionalInsights}`);
+  lines.push('');
+
+  lines.push('## 9.5 BuildBrainEvolver — Rewrite Effectiveness');
+  lines.push(`- Evolution proposals: ${evolutionProposals.length}`);
+  for (const e of evolutionProposals) lines.push(`  - [${e.evolution_type}] ${e.proposed_change}`);
+  lines.push('');
+
+  lines.push('## 11. EvolutionPromoter — Auto-Promotions');
+  lines.push(`- Evolutions promoted: ${evolutionPromotions.length}`);
+  for (const p of evolutionPromotions) {
+    lines.push(`  - [${p.evolutionType}] ${p.effectApplied} (confidence ${(p.confidenceAtPromotion * 100).toFixed(0)}%)`);
+  }
   lines.push('');
 
   if (warnings.length > 0) {
@@ -737,6 +758,46 @@ export async function runPhase5Learner(
   }
   log(`step 9 (additional insights): ${additionalInsights} insight(s) stored`);
 
+  // 9.5. BuildBrainEvolver (LEARNING_BLUEPRINT.md § Agent: BuildBrainEvolver) — analyze this
+  // build's Contract-9 rewrite-effectiveness observations and emit any TEMPLATE evolution
+  // proposals. Runs before any future promotion step reads pending_evolutions (Learning Iron Law
+  // L5: this agent only ever proposes — it never edits src/engine/prompt-rewriter.ts itself).
+  let evolutionProposals: PendingEvolution[] = [];
+  if (store) {
+    try {
+      const memoryClient = BuildMemory.getClient();
+      if (memoryClient) {
+        evolutionProposals = emitProposals(buildRunId, memoryClient);
+      } else {
+        warnings.push('BuildBrainEvolver skipped — Build Memory unreachable (stateless, Contract 4).');
+      }
+    } catch (error) {
+      warnings.push(`BuildBrainEvolver failed (${describe(error)}).`);
+      log(`WARNING: BuildBrainEvolver degraded (${describe(error)})`);
+    }
+  }
+  log(`step 9.5 (BuildBrainEvolver): ${evolutionProposals.length} evolution proposal(s)`);
+
+  // 11. EvolutionPromoter (LEARNING_BLUEPRINT.md § Agent: EvolutionPromoter) — appended after the
+  // existing 10-step sequence so it sees the freshest pending_evolutions rows (including any
+  // BuildBrainEvolver just wrote in step 9.5). Guarded like every other step (Contract 4): a
+  // promotion failure degrades to an empty result and never halts the build.
+  let evolutionPromotions: PromotionResult[] = [];
+  if (store) {
+    try {
+      const memoryClient = BuildMemory.getClient();
+      if (memoryClient) {
+        evolutionPromotions = registerPromoterPhase5Hook(memoryClient);
+      } else {
+        warnings.push('EvolutionPromoter skipped — Build Memory unreachable (stateless, Contract 4).');
+      }
+    } catch (error) {
+      warnings.push(`EvolutionPromoter failed (${describe(error)}).`);
+      log(`WARNING: EvolutionPromoter degraded (${describe(error)})`);
+    }
+  }
+  log(`step 11 (EvolutionPromoter): ${evolutionPromotions.length} evolution(s) promoted`);
+
   // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
@@ -751,6 +812,8 @@ export async function runPhase5Learner(
     governanceRules,
     skillFiles,
     additionalInsights,
+    evolutionProposals,
+    evolutionPromotions,
     warnings,
     generatedAt
   );
@@ -791,6 +854,8 @@ export async function runPhase5Learner(
     governanceRules,
     skillFiles,
     additionalInsights,
+    evolutionProposals,
+    evolutionPromotions,
     summaryReport,
     reportPath,
     warnings,

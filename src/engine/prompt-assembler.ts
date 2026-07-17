@@ -47,6 +47,7 @@ import type { ContextInjection, PromptType, QueueEntry } from './queue-generator
 import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { ErrorPattern, JsonObject } from '../types/index.js';
 import { BuildMemory } from '../memory/index.js';
+import { filterRetiredPatterns } from '../learning/retirement-filter.js';
 import {
   selectModel,
   estimateModelCostFromBudget,
@@ -151,6 +152,13 @@ export interface AssembleInput {
    * this task must stay confined to it. Optional so existing callers/tests are unaffected.
    */
   projectPath?: string;
+  /**
+   * Pre-rendered CrossProjectKnowledgeTransfer block (`src/learning/cross-project-transfer.ts`
+   * `TransferResult.contextBlock`) — stack-compatible, non-retired lessons pushed from prior
+   * FORGE builds. Injected verbatim (before the state-audit footer), same mechanism as
+   * {@link relevantFilesBlock}. Empty/absent → nothing injected (no compatible insights on record).
+   */
+  crossProjectInsightsBlock?: string;
 }
 
 /** Options for {@link assemblePrompt}. */
@@ -399,7 +407,9 @@ async function defaultFetchWarnings(
 ): Promise<ErrorPattern[]> {
   const patterns = await BuildMemory.errors.findPatternsByPromptType(promptType);
   if (!patterns) return []; // stateless mode / query failure (Contract 4)
-  return patterns.filter((p) => patternMatchesStack(p, stackFingerprint));
+  const memoryDb = BuildMemory.getClient();
+  const surviving = memoryDb ? filterRetiredPatterns(patterns, memoryDb) : patterns;
+  return surviving.filter((p) => patternMatchesStack(p, stackFingerprint));
 }
 
 /** Render the Build Memory warnings section, or `null` when there are none. */
@@ -532,6 +542,12 @@ export async function assemblePrompt(
   //     footer so it is part of the hashed prompt; empty when nothing is relevant.
   if (input.relevantFilesBlock && input.relevantFilesBlock.trim() !== '') {
     sections.push(input.relevantFilesBlock.trim());
+  }
+
+  // 4c. CrossProjectKnowledgeTransfer — stack-compatible, non-retired lessons pushed from prior
+  //     builds (LEARNING_BLUEPRINT.md § CrossProjectKnowledgeTransfer). Same mechanism as 4b.
+  if (input.crossProjectInsightsBlock && input.crossProjectInsightsBlock.trim() !== '') {
+    sections.push(input.crossProjectInsightsBlock.trim());
   }
 
   // 5. Mandatory state-audit footer (verbatim).
