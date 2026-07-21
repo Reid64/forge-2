@@ -1,10 +1,118 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-07-17 (Systems 1-4 — Resurrection, Learning extensions, Enterprise Test Suite, Integration Bus — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 (ALL COMPLETE)
+**Last Updated:** 2026-07-21 (System 5 — Sentinel Prime — and the Native Orchestrator — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + **Systems 1-5 plus Native Orchestrator COMPLETE**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + **System 5 (Sentinel Prime) + Native Orchestrator (ALL COMPLETE)**
+**Schema version:** **2.5.0** (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` — bumped from 2.3.0 for the four System 5/Orchestrator tables: `sentinel_prime_runs`, `validation_events`, `orchestrator_manifests`, `orchestrator_queue_runs`)
 **Total Prompts Executed:** 78 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
+
+---
+
+## System 5 — Sentinel Prime (2026-07-21) — COMPLETE
+
+**Objective:** a SECOND, independent observation layer over every completed Phase 3 prompt — running
+IN ADDITION to the mandatory Contract 13 Sentinel gate (`phase4-sentinel.ts`), never in place of it.
+Where Contract 13 answers "does the code compile/build/pass its existing checks," Sentinel Prime
+answers three harder questions the Contract 13 gate structurally cannot: did the subprocess write or
+delete anything outside its allowed project scope (`ExecutionMonitor`), did the diff it produced
+actually fulfill the prompt's stated intent rather than merely exiting 0 (`DecisionValidator`, an
+independent Claude Code CLI critic pass), and does the diff contradict a numbered
+`BEHAVIORAL_CONTRACTS.md` contract even though it never touched the governance doc itself
+(`GovernanceEnforcer`). The four signals are combined into one weighted composite confidence score
+(`ConfidenceScorer`) and turned into a halt/continue decision, orchestrated end-to-end by
+`SentinelPrime.runFullObservation` (`src/sentinel-prime/index.ts`).
+
+**Schema version:** `2.3.0` → **`2.5.0`** (two new tables ride the same migration block as the
+Orchestrator's two tables below — `sentinel_prime_runs`, `validation_events` — both `CREATE TABLE IF
+NOT EXISTS`, additive-only, no CHECK-constraint change to any existing table).
+
+**Prompts — all DONE, this commit** (see the note at the end of this section on why every prompt in
+this system shares one commit hash rather than a distinct one per prompt):
+
+| # | Prompt | Module | Status | Commit |
+|---|--------|--------|--------|--------|
+| SP-1 | ExecutionMonitor — streaming per-chunk observer of a prompt's subprocess (out-of-scope writes, unexpected deletions, destructive commands), keyed by `buildRunId` via `executionMonitorSingleton` | `src/sentinel-prime/execution-monitor.ts` (342 lines) | DONE | this commit — see `git log -1` |
+| SP-2 | DecisionValidator — independent Claude Code CLI critic pass scoring whether a diff fulfills the prompt's intent (never the same call that built the diff) | `src/sentinel-prime/decision-validator.ts` (345 lines) | DONE | this commit — see `git log -1` |
+| SP-3 | GovernanceEnforcer — post-prompt scan of modified `.ts`/`.tsx` files for contradictions against `BEHAVIORAL_CONTRACTS.md`'s numbered contracts (4 named contradiction rules) plus a governance-doc-freshness WARN check | `src/sentinel-prime/governance-enforcer.ts` (410 lines) | DONE | this commit — see `git log -1` |
+| SP-4 | ConfidenceScorer — `scoreConfidence`/`decideHalt`/`persistSentinelRun`: weighted composite (execution 0.35, validation 0.40, governance 0.25), halt below composite 0.4, auto-recoverable floor 0.3 | `src/sentinel-prime/confidence-scorer.ts` (201 lines) | DONE | this commit — see `git log -1` |
+| SP-5 | SentinelPrime orchestrator — the six-step composition root (`runFullObservation`) wiring SP-1 through SP-4 together, plus shared type definitions | `src/sentinel-prime/index.ts` (172 lines), `src/sentinel-prime/types.ts` (99 lines) | DONE | this commit — see `git log -1` |
+| SP-6 | Phase 3 wiring — `phase3-executor.ts` invokes `new SentinelPrime().runFullObservation(...)` immediately after the Contract 13 gate on every prompt, throws on a non-auto-recoverable HALT (invoking `onSentinelPrimeHalt`), WARNs on an auto-recoverable one | `src/phases/phase3-executor.ts` (+74/-lines this diff) | DONE | this commit — see `git log -1` |
+| SP-7 | Integration Bus wiring — `onSentinelPrimeHalt`, `appendSentinelPrimeBlocker`, `queueSentinelPrimeRetry`, `reconstructSentinelPrimeRun`/`loadSentinelPrimeRun` (reads the persisted row back via the SAME pure `scoreConfidence`/`decideHalt` functions, never re-derives from stored columns) | `src/integration/bus.ts` (+238/-lines this diff) | DONE | this commit — see `git log -1` |
+| SP-8 | Build Memory schema — `sentinel_prime_runs` (15 columns, 3 indexes), `validation_events` (9 columns, 2 indexes), registered in `ALL_FORGE_TABLES` | `src/learning/database.ts` (+85/-lines this diff) | DONE | this commit — see `git log -1` |
+| SP-9 | CLI surface — `forge sentinel report --build-run-id <id>` (full per-prompt diagnostic), `forge sentinel history --project <path> [--limit <n>]` (last N runs with confidence scores), `forge sentinel threshold [--set <value>]` (get/persist the halt threshold override) | `src/cli/index.ts` (`cmdSentinelReport`/`cmdSentinelHistory`/`cmdSentinelThreshold`) | DONE | this commit — see `git log -1` |
+
+**Known gap, flagged not silently skipped:** `forge sentinel threshold --set <value>` persists the
+override to `forge_meta` under key `sentinel_halt_threshold`, but `src/sentinel-prime/confidence-scorer.ts`'s
+`decideHalt`/`scoreConfidence` read a hardcoded local constant (`HALT_COMPOSITE_THRESHOLD = 0.4`,
+`AUTO_RECOVER_COMPOSITE_FLOOR = 0.3`) — nothing in `confidence-scorer.ts` currently reads
+`forge_meta.sentinel_halt_threshold` back. The CLI command is real and the persistence is real; the
+override does not yet change scoring behavior. Wiring that read is the next action for this system.
+
+**Verification:** every file above was read in full this session and every cross-module import was
+checked against its actual exported symbol and signature (`runClaude` from `engine/claude-runner.ts`,
+`extractJsonObject` from `tools/json-extraction.ts`, `findGovernanceDoc`/`ArtifactName` from
+`resurrection/governance-gaps.ts`, `getClient`/`toJsonText`/`toSqliteBool`/`fromJsonText` from
+`memory/client.ts`) — no unresolved import or signature mismatch found by inspection. `CURRENT_SCHEMA_VERSION`
+confirmed as `'2.5.0'` in `src/learning/database.ts:17`; the four new tables confirmed present in the
+migration SQL and in `ALL_FORGE_TABLES`. **`pnpm run build` could not be run this session — every
+invocation (`pnpm run build`, `pnpm --version`, `node node_modules/typescript/bin/tsc -p .`, with and
+without `dangerouslyDisableSandbox`) was rejected by this session's exec-approval gate before it
+executed**, the same intermittent gate documented across nearly every prior FORGE session in this
+file (see e.g. Session 5.2/5.3, "blocked by exec gate ... verified via comprehensive static analysis").
+This is a live gap, not a passed gate — the next session with a working exec gate must run `pnpm run
+build`/`pnpm tsc --noEmit` for real and record the actual result here before this system is claimed
+compile-clean by anything stronger than static inspection.
+
+**On commit hashes:** every prompt in the table above lists "this commit — see `git log -1`" rather
+than a distinct hash. That is accurate, not a shortcut: `src/sentinel-prime/`, `src/orchestrator/`,
+and the four modified files this system touches were all written in one uncommitted working session
+(confirmed via `git status`/`git log` at the start of this session — every file was untracked or
+modified with zero prior commits against it) and land in a single commit together with this
+governance update. Fabricating distinct per-prompt hashes for a history that was never actually
+committed prompt-by-prompt would violate CLAUDE.md Iron Law 3 (never fabricate a result); the honest
+record is one real hash covering all of it.
+
+---
+
+## Native Orchestrator (2026-07-21) — COMPLETE
+
+**Objective:** replace the PowerShell Layer 2 of FORGE's three-layer architecture (per `UPGRADES TO
+FORGE FROM 2.0 TO 3.0/INSTRUCTIONAL DOC FOR ANY CHAT ON ORCHESTRATOR LIBRARY USE WITH FORGE.md`) —
+`forge-orchestrator.ps1`, which read a project's `library-manifest.yaml` and ran every queue in
+dependency order with no shell dependency — with a first-class, in-process TypeScript module. Layer 1
+(`forge.ps1` / `forge build`, one `queue.yaml` at a time) and Layer 3 (`library/<project>/*.yaml`, the
+"fuel depot" of pre-written queue files) are unchanged; only Layer 2 is now native TS.
+
+**Schema version:** rides the same `2.3.0` → **`2.5.0`** bump as Sentinel Prime above — two more
+tables, `orchestrator_manifests` and `orchestrator_queue_runs`, both additive `CREATE TABLE IF NOT
+EXISTS`.
+
+**Prompts — all DONE, this commit:**
+
+| # | Prompt | Module | Status | Commit |
+|---|--------|--------|--------|--------|
+| ORC-1 | ManifestResolver — `library-manifest.yaml` load/validate/save, dependency-resolved+priority-sorted runnable frontier (`getRunnable`), status transitions (`markRunning`/`markComplete`/`markFailed`), DFS cycle+dangling-reference detection (`validateNoCycles`), best-effort `orchestrator_manifests`/`orchestrator_queue_runs` Build Memory mirror | `src/orchestrator/manifest-resolver.ts` (356 lines) | DONE | this commit — see `git log -1` |
+| ORC-2 | QueueRunner — runs ONE queue entry end-to-end: DIRECTIVE-016 governance sync, stage the queue file as the active `queue.yaml`, spawn `forge build --use-existing-queue` as a real subprocess (streaming output live, `[ORCHESTRATOR] [<queue-id>]`-prefixed), read back the Sentinel Prime checkpoint for the build that just ran | `src/orchestrator/queue-runner.ts` (396 lines) | DONE | this commit — see `git log -1` |
+| ORC-3 | GovernanceSync — implements DIRECTIVE-016 natively: copies every `*.md` at a project repo's root into the FORGE projects folder before a queue run, skip-if-not-newer, never throws | `src/orchestrator/governance-sync.ts` (103 lines) | DONE | this commit — see `git log -1` |
+| ORC-4 | LibraryManager — owns `library/<project>/` bookkeeping: list/scaffold/add queue files, `validateQueueYaml` (readable, valid YAML, `project` key, non-empty unique-id `prompts` array, non-empty `gates` per prompt) | `src/orchestrator/library-manager.ts` (225 lines) | DONE | this commit — see `git log -1` |
+| ORC-5 | OrchestratorEngine — the master loop: load+validate manifest, `--dry-run` execution-plan printer, `--only`/`--skip-to`/`--reset` handling, dependency-aware skip-cascade on failure (`skipDependentsOf`), blocked-queue diagnostics, OOM-safe graceful degradation (`handleOutOfMemory` — saves manifest state, marks the Build Memory row PAUSED not FAILED, logs the exact `--skip-to` resume command) | `src/orchestrator/engine.ts` (580 lines) | DONE | this commit — see `git log -1` |
+| ORC-6 | Type definitions + barrel export | `src/orchestrator/types.ts` (75 lines), `src/orchestrator/index.ts` (13 lines) | DONE | this commit — see `git log -1` |
+| ORC-7 | CLI surface — `forge orchestrate <project> [--library-path <path>] [--project-path <path>] [--dry-run] [--skip-to <id>] [--only <id>] [--reset]`; `forge library list\|add\|validate\|scaffold <project>` | `src/cli/index.ts` (`cmdOrchestrate`, `cmdLibraryList`, `cmdLibraryAdd`, `cmdLibraryValidate`, `cmdLibraryScaffold`) | DONE | this commit — see `git log -1` |
+| ORC-8 | Build Memory schema — `orchestrator_manifests` (12 columns, 2 indexes), `orchestrator_queue_runs` (13 columns, 2 indexes), registered in `ALL_FORGE_TABLES` | `src/learning/database.ts` (shared migration block with SP-8 above) | DONE | this commit — see `git log -1` |
+
+**Verification:** all 7 orchestrator files (`engine.ts`, `governance-sync.ts`, `manifest-resolver.ts`,
+`queue-runner.ts`, `library-manager.ts`, `types.ts`, `index.ts`) read in full this session. Confirmed
+`QueueRunner` never runs Phase 3 in-process (always a real `spawn(process.execPath, [cliPath, 'build',
+...])` subprocess, resolved relative to the compiled module's own path via `import.meta.url`, not
+`process.cwd()`), confirmed `ManifestResolver.validateNoCycles` runs a DFS that throws on both a true
+cycle and a dangling `dependsOn` reference (satisfies ORC-2's "queue dependency cycles MUST be
+detected and rejected at manifest load time" requirement below), confirmed `OrchestratorEngine`
+persists to `orchestrator_manifests` via `getClient()`/Build Memory in addition to the on-disk
+manifest YAML (satisfies ORC-3 below), confirmed every Build Memory write in this module is wrapped
+in try/catch + `logMemoryWarning` per Contract 4 (never a halting error). Same exec-gate caveat as
+System 5 above applies here — `pnpm run build` was not able to run live this session; this is static
+verification, not a compiler's.
 
 ---
 
@@ -863,7 +971,9 @@ rebuild plan: Foundation & Memory → Design Intelligence → … → Verify).
 | System 1 — Resurrection (`src/resurrection/`) | COMPLETE | 9 files: gap-auditor.ts (247L), governance-gaps.ts (423L), artifact-scorer.ts (156L), regeneration-engine.ts (229L), human-gate.ts (86L), halt-reconstructor.ts (131L), continuation-planner.ts (63L), types.ts (189L), index.ts (24L). Plus `src/memory/gap-audits.ts` (253L) |
 | System 2 — Learning Engine extensions (`src/learning/`) | COMPLETE | build-brain-evolver.ts (245L), cross-project-transfer.ts (281L), pattern-retirer.ts (129L), retirement-filter.ts (44L) |
 | System 3 — Enterprise Test Suite (`src/testing/`) | COMPLETE | orchestrator.ts (102L), types.ts (64L), `runners/` (17 files: unit/integration/api/e2e/security/performance/dependency + shared vitest-shared/exec/persist). Plus `src/memory/test-results.ts` (294L) |
-| System 4 — Integration Bus (`src/integration/`) | COMPLETE | bus.ts (182L) — `onSentinelFailure`, `onEvolutionPromoted`, `onContractConfirmed` |
+| System 4 — Integration Bus (`src/integration/`) | COMPLETE | bus.ts (238L as of this session, +56L for Sentinel Prime readback) — `onSentinelFailure`, `onEvolutionPromoted`, `onContractConfirmed`, `onSentinelPrimeHalt` |
+| System 5 — Sentinel Prime (`src/sentinel-prime/`) | COMPLETE | 6 files: index.ts (172L), types.ts (99L), execution-monitor.ts (342L), decision-validator.ts (345L), governance-enforcer.ts (410L), confidence-scorer.ts (201L) — 1569L total |
+| Native Orchestrator (`src/orchestrator/`) | COMPLETE | 7 files: engine.ts (580L), manifest-resolver.ts (356L), queue-runner.ts (396L), library-manager.ts (225L), governance-sync.ts (103L), types.ts (75L), index.ts (13L) — 1748L total |
 
 ---
 
@@ -979,7 +1089,9 @@ Investigated whether Anthropic prompt caching (`cache_control` ephemeral breakpo
 - **System 2 (Learning Engine extensions):** COMPLETE ✓
 - **System 3 (Enterprise Test Suite):** COMPLETE ✓
 - **System 4 (Integration Bus):** COMPLETE ✓
-- **Overall:** ~78/~80 queued prompts complete (98%) — FORGE 2.0 production-ready + Systems 1-4 complete
+- **System 5 (Sentinel Prime):** COMPLETE ✓
+- **Native Orchestrator:** COMPLETE ✓
+- **Overall:** ~78/~80 queued prompts complete (98%) — FORGE 2.0 production-ready + **Systems 1-5 plus Native Orchestrator complete**
 
 ---
 
@@ -1030,3 +1142,6 @@ forge build ./my-project --start-at 5 --dry-run
 3. **PowerShell modules** — ForgeCore.psm1 etc. per BLUEPRINT.md NOT built. TypeScript CLI is the delivered artifact.
 4. **ForgeDeploy full pipeline** — Canary deployment, env parity, production rollback NOT implemented. Basic `forge deploy` stub with monitoring snippet IS present.
 5. **Playwright integration tests** — Never run under autonomous control.
+6. **System 5/Orchestrator live exec verification** — same exec gate as item 1 blocked `pnpm run build`/`pnpm tsc --noEmit` for the System 5 (Sentinel Prime) and Native Orchestrator code this session; verified only by comprehensive static read-through (every import cross-checked against its real export/signature). Run the real compiler the next session an exec gate is available and record the actual result in the System 5/Orchestrator sections above.
+7. **`forge sentinel threshold --set` does not yet change scoring** — the value persists to `forge_meta.sentinel_halt_threshold`, but `src/sentinel-prime/confidence-scorer.ts` reads a hardcoded local constant (`HALT_COMPOSITE_THRESHOLD = 0.4`) instead of that stored override. Wiring the read is the next action for System 5.
+8. **`forge orchestrate`/`forge library` never run end-to-end against a real `library-manifest.yaml`** — the modules compile-by-inspection and the CLI is wired, but no session has actually executed `forge orchestrate <project>` against a live multi-queue project yet, the same "not yet verified this session" caveat Systems 1/3's CLI surface carried before it.

@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '2.3.0';
+export const CURRENT_SCHEMA_VERSION = '2.5.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -483,6 +483,81 @@ const SYSTEMS_1_3_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_test_coverage_type ON test_coverage_snapshots(coverage_type);
 `;
 
+/**
+ * System 5 (Sentinel Prime) + Orchestrator tables (schema bump 2.3.0 -> 2.5.0).
+ */
+const SYSTEM_5_ORCHESTRATOR_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS sentinel_prime_runs (
+      id                          TEXT PRIMARY KEY,
+      build_run_id                TEXT NOT NULL,
+      prompt_id                   TEXT NOT NULL,
+      prompt_index                INTEGER NOT NULL,
+      execution_monitor_result    TEXT NOT NULL,
+      decision_validator_result   TEXT NOT NULL,
+      governance_enforcer_result  TEXT NOT NULL,
+      composite_confidence        REAL NOT NULL,
+      halt_triggered              INTEGER NOT NULL DEFAULT 0,
+      halt_reason                 TEXT,
+      out_of_scope_writes         TEXT,
+      contract_violations         TEXT,
+      intent_fulfillment_score    REAL,
+      gate_pass_score             REAL,
+      created_at                  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sentinel_prime_runs_build ON sentinel_prime_runs(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_sentinel_prime_runs_prompt ON sentinel_prime_runs(prompt_id);
+    CREATE INDEX IF NOT EXISTS idx_sentinel_prime_runs_halt ON sentinel_prime_runs(halt_triggered);
+
+    CREATE TABLE IF NOT EXISTS validation_events (
+      id                TEXT PRIMARY KEY,
+      sentinel_run_id   TEXT NOT NULL,
+      event_type        TEXT NOT NULL,
+      severity          TEXT NOT NULL,
+      artifact          TEXT,
+      description       TEXT NOT NULL,
+      auto_resolved     INTEGER NOT NULL DEFAULT 0,
+      resolution        TEXT,
+      created_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_validation_events_run ON validation_events(sentinel_run_id);
+    CREATE INDEX IF NOT EXISTS idx_validation_events_severity ON validation_events(severity);
+
+    CREATE TABLE IF NOT EXISTS orchestrator_manifests (
+      id               TEXT PRIMARY KEY,
+      project          TEXT NOT NULL,
+      manifest_path    TEXT NOT NULL,
+      version          TEXT NOT NULL,
+      description      TEXT,
+      status           TEXT NOT NULL DEFAULT 'idle',
+      queues_total     INTEGER NOT NULL DEFAULT 0,
+      queues_complete  INTEGER NOT NULL DEFAULT 0,
+      queues_failed    INTEGER NOT NULL DEFAULT 0,
+      started_at       TEXT,
+      completed_at     TEXT,
+      created_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_manifests_project ON orchestrator_manifests(project);
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_manifests_status ON orchestrator_manifests(status);
+
+    CREATE TABLE IF NOT EXISTS orchestrator_queue_runs (
+      id                          TEXT PRIMARY KEY,
+      manifest_id                 TEXT NOT NULL,
+      queue_id                    TEXT NOT NULL,
+      queue_file                  TEXT NOT NULL,
+      status                      TEXT NOT NULL DEFAULT 'pending',
+      depends_on                  TEXT,
+      priority                    INTEGER NOT NULL DEFAULT 1,
+      prompt_count                INTEGER,
+      started_at                  TEXT,
+      completed_at                TEXT,
+      sentinel_prime_checkpoint   TEXT,
+      error                       TEXT,
+      created_at                  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_queue_runs_manifest ON orchestrator_queue_runs(manifest_id);
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_queue_runs_status ON orchestrator_queue_runs(status);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -507,6 +582,11 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'pattern_retirement_log',
   'test_run_results',
   'test_coverage_snapshots',
+  // System 5 (Sentinel Prime) + Orchestrator (schema 2.5.0)
+  'sentinel_prime_runs',
+  'validation_events',
+  'orchestrator_manifests',
+  'orchestrator_queue_runs',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -806,6 +886,9 @@ export function initializeForgeMemory(dbPath?: string): void {
     db.exec('DROP TABLE IF EXISTS gap_audit_runs');
   }
   db.exec(SYSTEMS_1_3_SCHEMA_SQL);
+  // 2.3.0 -> 2.5.0 (System 5 — Sentinel Prime — and the Orchestrator): sentinel_prime_runs,
+  // validation_events, orchestrator_manifests, orchestrator_queue_runs.
+  db.exec(SYSTEM_5_ORCHESTRATOR_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

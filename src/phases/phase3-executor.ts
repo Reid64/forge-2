@@ -149,7 +149,9 @@ import { runSmokeTests, shouldRunTests } from '../tools/incremental-tester.js';
 import { scanDeadCode } from '../tools/dead-code-scanner.js';
 import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js';
 import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
-import { onSentinelFailure } from '../integration/bus.js';
+import { onSentinelFailure, onSentinelPrimeHalt } from '../integration/bus.js';
+import { SentinelPrime } from '../sentinel-prime/index.js';
+import { createExecutionMonitor, executionMonitorSingleton } from '../sentinel-prime/execution-monitor.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -1728,6 +1730,13 @@ async function executePrompt(
   renderProgress('INFO', `PROMPT ${index}/${ctx.totalPrompts} : ${entry.id}`);
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
+  // Sentinel Prime (System 5): start the ExecutionMonitor singleton for this prompt BEFORE any
+  // claude-runner call, so it observes the subprocess's stdout/commands as they happen. Reused
+  // across the whole build (keyed by buildRunId), reset per-prompt via start().
+  const executionMonitor = executionMonitorSingleton.get(buildIdOf(ctx)) ?? createExecutionMonitor();
+  executionMonitorSingleton.set(buildIdOf(ctx), executionMonitor);
+  executionMonitor.start(buildIdOf(ctx), entry.id, index, ctx.projectPath);
+
   try {
     // b. Failure prediction (Contract 8).
     const prediction = await ctx.predictImpl({
@@ -2011,6 +2020,51 @@ async function executePrompt(
     // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure â€”
     // never let a prompt whose own execution didn't succeed merge on the back of a Sentinel PASS.
     sentinel = forceFailOnClaudeFailure(sentinel, run, entry, log, index);
+
+    // Sentinel Prime (System 5): a second, independent observation pass over this SAME completed
+    // prompt, run in addition to (never in place of) the mandatory Contract-13 gate above â€”
+    // ExecutionMonitor (how the subprocess ran) + DecisionValidator (an independent critic pass on
+    // the diff) + GovernanceEnforcer (contract-contradiction scan) combined into one composite
+    // confidence score and halt decision.
+    const gitDiffNamesOnly = gitDiffAgainstMain(ctx, ['diff', `${ctx.mainBranch}..HEAD`, '--name-only'], entry, index);
+    const gitDiffFull = gitDiffAgainstMain(ctx, ['diff', `${ctx.mainBranch}..HEAD`], entry, index);
+    const sentinelPrimeModifiedFiles = gitDiffNamesOnly
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter(Boolean);
+
+    const sentinelPrimeResult = await new SentinelPrime().runFullObservation({
+      buildRunId: buildIdOf(ctx),
+      promptEntry: { id: entry.id, prompt: promptText, prompt_type: entry.prompt_type },
+      promptIndex: index,
+      projectPath: ctx.projectPath,
+      gatesPassed: sentinel.passed,
+      modifiedFiles: sentinelPrimeModifiedFiles,
+      gitDiff: gitDiffFull,
+    });
+
+    renderProgress(
+      'INFO',
+      `[SENTINEL PRIME] Confidence: ${sentinelPrimeResult.confidenceScore.composite.toFixed(2)}`
+    );
+
+    if (sentinelPrimeResult.haltDecision.shouldHalt && !sentinelPrimeResult.haltDecision.autoRecoverable) {
+      renderProgress(
+        'FAIL',
+        `[SENTINEL PRIME] HALT â€” ${sentinelPrimeResult.haltDecision.reason ?? 'unknown reason'}`
+      );
+      try {
+        await onSentinelPrimeHalt(sentinelPrimeResult.id, ctx.projectPath);
+      } catch (error) {
+        log(`integration bus onSentinelPrimeHalt failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      throw new Error(`Sentinel Prime HALT: ${sentinelPrimeResult.haltDecision.reason ?? 'unknown reason'}`);
+    } else if (sentinelPrimeResult.haltDecision.shouldHalt && sentinelPrimeResult.haltDecision.autoRecoverable) {
+      renderProgress(
+        'WARN',
+        `[SENTINEL PRIME] WARN â€” ${sentinelPrimeResult.haltDecision.reason ?? 'unknown reason'}`
+      );
+    }
 
     // One automatic retry at 2x the budget before failing outright (autonomous recovery only) â€”
     // a single timeout is often just an undersized budget for THIS prompt, not a real defect.
@@ -2627,6 +2681,24 @@ function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]
     }
   }
   return { created, modified, deleted };
+}
+
+/**
+ * Run one `git diff` variant against the configured main branch, for Sentinel Prime's (System 5)
+ * post-gate observation pass. Never throws (Iron Law 3) â€” a failure (e.g. no commits yet on this
+ * branch) is logged and degrades to an empty string rather than aborting the prompt.
+ */
+function gitDiffAgainstMain(ctx: LoopContext, args: readonly string[], entry: QueueEntry, index: number): string {
+  try {
+    return execSync(`git ${args.join(' ')}`, {
+      cwd: ctx.projectPath,
+      encoding: 'utf8',
+      maxBuffer: 20 * 1024 * 1024,
+    });
+  } catch (error) {
+    ctx.log(`prompt ${index} '${entry.id}': git ${args.join(' ')} failed â€” ${describe(error)}`);
+    return '';
+  }
 }
 
 /**

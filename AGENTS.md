@@ -1,6 +1,6 @@
 # FORGE 2.0 — Agents Registry
 
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-07-21
 **Maintained by:** FORGE build system (auto-updated each run)
 
 ---
@@ -261,3 +261,75 @@ Generated `queue.yaml` is ordered by dependency tier:
 - **Exports:** `evaluateGates`, `GateOutcome`, `isArchitecturalGap`
 - **Dependencies:** `readline` (interactive prompt, `reconcile.ts` pattern), `src/memory/gap-audits.ts`
 - **Database tables:** `artifact_health_scores` (read — `regeneration_tier = 'HUMAN_GATE'` rows), `gap_audit_runs` (write — `gaps_human_gated`, `status = 'halted_for_human'`)
+
+---
+
+## Agent: ExecutionMonitor (src/sentinel-prime/execution-monitor.ts)
+
+- **Purpose:** System 5 (Sentinel Prime) real-time observer for a single Phase 3 prompt's subprocess execution. A caller feeds it stdout chunks and shell commands AS they happen (one instance per prompt, held live for the duration of the subprocess), so an out-of-scope write or a destructive command can be observed immediately rather than only reconstructed after the fact. The prompt's only permitted write scope is the `projectPath` recorded at `start()`; ExecutionMonitor observes and records violations — it cannot kill the subprocess itself. `finish()` compiles everything recorded into an `ExecutionMonitorResult`; `passed` is false when any CRITICAL or HALT-severity event was recorded, regardless of exit code.
+- **Status:** COMPLETE
+- **CLI:** none directly — invoked by `SentinelPrime.runFullObservation` via the `executionMonitorSingleton` registry
+- **Entry Point:** `src/sentinel-prime/execution-monitor.ts` → `ExecutionMonitor` class, `createExecutionMonitor()` factory
+- **Exports:** `ExecutionMonitor`, `createExecutionMonitor`, `executionMonitorSingleton` (a `Map<buildRunId, ExecutionMonitor>` cross-module registry)
+- **Dependencies:** `src/sentinel-prime/types.ts` (`ObservationEventType`, `EventSeverity`, `ExecutionMonitorResult`, `ObservationEvent`)
+- **Database tables:** none directly — its `ExecutionMonitorResult` is folded into `sentinel_prime_runs`/`validation_events` by `ConfidenceScorer.persistSentinelRun`
+
+---
+
+## Agent: DecisionValidator (src/sentinel-prime/decision-validator.ts)
+
+- **Purpose:** System 5 (Sentinel Prime) independent critic pass over a completed Phase 3 prompt — reasons about WHAT the prompt actually produced (does the `git diff` genuinely fulfill the prompt intent, or is it a stub/partial implementation/empty diff that still exits 0), as opposed to HOW the subprocess ran. Runs as a SEPARATE Claude Code CLI invocation (`runClaude`) from the one that did the build — a fresh subprocess with no memory of building the feature, deliberately never the same model call that produced the code (a builder grading its own work is a known blind spot). `intentActuallyFulfilled` is true only when the critic's `intentFulfillmentScore >= INTENT_FULFILLMENT_THRESHOLD` (0.75). Advisory, not a hard gate on its own — a low score on a prompt whose mandatory gates already passed logs a pointed WARN rather than flipping the prompt to halted; the caller (`SentinelPrime`'s composite scorer) decides how much weight it carries. Never throws: a CLI failure, timeout, or unparseable response degrades to a documented fallback (`intentFulfillmentScore: 0.5, confidence: 0`, reason recorded in `gaps`).
+- **Status:** COMPLETE
+- **CLI:** none directly — invoked by `SentinelPrime.runFullObservation`; its persisted result is readable via `forge sentinel report --build-run-id <id>`
+- **Entry Point:** `src/sentinel-prime/decision-validator.ts` → `DecisionValidator` class, `createDecisionValidator()` factory
+- **Exports:** `DecisionValidator`, `createDecisionValidator`, `buildCriticPrompt`, `parseCriticResponse`, `CRITIC_SYSTEM_PROMPT`, `INTENT_FULFILLMENT_THRESHOLD`, `newDecisionValidatorRunId`
+- **Dependencies:** `src/engine/claude-runner.ts` (`runClaude`, `ClaudeRunResult` — Contract 5, zero incremental cost via the Max-subscription CLI path, never the metered `api.anthropic.com` endpoint), `src/tools/json-extraction.ts` (`extractJsonObject`)
+- **Database tables:** none directly — its `ValidationResult` is folded into `sentinel_prime_runs` by `ConfidenceScorer.persistSentinelRun`
+
+---
+
+## Agent: GovernanceEnforcer (src/sentinel-prime/governance-enforcer.ts)
+
+- **Purpose:** System 5 (Sentinel Prime) post-prompt contract scanner. Where Contract 3 already halts a build the instant a prompt tries to EDIT a governance document, GovernanceEnforcer catches the quieter case: a prompt that never touches `BEHAVIORAL_CONTRACTS.md` at all but writes code that contradicts what the document promises. Parses every `### Contract N: Title` heading out of `BEHAVIORAL_CONTRACTS.md` (`parseContracts`), matches contracts to modified `.ts`/`.tsx` files by keyword overlap (a cheap, dependency-free relevance proxy), then runs a small fixed library of four named contradiction scanners: an unguarded build-state write during an active build (Contract R-2), a silent auto-approve reintroducing the Session 5.1 `--auto-approve-gates`/`--accept-blockers` conflation, a self-modifying write under `src/`, and a stray reference to the metered `api.anthropic.com` endpoint where Contract 5 promises a $0-incremental-cost CLI path. Every contradiction becomes a CRITICAL, non-auto-resolvable `DriftReport`; a prompt that touched `src/` but left `STATE_OF_THE_BUILD.md`/`SESSION_STATE.md` untouched becomes a WARN, auto-resolvable one instead. Read-only and never throws — a missing governance doc or unreadable file degrades to a logged WARN and a smaller scan.
+- **Status:** COMPLETE
+- **CLI:** none directly — invoked by `SentinelPrime.runFullObservation`; its persisted result (contract violations) is readable via `forge sentinel report --build-run-id <id>`
+- **Entry Point:** `src/sentinel-prime/governance-enforcer.ts` → `GovernanceEnforcer` class, `createGovernanceEnforcer()` factory
+- **Exports:** `GovernanceEnforcer`, `createGovernanceEnforcer`, `parseContracts`, `ParsedContract`
+- **Dependencies:** `src/resurrection/governance-gaps.ts` (`findGovernanceDoc` — reused from System 1, so a project keeping governance under `governance/` or `docs/` is still found)
+- **Database tables:** none directly — its `GovernanceEnforcerResult` is folded into `sentinel_prime_runs` by `ConfidenceScorer.persistSentinelRun`
+
+---
+
+## Agent: ConfidenceScorer (src/sentinel-prime/confidence-scorer.ts)
+
+- **Purpose:** System 5 (Sentinel Prime) — combines the three independent signals above (ExecutionMonitor, DecisionValidator, GovernanceEnforcer) into one weighted composite confidence score (`scoreConfidence`: execution 0.35 + validation 0.40 + governance 0.25) and turns that score into a concrete halt/continue decision (`decideHalt`: halt when composite < 0.4, OR any HALT-severity execution violation, OR any governance contract violation — any one alone is sufficient; auto-recoverable only when composite >= 0.3 AND neither hard signal fired). Persists the full run to `sentinel_prime_runs` plus one `validation_events` row per recorded violation (`persistSentinelRun`), guarded per Contract 4 — a database failure is logged and swallowed, never thrown. Pure arithmetic over already-resolved inputs, so it never throws on its own.
+- **Status:** COMPLETE
+- **CLI:** none directly — its output (`composite_confidence`, `halt_triggered`, `halt_reason`) is readable via `forge sentinel report --build-run-id <id>`, `forge sentinel history --project <path>`; the halt threshold is readable/settable via `forge sentinel threshold [--set <value>]` (persists to `forge_meta`, not yet read back by this module — flagged in `STATE_OF_THE_BUILD.md`)
+- **Entry Point:** `src/sentinel-prime/confidence-scorer.ts` → `scoreConfidence(...)`, `decideHalt(...)`, `persistSentinelRun(...)`
+- **Exports:** `scoreConfidence`, `decideHalt`, `persistSentinelRun`, `SENTINEL_WEIGHTS`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `toJsonText`, `toSqliteBool`)
+- **Database tables:** `sentinel_prime_runs` (write), `validation_events` (write)
+
+---
+
+## Agent: OrchestratorEngine (src/orchestrator/engine.ts)
+
+- **Purpose:** The Native Orchestrator's master loop — replaces `forge-orchestrator.ps1` (Layer 2 of FORGE's three-layer architecture: `forge.ps1`/`forge build` runs one `queue.yaml`; the orchestrator runs an entire project's `library-manifest.yaml` to completion in dependency order; `library/<project>/*.yaml` is the fuel depot). Given a project name, loads its manifest, resolves the dependency-ordered runnable frontier via `ManifestResolver`, runs each queue to completion via `QueueRunner`, and loops until nothing more can run — either every queue reached a terminal state, or a failure severed the remaining dependency chain (cascading a `SKIPPED` status to every downstream dependent via `skipDependentsOf`). Supports `--dry-run` (prints the full simulated execution plan, mutates nothing), `--only <id>` (bypasses dependency resolution), `--skip-to <id>` (marks everything before the target `SKIPPED`, for resuming), `--reset` (re-run a COMPLETE queue). Degrades gracefully on an out-of-memory-flavored failure (`isOutOfMemoryError`/`handleOutOfMemory`): saves manifest state, marks the Build Memory row PAUSED (not FAILED), logs the exact `--skip-to` command to resume. Never fabricates a result (Iron Law 3) — a queue's `success` is exactly what `QueueRunner.run` reported.
+- **Status:** COMPLETE
+- **CLI:** `forge orchestrate <project> [--library-path <path>] [--project-path <path>] [--dry-run] [--skip-to <queue-id>] [--only <queue-id>] [--reset]`
+- **Entry Point:** `src/orchestrator/engine.ts` → `OrchestratorEngine` class, `createOrchestratorEngine()` factory, `.run(options: OrchestratorOptions): Promise<OrchestratorResult>`
+- **Exports:** `OrchestratorEngine`, `createOrchestratorEngine`
+- **Dependencies:** `ManifestResolver` (`src/orchestrator/manifest-resolver.ts`), `QueueRunner` (`src/orchestrator/queue-runner.ts`), `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso`)
+- **Database tables:** `orchestrator_manifests` (write — best-effort mirror; the on-disk manifest YAML is the actual source of truth, per Contract 4)
+
+### Files (Native Orchestrator, src/orchestrator/)
+
+| File | Purpose |
+|------|---------|
+| `src/orchestrator/engine.ts` | `OrchestratorEngine` — the master sequencing loop |
+| `src/orchestrator/manifest-resolver.ts` | `ManifestResolver` — manifest load/validate/save, runnable frontier, cycle detection, Build Memory mirror |
+| `src/orchestrator/queue-runner.ts` | `QueueRunner` — runs ONE queue end-to-end (governance sync, stage, spawn `forge build`, Sentinel Prime readback) |
+| `src/orchestrator/library-manager.ts` | `LibraryManager` — `library/<project>/` directory bookkeeping, `validateQueueYaml` |
+| `src/orchestrator/governance-sync.ts` | `syncGovernanceDocs`/`syncBeforeQueueRun` — DIRECTIVE-016, native `*.md` sync |
+| `src/orchestrator/types.ts` | `QueueStatus`, `ManifestStatus`, `QueueEntry`, `LibraryManifest`, `OrchestratorOptions`, `OrchestratorResult`, `QueueTransitionEvent` |
+| `src/orchestrator/index.ts` | Barrel export — re-exports every module's factory function |

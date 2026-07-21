@@ -209,3 +209,72 @@ a valid result; a fabricated one is a defect.
 `forge resurrect --resume` and `phase-chain.ts` RETROFIT entry enforce the resume floor (mean
 `composite_score >= 0.70` and `gaps_critical = 0`) in code before handing any resume point to the
 Phase 3 executor. The floor is a gate, not operator advice.
+
+## System 5 — Sentinel Prime Contracts
+
+Source: `src/sentinel-prime/` module docs (System 5-specific, prose style of BEHAVIORAL_CONTRACTS.md,
+matching the R-series precedent above). Sentinel Prime is a SECOND, independent observation layer
+that runs IN ADDITION to the mandatory Contract 13 Sentinel gate — never in place of it.
+
+### Contract SP-1: Sentinel Prime Runs After Every Prompt
+`SentinelPrime.runFullObservation` MUST run immediately after the Contract 13 gate completes for
+every Phase 3 prompt, not a sample of prompts and not only on a Contract 13 failure. `phase3-executor.ts`
+invokes it unconditionally on every prompt's completion path. A build that skips this call for any
+prompt is a defect, not an optimization.
+
+### Contract SP-2: Low Composite Confidence Halts
+A composite confidence score below 0.4 (`HALT_COMPOSITE_THRESHOLD` in `confidence-scorer.ts`) MUST
+trigger a halt recommendation, independent of whether the individual execution/validation/governance
+signals look acceptable in isolation. The composite threshold is a hard gate evaluated in code
+(`decideHalt`), never operator advice, and applies even when the mandatory Contract 13 gate already
+passed — gates passing does not mean the diff actually did the work.
+
+### Contract SP-3: Out-of-Scope Writes Are HALT Severity
+Any file write, file deletion, or shell command that resolves outside a prompt's pinned
+`projectPath` write scope MUST be recorded at HALT severity by `ExecutionMonitor`, and a HALT-severity
+execution violation MUST force `decideHalt`'s `shouldHalt = true` regardless of the composite score —
+it is never averaged away by an otherwise-high validation or governance score. A destructive command
+(`rm -rf`, `Remove-Item -Recurse -Force`) is HALT severity outright, independent of path scope.
+
+### Contract SP-4: DecisionValidator Uses the Claude Code CLI, Never the Metered API
+`DecisionValidator`'s independent critic pass MUST invoke `runClaude` (the Claude Code CLI subprocess,
+Contract 5's Max-subscription path) and MUST NOT call the metered `api.anthropic.com` Messages API
+directly. Incremental cost for every Sentinel Prime critic call MUST be $0, exactly as every other
+`runClaude` invocation in FORGE. `GovernanceEnforcer`'s `ZERO_COST_RULE` scans for and flags any
+introduced reference to `api.anthropic.com` as a CRITICAL contract violation of this contract.
+
+### Contract SP-5: GovernanceEnforcer Findings Are Never Auto-Approved
+A CRITICAL `DriftReport` from `GovernanceEnforcer` (a confirmed contradiction against a numbered
+`BEHAVIORAL_CONTRACTS.md` contract) MUST NOT be auto-approved, auto-dismissed, or silently overridden
+by any flag. `decideHalt` treats any governance contract violation as a hard, non-auto-recoverable
+halt signal (`hasContractViolations` forces `autoRecoverable = false`) — the same non-bypassable
+posture Contract 2's four human gates and Contract R-3's fifth gate already establish for FORGE as a
+whole.
+
+## Native Orchestrator Contracts
+
+Source: `src/orchestrator/` module docs (Native-Orchestrator-specific, prose style of
+BEHAVIORAL_CONTRACTS.md). The Native Orchestrator replaces `forge-orchestrator.ps1` — Layer 2 of the
+three-layer architecture (`forge.ps1`/`forge build` = Layer 1, one queue at a time; the orchestrator =
+Layer 2, an entire project's `library-manifest.yaml` run to completion in dependency order;
+`library/<project>/*.yaml` = Layer 3, the fuel depot) — with a first-class, in-process TypeScript
+module.
+
+### Contract ORC-1: GovernanceSync Runs Before Every Queue Execution
+`syncBeforeQueueRun` (DIRECTIVE-016) MUST run before `QueueRunner` spawns `forge build` for any queue
+entry, with no exception path. A queue must never execute against stale or absent governance docs in
+the FORGE projects folder. A sync error is logged (WARN) and the run proceeds with whatever governance
+state is already present rather than silently skipping the sync step entirely.
+
+### Contract ORC-2: Dependency Cycles Are Rejected at Manifest Load Time
+`ManifestResolver.validateNoCycles` MUST run against every loaded `library-manifest.yaml` before
+`OrchestratorEngine.run` enters its main loop, and MUST throw on either a true circular `dependsOn`
+chain or a dangling reference to a queue id that does not exist in the manifest. A cyclic or
+malformed manifest must fail loudly at load time, never partially execute and stall silently.
+
+### Contract ORC-3: Orchestrator Manifest State Is Persisted to Build Memory, Not Only YAML
+Every manifest run MUST mirror its state into the `orchestrator_manifests` (and per-queue
+`orchestrator_queue_runs`) Build Memory tables, not rely on the on-disk `library-manifest.yaml` alone.
+Per Contract 4, this mirror is best-effort and non-blocking — a Build Memory write failure is logged
+and swallowed, never a halting error — but `OrchestratorEngine`/`ManifestResolver` MUST attempt the
+write on every status transition rather than treating the YAML file as the only record of what ran.

@@ -37,13 +37,13 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { dump as dumpYaml } from 'js-yaml';
+import { dump as dumpYaml, load as parseYaml } from 'js-yaml';
 
 import { loadConfig, describeConfig, type EnvConfig } from './config.js';
 
@@ -67,6 +67,21 @@ import { cmdGeneratePrompts } from './generate-prompts-command.js';
 import { tryRenderLiveStatus } from './status-command.js';
 import { diffQueueEntries, getQueueVersion, loadQueueEntriesFromFile } from '../tools/queue-versioning.js';
 import { runGapAudit, type AuditScope } from '../resurrection/index.js';
+import { createOrchestratorEngine } from '../orchestrator/engine.js';
+import { createManifestResolver } from '../orchestrator/manifest-resolver.js';
+import { createLibraryManager, DEFAULT_LIBRARY_BASE_PATH } from '../orchestrator/library-manager.js';
+import {
+  QueueStatus,
+  type LibraryManifest,
+  type OrchestratorOptions,
+  type OrchestratorResult,
+} from '../orchestrator/types.js';
+import { fromJsonText, fromSqliteBool } from '../memory/client.js';
+import type {
+  ExecutionMonitorResult,
+  GovernanceEnforcerResult,
+  ValidationResult,
+} from '../sentinel-prime/types.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -1817,6 +1832,439 @@ async function cmdRepair(
 }
 
 // ---------------------------------------------------------------------------
+// `forge orchestrate <project>` — native TS multi-queue orchestrator
+// ---------------------------------------------------------------------------
+
+/**
+ * `forge orchestrate <project>` — run a project's full `library-manifest.yaml` to completion (or
+ * as far as it can go) via {@link OrchestratorEngine}. Layer 2 of the three-layer architecture
+ * (`library/<project>/*.yaml` → manifest → `forge build --use-existing-queue` per queue).
+ */
+async function cmdOrchestrate(
+  project: string,
+  opts: {
+    libraryPath?: string;
+    projectPath?: string;
+    dryRun?: boolean;
+    skipTo?: string;
+    only?: string;
+    reset?: boolean;
+  }
+): Promise<void> {
+  const forgeBase = resolve(opts.libraryPath ?? DEFAULT_LIBRARY_BASE_PATH);
+  const libraryPath = join(forgeBase, 'library');
+  const projectPath = join(forgeBase, 'projects', project);
+  // --project-path is the project's OWN repo (governance *.md docs are synced FROM here into
+  // the FORGE projects folder before every queue run — DIRECTIVE-016). It must never equal
+  // `projectPath` (the FORGE-side sync destination) — a self-copy of every .md file would be
+  // wasted work at best and a same-path copy error at worst — so an omitted flag falls back to
+  // cwd (with a loud warning) rather than silently reusing the destination as the source.
+  let governanceSyncPath: string;
+  if (opts.projectPath) {
+    governanceSyncPath = resolve(opts.projectPath);
+  } else {
+    governanceSyncPath = process.cwd();
+    process.stdout.write(
+      `${tsPrefix('WARN')} ${chalk.yellow(`--project-path not given — defaulting governance sync source to cwd (${governanceSyncPath}).`)}\n`
+    );
+  }
+
+  const options: OrchestratorOptions = {
+    project,
+    libraryPath,
+    projectPath,
+    dryRun: opts.dryRun ?? false,
+    skipTo: opts.skipTo ?? null,
+    only: opts.only ?? null,
+    resetStatus: opts.reset ?? false,
+    governanceSyncPath,
+  };
+
+  const manifestPath = join(libraryPath, project, 'library-manifest.yaml');
+  let manifest: LibraryManifest;
+  try {
+    manifest = createManifestResolver().load(manifestPath);
+  } catch (error) {
+    fail(`could not load manifest "${manifestPath}" — ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  const estimatedHours = manifest.queues
+    .filter((q) => q.status !== QueueStatus.COMPLETE && q.status !== QueueStatus.SKIPPED)
+    .reduce((sum, q) => sum + q.estimatedHours, 0);
+  process.stdout.write(
+    `${tsPrefix('INFO')} [ORCHESTRATOR] project=${project} queuesFound=${manifest.queues.length} ` +
+      `estimatedTotalHours=${estimatedHours}${opts.dryRun ? ' (dry run)' : ''}\n`
+  );
+  process.stdout.write(
+    `${tsPrefix('INFO')} [ORCHESTRATOR] library=${libraryPath}  target=${projectPath}  governanceSync=${governanceSyncPath}\n`
+  );
+
+  const engine = createOrchestratorEngine();
+  let result: OrchestratorResult;
+  try {
+    result = await engine.run(options);
+  } catch (error) {
+    fail(`orchestrator run failed — ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  console.log(
+    `\n  manifest ${chalk.bold(result.manifestId)} — ` +
+      `${chalk.green(String(result.queuesComplete) + ' complete')}, ` +
+      `${chalk.red(String(result.queuesFailed) + ' failed')}, ${result.queuesRun} run — ` +
+      `${(result.totalDurationMs / 1000).toFixed(1)}s`
+  );
+  if (result.queuesFailed > 0) process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// `forge library` — inspect/manage a project's queue library
+// ---------------------------------------------------------------------------
+
+/** `forge library list <project>` — every queue file in the library, with its manifest status if any. */
+async function cmdLibraryList(project: string, opts: { libraryPath?: string }): Promise<void> {
+  const baseDir = resolve(opts.libraryPath ?? DEFAULT_LIBRARY_BASE_PATH);
+  const lm = createLibraryManager();
+  const libPath = lm.getLibraryPath(baseDir, project);
+  const files = lm.listQueues(libPath);
+
+  if (files.length === 0) {
+    console.log(chalk.yellow(`\nNo queue-*.yaml files found in ${libPath}.`));
+    return;
+  }
+
+  let manifest: LibraryManifest | null = null;
+  try {
+    manifest = createManifestResolver().load(join(libPath, 'library-manifest.yaml'));
+  } catch {
+    manifest = null;
+  }
+
+  console.log(chalk.bold(`\n${files.length} queue file(s) in ${libPath}:`));
+  for (const file of files) {
+    const entry = manifest?.queues.find((q) => q.file === file);
+    if (entry) {
+      console.log(
+        `  ${statusChip(entry.status).padEnd(20, ' ')} ${file}  ` +
+          chalk.dim(`(${entry.id}, priority ${entry.priority}, depends on: ${entry.dependsOn.join(', ') || '(none)'})`)
+      );
+    } else {
+      console.log(`  ${chalk.dim('(no manifest entry)').padEnd(29, ' ')} ${file}`);
+    }
+  }
+  if (!manifest) {
+    console.log(chalk.yellow(`\nNo library-manifest.yaml found — statuses unavailable. Run \`forge library scaffold ${project}\`.`));
+  }
+}
+
+/** Count the `prompts:` entries in a queue YAML file. Best-effort — 0 on any read/parse failure. */
+function countQueuePrompts(queueFilePath: string): number {
+  try {
+    const doc = parseYaml(readFileSync(queueFilePath, 'utf8')) as { prompts?: unknown[] } | null;
+    return doc && Array.isArray(doc.prompts) ? doc.prompts.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** `forge library add <project> <queue-file>` — validate a queue YAML, then register it in the manifest. */
+async function cmdLibraryAdd(
+  project: string,
+  queueFile: string,
+  opts: {
+    libraryPath?: string;
+    id?: string;
+    description?: string;
+    dependsOn?: string;
+    estimatedHours?: string;
+    priority?: string;
+  }
+): Promise<void> {
+  const baseDir = resolve(opts.libraryPath ?? DEFAULT_LIBRARY_BASE_PATH);
+  const lm = createLibraryManager();
+  const libPath = lm.getLibraryPath(baseDir, project);
+  lm.ensureLibraryExists(libPath);
+
+  let resolvedQueuePath: string;
+  try {
+    resolvedQueuePath = lm.getQueueFilePath(libPath, queueFile);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
+  const validationErrors = lm.validateQueueYaml(resolvedQueuePath);
+  if (validationErrors.length > 0) {
+    fail(`Queue YAML validation failed for "${queueFile}" — not added to the manifest:`);
+    for (const e of validationErrors) console.error(chalk.red(`    • ${e}`));
+    return;
+  }
+
+  const manifestPath = join(libPath, 'library-manifest.yaml');
+  if (!existsSync(manifestPath)) {
+    fail(`No library-manifest.yaml at ${manifestPath}. Run \`forge library scaffold ${project}\` first.`);
+    return;
+  }
+
+  const id = opts.id ?? basename(queueFile).replace(/\.ya?ml$/i, '');
+  const dependsOn = opts.dependsOn
+    ? opts.dependsOn.split(',').map((s) => s.trim()).filter((s) => s !== '')
+    : [];
+
+  try {
+    lm.addQueueToManifest(manifestPath, {
+      id,
+      file: basename(resolvedQueuePath),
+      description: opts.description ?? `Queue ${id}`,
+      status: QueueStatus.PENDING,
+      dependsOn,
+      promptCount: countQueuePrompts(resolvedQueuePath),
+      estimatedHours: opts.estimatedHours ? Number.parseFloat(opts.estimatedHours) : 0,
+      priority: opts.priority ? Number.parseInt(opts.priority, 10) : 1,
+    });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
+  console.log(chalk.green(`\n✔ added queue "${id}" (${basename(resolvedQueuePath)}) to ${manifestPath}`));
+}
+
+/** `forge library validate <project>` — run `validateQueueYaml` over every queue file, report errors. */
+async function cmdLibraryValidate(project: string, opts: { libraryPath?: string }): Promise<void> {
+  const baseDir = resolve(opts.libraryPath ?? DEFAULT_LIBRARY_BASE_PATH);
+  const lm = createLibraryManager();
+  const libPath = lm.getLibraryPath(baseDir, project);
+  const files = lm.listQueues(libPath);
+
+  if (files.length === 0) {
+    console.log(chalk.yellow(`\nNo queue-*.yaml files found in ${libPath}.`));
+    return;
+  }
+
+  console.log(chalk.bold(`\nValidating ${files.length} queue file(s) in ${libPath}:`));
+  let totalErrors = 0;
+  for (const file of files) {
+    const errs = lm.validateQueueYaml(join(libPath, file));
+    if (errs.length === 0) {
+      console.log(`  ${chalk.green('✔')} ${file}`);
+    } else {
+      totalErrors += errs.length;
+      console.log(`  ${chalk.red('✖')} ${file}`);
+      for (const e of errs) console.log(chalk.red(`      • ${e}`));
+    }
+  }
+  console.log(
+    totalErrors === 0
+      ? chalk.green(`\n✔ all ${files.length} queue file(s) valid.`)
+      : chalk.red(`\n✖ ${totalErrors} problem(s) found.`)
+  );
+  if (totalErrors > 0) process.exitCode = 1;
+}
+
+/** `forge library scaffold <project>` — write a starter `library-manifest.yaml` (no-op if one exists). */
+async function cmdLibraryScaffold(project: string, opts: { libraryPath?: string }): Promise<void> {
+  const baseDir = resolve(opts.libraryPath ?? DEFAULT_LIBRARY_BASE_PATH);
+  const lm = createLibraryManager();
+  const libPath = lm.getLibraryPath(baseDir, project);
+  const manifestPath = join(libPath, 'library-manifest.yaml');
+  const existedBefore = existsSync(manifestPath);
+
+  lm.scaffoldManifest(libPath, project);
+
+  if (existedBefore) {
+    console.log(chalk.yellow(`\nlibrary-manifest.yaml already exists at ${manifestPath} — left untouched.`));
+  } else {
+    console.log(chalk.green(`\n✔ scaffolded starter manifest for "${project}" at ${manifestPath}`));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `forge sentinel report|history|threshold` — System 5 (Sentinel Prime) diagnostics
+// ---------------------------------------------------------------------------
+
+/** Row shape read back from `sentinel_prime_runs` for the diagnostics commands below. */
+interface SentinelPrimeRunRow {
+  id: string;
+  build_run_id: string;
+  prompt_id: string;
+  prompt_index: number;
+  execution_monitor_result: string;
+  decision_validator_result: string;
+  governance_enforcer_result: string;
+  composite_confidence: number;
+  halt_triggered: number;
+  halt_reason: string | null;
+  created_at: string;
+}
+
+/** `forge sentinel report --build-run-id <id>` — full per-prompt diagnostic for one build. */
+async function cmdSentinelReport(opts: { buildRunId?: string }): Promise<void> {
+  if (!opts.buildRunId) {
+    fail('--build-run-id is required.');
+    return;
+  }
+  const db = BuildMemory.getClient();
+  if (!db) {
+    fail('Build Memory is unreachable — cannot read sentinel_prime_runs.');
+    return;
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT id, build_run_id, prompt_id, prompt_index, execution_monitor_result,
+              decision_validator_result, governance_enforcer_result, composite_confidence,
+              halt_triggered, halt_reason, created_at
+       FROM sentinel_prime_runs
+       WHERE build_run_id = ?
+       ORDER BY prompt_index ASC, created_at ASC`
+    )
+    .all(opts.buildRunId) as SentinelPrimeRunRow[];
+
+  if (rows.length === 0) {
+    console.log(chalk.yellow(`\nNo sentinel_prime_runs found for build ${opts.buildRunId}.`));
+    return;
+  }
+
+  console.log(chalk.bold(`\nSentinel Prime report — build ${opts.buildRunId} (${rows.length} run(s)):`));
+  for (const row of rows) {
+    const execResult = fromJsonText<ExecutionMonitorResult | null>(row.execution_monitor_result, null);
+    const validationResult = fromJsonText<ValidationResult | null>(row.decision_validator_result, null);
+    const governanceResult = fromJsonText<GovernanceEnforcerResult | null>(row.governance_enforcer_result, null);
+    const halted = fromSqliteBool(row.halt_triggered);
+
+    console.log(
+      `\n  [prompt ${row.prompt_index}] ${row.prompt_id}  ` +
+        `confidence=${chalk.cyan(row.composite_confidence.toFixed(2))}  halt=${halted ? chalk.red('true') : chalk.green('false')}`
+    );
+    if (halted && row.halt_reason) console.log(chalk.red(`    halt reason: ${row.halt_reason}`));
+    if (execResult) {
+      console.log(
+        `    execution:  passed=${execResult.passed} violations=${execResult.violations.length} ` +
+          `exitCode=${execResult.exitCode ?? '—'} durationMs=${execResult.durationMs}`
+      );
+      if (execResult.outOfScopeWrites.length > 0) {
+        console.log(chalk.yellow(`      out-of-scope writes: ${execResult.outOfScopeWrites.join(', ')}`));
+      }
+      if (execResult.unexpectedDeletions.length > 0) {
+        console.log(chalk.yellow(`      unexpected deletions: ${execResult.unexpectedDeletions.join(', ')}`));
+      }
+    }
+    if (validationResult) {
+      console.log(
+        `    validation: intentFulfillmentScore=${validationResult.intentFulfillmentScore.toFixed(2)} ` +
+          `gatePassed=${validationResult.gatePassed}`
+      );
+      if (validationResult.gaps.length > 0) console.log(chalk.yellow(`      gaps: ${validationResult.gaps.join('; ')}`));
+    }
+    if (governanceResult) {
+      console.log(
+        `    governance: passed=${governanceResult.passed} contractViolations=${governanceResult.contractViolations.length}`
+      );
+      if (governanceResult.contractViolations.length > 0) {
+        console.log(chalk.red(`      violations: ${governanceResult.contractViolations.join('; ')}`));
+      }
+    }
+    console.log(chalk.dim(`    created: ${row.created_at}`));
+  }
+}
+
+/** `forge sentinel history --project <path> --limit <n>` — last N Sentinel Prime runs for a project. */
+async function cmdSentinelHistory(opts: { project?: string; limit?: string }): Promise<void> {
+  if (!opts.project) {
+    fail('--project <path> is required.');
+    return;
+  }
+  const projectPath = resolveProjectPath(opts.project);
+  const limit = opts.limit ? Number.parseInt(opts.limit, 10) : 20;
+  if (!Number.isInteger(limit) || limit < 1) {
+    fail('--limit must be a positive integer.');
+    return;
+  }
+
+  const db = BuildMemory.getClient();
+  if (!db) {
+    fail('Build Memory is unreachable — cannot read sentinel_prime_runs.');
+    return;
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT spr.id, spr.build_run_id, spr.prompt_id, spr.prompt_index, spr.composite_confidence,
+              spr.halt_triggered, spr.halt_reason, spr.created_at
+       FROM sentinel_prime_runs spr
+       JOIN build_runs br ON br.id = spr.build_run_id
+       WHERE br.project_path = ?
+       ORDER BY spr.created_at DESC
+       LIMIT ?`
+    )
+    .all(projectPath, limit) as Array<{
+    id: string;
+    build_run_id: string;
+    prompt_id: string;
+    prompt_index: number;
+    composite_confidence: number;
+    halt_triggered: number;
+    halt_reason: string | null;
+    created_at: string;
+  }>;
+
+  if (rows.length === 0) {
+    console.log(chalk.yellow(`\nNo sentinel_prime_runs found for project ${projectPath}.`));
+    return;
+  }
+
+  console.log(chalk.bold(`\n${rows.length} Sentinel Prime run(s) for ${projectPath}:`));
+  for (const row of rows) {
+    const halted = fromSqliteBool(row.halt_triggered);
+    console.log(
+      `  ${chalk.dim(row.created_at.slice(0, 19).replace('T', ' '))}  ` +
+        `build ${row.build_run_id.slice(0, 8)}  prompt ${String(row.prompt_index).padStart(3, ' ')}  ` +
+        `confidence ${chalk.cyan(row.composite_confidence.toFixed(2))}  ` +
+        `${halted ? chalk.red('HALT') : chalk.green('ok')}` +
+        `${halted && row.halt_reason ? chalk.dim(` — ${row.halt_reason}`) : ''}`
+    );
+  }
+}
+
+/** Build Memory `forge_meta` key the Sentinel Prime halt threshold override is stored under. */
+const SENTINEL_THRESHOLD_META_KEY = 'sentinel_halt_threshold';
+
+/** `forge sentinel threshold [--set <value>]` — get, or persist, the halt threshold in Build Memory. */
+async function cmdSentinelThreshold(opts: { set?: string }): Promise<void> {
+  const db = BuildMemory.getClient();
+  if (!db) {
+    fail('Build Memory is unreachable — cannot read/write the sentinel halt threshold.');
+    return;
+  }
+
+  if (opts.set === undefined) {
+    const row = db.prepare('SELECT value FROM forge_meta WHERE key = ?').get(SENTINEL_THRESHOLD_META_KEY) as
+      | { value: string }
+      | undefined;
+    console.log(
+      row
+        ? `\nSentinel Prime halt threshold override: ${chalk.cyan(row.value)}`
+        : chalk.yellow('\nNo threshold override set — Sentinel Prime uses its built-in default (0.4).')
+    );
+    return;
+  }
+
+  const value = Number.parseFloat(opts.set);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    fail('--set must be a number between 0.0 and 1.0.');
+    return;
+  }
+
+  db.prepare('INSERT OR REPLACE INTO forge_meta (key, value) VALUES (?, ?)').run(
+    SENTINEL_THRESHOLD_META_KEY,
+    String(value)
+  );
+  console.log(chalk.green(`\n✔ sentinel halt threshold set to ${value}`));
+}
+
+// ---------------------------------------------------------------------------
 // CLI wiring
 // ---------------------------------------------------------------------------
 
@@ -2013,6 +2461,86 @@ async function main(): Promise<void> {
       ) => cmdRepair(pathArg, opts)
     );
 
+  program
+    .command('orchestrate')
+    .description(
+      "Run the native TS orchestrator across a project's full library-manifest.yaml (multi-queue autonomous build)"
+    )
+    .argument('<project>', 'project name — reads <library-path>/library/<project>/library-manifest.yaml')
+    .option('--library-path <path>', 'FORGE base directory containing library/ and projects/ subfolders', DEFAULT_LIBRARY_BASE_PATH)
+    .option(
+      '--project-path <path>',
+      "the project's own repo path — governance *.md docs are synced FROM here into the FORGE projects folder before every queue run (DIRECTIVE-016)"
+    )
+    .option('--dry-run', 'print the full dependency-resolved execution plan without running anything', false)
+    .option('--skip-to <queue-id>', 'mark every queue before this id as SKIPPED, then resume from it')
+    .option('--only <queue-id>', 'run exactly this one queue, bypassing dependency resolution')
+    .option('--reset', 'reset every COMPLETE queue back to PENDING before running (full re-run)', false)
+    .action(
+      (
+        project: string,
+        opts: {
+          libraryPath?: string;
+          projectPath?: string;
+          dryRun?: boolean;
+          skipTo?: string;
+          only?: string;
+          reset?: boolean;
+        }
+      ) => cmdOrchestrate(project, opts)
+    );
+
+  const library = program
+    .command('library')
+    .description("Manage a project's queue library (list / add / validate / scaffold)");
+
+  library
+    .command('list')
+    .description('List every queue file in the library, with its manifest status if a manifest exists')
+    .argument('<project>', 'project name')
+    .option('--library-path <path>', 'FORGE base directory containing the library/ subfolder', DEFAULT_LIBRARY_BASE_PATH)
+    .action((project: string, opts: { libraryPath?: string }) => cmdLibraryList(project, opts));
+
+  library
+    .command('add')
+    .description('Validate a queue YAML file, then register it as a new entry in the manifest')
+    .argument('<project>', 'project name')
+    .argument('<queue-file>', 'queue YAML file — a filename inside the library, or an absolute path')
+    .option('--library-path <path>', 'FORGE base directory containing the library/ subfolder', DEFAULT_LIBRARY_BASE_PATH)
+    .option('--id <id>', 'unique queue id (default: the filename without extension)')
+    .option('--description <text>', 'human description of the queue')
+    .option('--depends-on <ids>', 'comma-separated queue ids that must be COMPLETE before this one can run')
+    .option('--estimated-hours <n>', 'estimated hours for display purposes', '0')
+    .option('--priority <n>', 'lower runs first when multiple queues are runnable', '1')
+    .action(
+      (
+        project: string,
+        queueFile: string,
+        opts: {
+          libraryPath?: string;
+          id?: string;
+          description?: string;
+          dependsOn?: string;
+          estimatedHours?: string;
+          priority?: string;
+        }
+      ) => cmdLibraryAdd(project, queueFile, opts)
+    );
+
+  library
+    .command('validate')
+    .description('Run validateQueueYaml over every queue file in the library and report every error found')
+    .argument('<project>', 'project name')
+    .option('--library-path <path>', 'FORGE base directory containing the library/ subfolder', DEFAULT_LIBRARY_BASE_PATH)
+    .action((project: string, opts: { libraryPath?: string }) => cmdLibraryValidate(project, opts));
+
+  library
+    .command('scaffold')
+    .description('Create a starter library-manifest.yaml for a new project (no-op if one already exists)')
+    .argument('<project>', 'project name')
+    .option('--library-path <path>', 'FORGE base directory containing the library/ subfolder', DEFAULT_LIBRARY_BASE_PATH)
+    .action((project: string, opts: { libraryPath?: string }) => cmdLibraryScaffold(project, opts));
+
   const schedule = program
     .command('schedule')
     .description('Manage cron-scheduled recurring tasks (list / add / remove / trigger)');
@@ -2131,8 +2659,12 @@ async function main(): Promise<void> {
       }
     });
 
-  program
+  const sentinel = program
     .command('sentinel')
+    .description('FORGE Sentinel quality pipeline (Ring runner) and System 5 (Sentinel Prime) diagnostics');
+
+  sentinel
+    .command('ring')
     .description('Run FORGE Sentinel quality pipeline against a project')
     .argument('<project-path>', 'Absolute path to the project')
     .option('--ring <ring>', 'Ring to run: 1 (every-prompt), 2 (every-10th), 3 (end-of-run), all', 'all')
@@ -2153,6 +2685,25 @@ async function main(): Promise<void> {
         if (!result.passed) process.exit(1);
       }
     });
+
+  sentinel
+    .command('report')
+    .description('Read sentinel_prime_runs for a build and print the full per-prompt diagnostic')
+    .requiredOption('--build-run-id <id>', 'the build_runs id to report on')
+    .action((opts: { buildRunId?: string }) => cmdSentinelReport(opts));
+
+  sentinel
+    .command('history')
+    .description('List the last N Sentinel Prime runs for a project, with confidence scores')
+    .requiredOption('--project <path>', 'project directory (matches build_runs.project_path)')
+    .option('--limit <n>', 'number of runs to show', '20')
+    .action((opts: { project?: string; limit?: string }) => cmdSentinelHistory(opts));
+
+  sentinel
+    .command('threshold')
+    .description('Get, or persist to Build Memory, the Sentinel Prime halt-confidence threshold')
+    .option('--set <value>', 'new halt threshold (0.0-1.0) to persist to Build Memory config')
+    .action((opts: { set?: string }) => cmdSentinelThreshold(opts));
 
   program
     .command('test')

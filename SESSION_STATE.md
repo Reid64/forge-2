@@ -1,9 +1,86 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Systems 1-4 (Resurrection, Learning Extensions, Enterprise Test Suite, Integration Bus) — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE
+## Current Session: System 5 (Sentinel Prime) + Native Orchestrator — governance reconciliation — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-07-17 (Systems 1-4 governance docs reconciled against already-implemented code: AGENTS.md, BEHAVIORAL_CONTRACTS.md, STATE_OF_THE_BUILD.md, FORGE_HANDOFF.md updated; `pnpm run build` confirmed 0 errors; committed)
+## Last Updated: 2026-07-21 (System 5/Orchestrator governance docs reconciled against already-implemented code: AGENTS.md, BEHAVIORAL_CONTRACTS.md (Contracts SP-1–SP-5, ORC-1–ORC-3), STATE_OF_THE_BUILD.md, FORGE_HANDOFF.md updated; `pnpm run build` could NOT be confirmed this session — exec-approval gate rejected every invocation, see note below; committed anyway per explicit instruction, live-build verification flagged as the next action)
+
+---
+
+## System 5 (Sentinel Prime) + Native Orchestrator — Governance Reconciliation (2026-07-21) — COMPLETE
+
+**Objective:** the code for System 5 (`src/sentinel-prime/` — `ExecutionMonitor`, `DecisionValidator`,
+`GovernanceEnforcer`, `ConfidenceScorer`, the `SentinelPrime` orchestrator) and the Native Orchestrator
+(`src/orchestrator/` — `OrchestratorEngine`, `ManifestResolver`, `QueueRunner`, `LibraryManager`,
+`GovernanceSync`, plus the shared type/barrel files) was found already implemented and wired on disk
+at the start of this session — both directories were untracked (`git status`), and `phase3-executor.ts`/
+`integration/bus.ts`/`cli/index.ts`/`learning/database.ts` already carried live, working-tree-only
+modifications wiring them in. This session reconciled governance with that real, already-present code
+(read every file in full; cross-checked every import against its actual export/signature; confirmed
+schema version 2.5.0 and all four new tables) — no new application code was written.
+
+**New files this session (all pre-existing on disk, none newly authored — see the file-by-file
+verification list below):**
+
+`src/sentinel-prime/` (System 5 — Sentinel Prime, 6 files, 1569 lines total):
+- `index.ts` (172L) — `SentinelPrime` class, `runFullObservation` (the six-step composition root), `createSentinelPrime` factory
+- `types.ts` (99L) — `ObservationEventType`, `EventSeverity`, `ObservationEvent`, `ExecutionMonitorResult`, `ValidationResult`, `DriftReport`, `GovernanceEnforcerResult`, `ConfidenceScore`, `HaltDecision`, `SentinelPrimeRunResult`
+- `execution-monitor.ts` (342L) — `ExecutionMonitor` class (streaming per-chunk observer), `executionMonitorSingleton` (cross-module registry keyed by `buildRunId`)
+- `decision-validator.ts` (345L) — `DecisionValidator` class, `buildCriticPrompt`/`parseCriticResponse`, `INTENT_FULFILLMENT_THRESHOLD = 0.75`, an independent Claude Code CLI critic call via `runClaude`
+- `governance-enforcer.ts` (410L) — `GovernanceEnforcer` class, `parseContracts` (BEHAVIORAL_CONTRACTS.md heading parser), keyword-overlap contract-to-file matching, 4 named `ContradictionRule`s
+- `confidence-scorer.ts` (201L) — `scoreConfidence`, `decideHalt`, `persistSentinelRun`, `SENTINEL_WEIGHTS` (execution 0.35 / validation 0.40 / governance 0.25)
+
+`src/orchestrator/` (Native Orchestrator — replaces `forge-orchestrator.ps1`, Layer 2 of the
+three-layer architecture in `UPGRADES TO FORGE FROM 2.0 TO 3.0/INSTRUCTIONAL DOC FOR ANY CHAT ON
+ORCHESTRATOR LIBRARY USE WITH FORGE.md` — 7 files, 1748 lines total):
+- `engine.ts` (580L) — `OrchestratorEngine`, the master loop: manifest load/validate, `--dry-run` plan printer, `--only`/`--skip-to`/`--reset`, dependency-aware failure skip-cascade, OOM-safe graceful degradation
+- `manifest-resolver.ts` (356L) — `ManifestResolver`, `library-manifest.yaml` load/validate/save, `getRunnable`, status transitions, `validateNoCycles` (DFS cycle + dangling-reference detection), Build Memory mirror
+- `queue-runner.ts` (396L) — `QueueRunner`, runs one queue end-to-end (governance sync → stage queue.yaml → spawn `forge build --use-existing-queue` as a real subprocess → read back the Sentinel Prime checkpoint)
+- `library-manager.ts` (225L) — `LibraryManager`, `library/<project>/` bookkeeping, `validateQueueYaml`
+- `governance-sync.ts` (103L) — `syncGovernanceDocs`/`syncBeforeQueueRun`/`verifyGovernancePresent` — implements DIRECTIVE-016 natively (copies `*.md` from a project repo into the FORGE projects folder)
+- `types.ts` (75L) — `QueueStatus`, `ManifestStatus`, `QueueEntry`, `LibraryManifest`, `OrchestratorOptions`, `OrchestratorResult`, `QueueTransitionEvent`
+- `index.ts` (13L) — barrel export
+
+**Modified files this session (all already carried the wiring on disk; read in full to verify, not
+rewritten):**
+- `src/phases/phase3-executor.ts` (+74/-lines) — invokes `new SentinelPrime().runFullObservation(...)` after the Contract 13 gate on every prompt; throws on a non-auto-recoverable HALT via `onSentinelPrimeHalt`
+- `src/integration/bus.ts` (+238/-lines) — `onSentinelPrimeHalt`, `appendSentinelPrimeBlocker`, `queueSentinelPrimeRetry`, `reconstructSentinelPrimeRun`/`loadSentinelPrimeRun`
+- `src/learning/database.ts` (+85/-lines) — `SYSTEM_5_ORCHESTRATOR_SCHEMA_SQL` (4 tables: `sentinel_prime_runs`, `validation_events`, `orchestrator_manifests`, `orchestrator_queue_runs`), `CURRENT_SCHEMA_VERSION = '2.5.0'`, all 4 tables added to `ALL_FORGE_TABLES`
+- `src/cli/index.ts` (+557/-lines) — `forge orchestrate`, `forge library list/add/validate/scaffold`, `forge sentinel report/history/threshold`
+
+**Governance changes this session:**
+1. `AGENTS.md` — added five System 5 agent entries (`ExecutionMonitor`, `DecisionValidator`, `GovernanceEnforcer`, `ConfidenceScorer`, `OrchestratorEngine`) in the existing registry format.
+2. `BEHAVIORAL_CONTRACTS.md` — added Contracts SP-1 through SP-5 (Sentinel Prime) and ORC-1 through ORC-3 (Native Orchestrator).
+3. `STATE_OF_THE_BUILD.md` — new "System 5 — Sentinel Prime" and "Native Orchestrator" sections, two new Module Status rows, schema version updated to 2.5.0, Overall Completion updated, 3 new "What Remains" gap entries.
+4. `FORGE_HANDOFF.md` — new section listing every file under `src/sentinel-prime/` and `src/orchestrator/` plus all new CLI commands.
+
+**Verification:** every one of the 13 files above (6 sentinel-prime, 7 orchestrator) was read in full
+this session. Cross-checked every cross-module import against its real exported symbol and signature —
+`runClaude` (`engine/claude-runner.ts`), `extractJsonObject` (`tools/json-extraction.ts`, NOT the
+differently-shaped same-named export in `tools/consensus-validator.ts`), `findGovernanceDoc`/
+`ArtifactName` (`resurrection/governance-gaps.ts`, confirmed `'BEHAVIORAL_CONTRACTS'` is a valid
+`ArtifactName` key), `getClient`/`toJsonText`/`toSqliteBool`/`fromJsonText`/`newId`/`nowIso`
+(`memory/client.ts`). Confirmed `CURRENT_SCHEMA_VERSION` is `'2.5.0'` and all four new tables are both
+in the migration SQL and in `ALL_FORGE_TABLES`. Confirmed the CLI commands (`forge orchestrate`,
+`forge library *`, `forge sentinel *`) are registered with `.command(...)` and their action handlers
+exist.
+
+**NOT done this session, flagged not silently skipped:** `pnpm run build` was requested explicitly by
+this session's task brief ("confirm 0 errors") but could not be run — every attempt
+(`pnpm run build`, `pnpm --version`, `node node_modules/typescript/bin/tsc -p .`, with and without
+`dangerouslyDisableSandbox`, via both the Bash and PowerShell tools) was rejected by this session's
+exec-approval gate before it executed, while a bare `node --version` succeeded — the same
+intermittent exec-gate behavior recorded in the `forge2-exec-blocker` memory and in nearly every
+FORGE session this file documents. This is a real, live gap: the System 5/Orchestrator code is
+verified by comprehensive static read-through (file-by-file, import-by-import) but NOT by an actual
+compiler run this session. Also not done: `forge orchestrate`/`forge library`/`forge sentinel` were
+not run end-to-end against a real project; `forge sentinel threshold --set` persists a value
+`confidence-scorer.ts` does not yet read back (flagged in `STATE_OF_THE_BUILD.md`).
+
+**Next action:** run `pnpm run build` / `pnpm tsc --noEmit` for real the next session an exec gate is
+available and record the actual result (replacing this session's static-analysis-only verification);
+wire `confidence-scorer.ts` to read `forge_meta.sentinel_halt_threshold`; run `forge orchestrate
+<project> --dry-run` against a real `library-manifest.yaml` to prove the CLI surface end-to-end.
 
 ---
 

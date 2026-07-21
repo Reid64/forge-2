@@ -14,16 +14,26 @@
  * thrown, so a bus call can never abort the Phase 3 loop that triggers it.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runGapAudit } from '../resurrection/gap-auditor.js';
 import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
 import { BuildMemory } from '../memory/index.js';
+import { fromJsonText, logMemoryWarning, nowIso } from '../memory/client.js';
+import SentinelPrime from '../sentinel-prime/index.js';
+import { decideHalt, scoreConfidence } from '../sentinel-prime/confidence-scorer.js';
+import type {
+  ExecutionMonitorResult,
+  GovernanceEnforcerResult,
+  SentinelPrimeRunResult,
+  ValidationResult,
+} from '../sentinel-prime/types.js';
 import { runTests } from '../testing/orchestrator.js';
 import { RunnerType, TriggerType, type TestRunResult } from '../testing/types.js';
 import { logLine } from '../tools/forge-logger.js';
+import { toAsciiGovernanceText } from '../tools/governance-text.js';
 
 const log = logLine('integration-bus');
 
@@ -37,6 +47,175 @@ const log = logLine('integration-bus');
  */
 export interface RollbackCapablePromoter {
   rollback(evolutionId: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Sentinel Prime (System 5) readback
+// ---------------------------------------------------------------------------
+
+/** Row shape read back from `sentinel_prime_runs` (see `src/learning/database.ts`). */
+interface SentinelPrimeRunRow {
+  id: string;
+  build_run_id: string;
+  prompt_id: string;
+  prompt_index: number;
+  execution_monitor_result: string;
+  decision_validator_result: string;
+  governance_enforcer_result: string;
+  created_at: string;
+}
+
+/** Documented degrade-to-clean fallbacks, mirroring `orchestrator/queue-runner.ts`'s own
+ *  readback of this same table — a storage-format hiccup degrades to "no opinion" rather than
+ *  fabricating a halt Sentinel Prime never actually decided (Contract 4). */
+const FALLBACK_EXECUTION_RESULT: ExecutionMonitorResult = {
+  promptId: '',
+  outOfScopeWrites: [],
+  unexpectedDeletions: [],
+  commandsExecuted: [],
+  stdoutChunks: 0,
+  exitCode: null,
+  durationMs: 0,
+  passed: true,
+  violations: [],
+};
+
+const FALLBACK_VALIDATION_RESULT: ValidationResult = {
+  promptId: '',
+  intentFulfillmentScore: 1,
+  gatePassed: true,
+  intentActuallyFulfilled: true,
+  promptSummary: '',
+  outputSummary: '',
+  gaps: [],
+  confidence: 1,
+};
+
+const FALLBACK_GOVERNANCE_RESULT: GovernanceEnforcerResult = {
+  promptId: '',
+  artifactsScanned: [],
+  driftReports: [],
+  contractViolations: [],
+  passed: true,
+};
+
+/**
+ * Reconstruct a full {@link SentinelPrimeRunResult} from a persisted row. `confidenceScore`/
+ * `haltDecision` are RECOMPUTED via the same pure `scoreConfidence`/`decideHalt` functions
+ * {@link SentinelPrime} itself used to persist the row, rather than re-parsed from derived
+ * columns, so the reconstruction never drifts from the scoring module's own logic.
+ */
+function reconstructSentinelPrimeRun(row: SentinelPrimeRunRow): SentinelPrimeRunResult {
+  const executionResult = fromJsonText<ExecutionMonitorResult>(row.execution_monitor_result, FALLBACK_EXECUTION_RESULT);
+  const validationResult = fromJsonText<ValidationResult>(row.decision_validator_result, FALLBACK_VALIDATION_RESULT);
+  const governanceResult = fromJsonText<GovernanceEnforcerResult>(row.governance_enforcer_result, FALLBACK_GOVERNANCE_RESULT);
+
+  const confidenceScore = scoreConfidence(executionResult, validationResult, governanceResult);
+  const haltDecision = decideHalt(confidenceScore, executionResult, governanceResult);
+
+  return {
+    id: row.id,
+    buildRunId: row.build_run_id,
+    promptId: row.prompt_id,
+    promptIndex: row.prompt_index,
+    executionResult,
+    validationResult,
+    governanceResult,
+    confidenceScore,
+    haltDecision,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Read back one `sentinel_prime_runs` row matching `whereClause` (a fixed, non-interpolated SQL
+ * fragment — `param` is always bound, never concatenated) and reconstruct it. Never throws
+ * (Contract 4) — an unreachable database or a missing row both resolve to `null`.
+ */
+function loadSentinelPrimeRun(whereClause: string, param: string): SentinelPrimeRunResult | null {
+  const db = BuildMemory.getClient();
+  if (!db) return null;
+
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, build_run_id, prompt_id, prompt_index, execution_monitor_result,
+                decision_validator_result, governance_enforcer_result, created_at
+         FROM sentinel_prime_runs
+         WHERE ${whereClause}
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      .get(param) as SentinelPrimeRunRow | undefined;
+    if (!row) return null;
+    return reconstructSentinelPrimeRun(row);
+  } catch (error) {
+    logMemoryWarning('integration-bus.loadSentinelPrimeRun', error);
+    return null;
+  }
+}
+
+/**
+ * Non-auto-recoverable Sentinel Prime halt: append a BLOCKER entry to STATE_OF_THE_BUILD.md
+ * (Canonical Rule 9 — the state document is deliberately outside Sentinel's protected doc set)
+ * so the halt is visible in the build's live progress record, not just Build Memory.
+ */
+async function appendSentinelPrimeBlocker(projectPath: string, run: SentinelPrimeRunResult): Promise<void> {
+  const block = [
+    '',
+    `## [FORGE Phase 3] BLOCKER — ${SentinelPrime.name}`,
+    `- Sentinel run: ${run.id}`,
+    `- Prompt: '${run.promptId}' (index ${run.promptIndex})`,
+    `- Composite confidence: ${run.confidenceScore.composite.toFixed(2)}`,
+    `- Halt reason: ${run.haltDecision.reason ?? 'unspecified'}`,
+    `- Timestamp: ${nowIso()}`,
+    '',
+  ].join('\n');
+
+  const dir = join(projectPath, 'governance');
+  await mkdir(dir, { recursive: true });
+  await appendFile(join(dir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
+}
+
+/**
+ * Auto-recoverable Sentinel Prime halt: queue a fresh `pending` `prompt_executions` row for this
+ * same build/prompt index so the next Phase 3 pass picks the prompt back up. `prompt_executions`
+ * has no dedicated `retry_count` column (see SCHEMA_REGISTRY.md) — rather than fabricate one, the
+ * attempt number is recorded in `resolution_applied`, derived from the real count of prior rows
+ * for this (build_run_id, prompt_index) pair.
+ */
+async function queueSentinelPrimeRetry(buildRunId: string, run: SentinelPrimeRunResult): Promise<void> {
+  const db = BuildMemory.getClient();
+  if (!db) return;
+
+  const baseRow = db
+    .prepare(
+      `SELECT prompt_name, prompt_hash, prompt_content, branch_name
+       FROM prompt_executions
+       WHERE build_run_id = ? AND prompt_index = ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(buildRunId, run.promptIndex) as
+    | { prompt_name: string; prompt_hash: string; prompt_content: string; branch_name: string | null }
+    | undefined;
+
+  const priorAttempts = (
+    db
+      .prepare('SELECT COUNT(*) AS n FROM prompt_executions WHERE build_run_id = ? AND prompt_index = ?')
+      .get(buildRunId, run.promptIndex) as { n: number }
+  ).n;
+
+  await BuildMemory.prompts.createPromptExecution({
+    build_run_id: buildRunId,
+    prompt_index: run.promptIndex,
+    prompt_name: baseRow?.prompt_name ?? run.promptId,
+    prompt_hash: baseRow?.prompt_hash ?? run.promptId,
+    prompt_content: baseRow?.prompt_content ?? '',
+    status: 'pending',
+    branch_name: baseRow?.branch_name ?? null,
+    resolution_applied: `${SentinelPrime.name} auto-recoverable halt -- retry #${priorAttempts} (sentinel run ${run.id})`,
+  });
 }
 
 /**
@@ -93,6 +272,24 @@ export async function onSentinelFailure(
   } catch (error) {
     log(`baseline test run failed for prompt ${promptId}: ${errorMessage(error)}`);
   }
+
+  // Sentinel Prime (System 5) readback: the SentinelPrime observation pass already ran for this
+  // same prompt during executePrompt (phase3-executor.ts), independently of the Contract-13 gate
+  // that triggered this call — cross-reference its verdict and act on it. A non-auto-recoverable
+  // halt is recorded as a BLOCKER in STATE_OF_THE_BUILD.md; an auto-recoverable one queues a fresh
+  // pending prompt_execution row so the build can pick the prompt back up.
+  try {
+    const run = loadSentinelPrimeRun('prompt_id = ?', promptId);
+    if (run && run.haltDecision.shouldHalt) {
+      if (!run.haltDecision.autoRecoverable) {
+        await appendSentinelPrimeBlocker(projectPath, run);
+      } else {
+        await queueSentinelPrimeRetry(buildRunId, run);
+      }
+    }
+  } catch (error) {
+    log(`Sentinel Prime readback failed for prompt ${promptId}: ${errorMessage(error)}`);
+  }
 }
 
 /**
@@ -133,6 +330,45 @@ export async function onEvolutionPromoted(
     await promoter.rollback(evolutionId);
   } catch (error) {
     log(`promoter rollback failed for evolution ${evolutionId}: ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * Fires at a Sentinel Prime HALT (the point `phase3-executor.ts` is about to throw and unwind the
+ * build — see the `SentinelPrime HALT:` throw site right after `runFullObservation`). Reads the
+ * persisted run back by id, formats a diagnostic block, and appends it to SESSION_STATE.md so the
+ * halt is visible in the session record even though the throw itself unwinds before Phase 3's own
+ * `rollbackAndReport`/`updateStateProgress` machinery (which handles the Contract-13 gate, not
+ * this second observation layer) ever runs. Non-fatal (Contract 4) — a read or write failure is
+ * logged and swallowed, never thrown, so this call can never block the halt it is documenting.
+ */
+export async function onSentinelPrimeHalt(sentinelRunId: string, projectPath: string): Promise<void> {
+  try {
+    const run = loadSentinelPrimeRun('id = ?', sentinelRunId);
+    if (!run) {
+      log(`onSentinelPrimeHalt: no sentinel_prime_runs row found for id ${sentinelRunId}`);
+      return;
+    }
+
+    const block = [
+      '',
+      `## ${SentinelPrime.name} HALT diagnostic — run ${run.id}`,
+      `- Prompt: '${run.promptId}' (index ${run.promptIndex})`,
+      `- Composite confidence: ${run.confidenceScore.composite.toFixed(2)} ` +
+        `(execution ${run.confidenceScore.executionScore.toFixed(2)}, ` +
+        `validation ${run.confidenceScore.validationScore.toFixed(2)}, ` +
+        `governance ${run.confidenceScore.governanceScore.toFixed(2)})`,
+      `- Halt reason: ${run.haltDecision.reason ?? 'unspecified'}`,
+      `- Auto-recoverable: ${run.haltDecision.autoRecoverable ? 'yes' : 'no'}`,
+      `- Timestamp: ${nowIso()}`,
+      '',
+    ].join('\n');
+
+    const dir = join(projectPath, 'governance');
+    await mkdir(dir, { recursive: true });
+    await appendFile(join(dir, 'SESSION_STATE.md'), toAsciiGovernanceText(block), 'utf8');
+  } catch (error) {
+    log(`onSentinelPrimeHalt failed for run ${sentinelRunId}: ${errorMessage(error)}`);
   }
 }
 
