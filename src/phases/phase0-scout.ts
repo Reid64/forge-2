@@ -53,6 +53,8 @@ import { detectSchemaDrift } from '../tools/schema-validator.js';
 import { HookManager } from '../engine/hook-manager.js';
 import { onSessionStart } from '../memory/session-hooks.js';
 import { ensureGitHubActions } from '../retrofit/github-actions-generator.js';
+import { createCredentialVault } from '../autonomy/credential-vault.js';
+import { validateEnv, printEnvReport } from '../autonomy/env-validator.js';
 import type { SecurityReport, SessionContext } from '../types/index.js';
 
 const execAsync = promisify(exec);
@@ -666,6 +668,22 @@ export async function runPhase0Scout(
   const governanceDirName = options.governanceDirName ?? 'governance';
   const log = options.log ?? logLine('phase0');
 
+  // -1. Environment variable validation — the ABSOLUTE FIRST step, before anything else
+  // (including git init) touches the project. A missing required env var becomes a blocker
+  // exactly like every other Phase 0 gate below (AgentShield, the toolchain audit, …) — folded
+  // into `blockers` once that array exists (step 8), never a separate silent-halt path.
+  log('step 0: environment variable validation');
+  const envResult = await validateEnv(projectPath);
+  printEnvReport(envResult);
+  const envBlockers = envResult.missing.map(
+    (r) => `Missing required env var ${r.key}: ${r.description}`
+  );
+  log(
+    envBlockers.length === 0
+      ? 'env gate: PASS'
+      : `env gate: FAIL (${envBlockers.length} missing required environment variable(s))`
+  );
+
   // 0. Greenfield git init (Session 5 finding #3) — before anything else touches the project.
   const gitInit = await ensureGitRepo(projectPath, log);
 
@@ -726,11 +744,14 @@ export async function runPhase0Scout(
     remediations,
     dockerStatus: audit.dockerStatus,
     gitInitialized: gitInit.initialized,
-    warnings: gitInit.warning ? [...audit.warnings, gitInit.warning] : audit.warnings,
+    warnings: gitInit.warning
+      ? [...audit.warnings, ...envResult.warnings, gitInit.warning]
+      : [...audit.warnings, ...envResult.warnings],
   };
 
   // 8. Compute the gate -----------------------------------------------------
   const blockers = computeBlockers(audit);
+  blockers.push(...envBlockers);
   const passed = blockers.length === 0;
   log(passed ? 'Phase 0 gate: PASS' : `Phase 0 gate: FAIL (${blockers.length} blocker(s))`);
 
@@ -896,6 +917,21 @@ export async function runPhase0Scout(
     const detail = error instanceof Error ? error.message : String(error);
     log(`WARNING: GitHub Actions workflow generation error — ${detail}`);
     toolchainManifest.warnings.push(`GitHub Actions workflow generation error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 14: CredentialVault — inject any stored project credentials into
+  // .env.local (existing keys are never touched, only genuinely-missing ones added)
+  // -------------------------------------------------------------------------
+  log('step 14: credential vault injection');
+  try {
+    const vault = createCredentialVault();
+    const injectedCount = await vault.injectIntoEnv(projectPath);
+    log(`[AUTONOMY] Credentials injected ${injectedCount} keys`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: credential vault injection error — ${detail}`);
+    toolchainManifest.warnings.push(`Credential vault injection error: ${detail}`);
   }
 
   // Recompute passed — AgentShield (step 9) may have added blockers after the

@@ -77,6 +77,8 @@ import {
   type AccessibilityAuditorOptions,
   type AccessibilityReport,
 } from '../tools/accessibility-auditor.js';
+import { checkProjectAccessibility } from '../ui-engine/accessibility-checker.js';
+import type { AccessibilityReport as ComponentAccessibilityReport } from '../ui-engine/accessibility-checker.js';
 import {
   runSeoAudit,
   type SeoAuditInput,
@@ -143,6 +145,7 @@ export type SentinelCheckName =
   | 'visual_regression'
   | 'live_preview'
   | 'accessibility'
+  | 'component_accessibility'
   | 'seo'
   | 'architecture'
   | 'consensus_validation'
@@ -355,6 +358,21 @@ export interface SentinelOptions {
     input: AccessibilityAuditInput,
     options?: AccessibilityAuditorOptions
   ) => Promise<AccessibilityReport>;
+  /**
+   * Component-accessibility configuration (the OPTIONAL twelfth check, `component_accessibility`).
+   * When supplied, Sentinel runs {@link checkProjectAccessibility}'s static WCAG 2.1 AA source scan
+   * (`src/ui-engine/accessibility-checker.ts`) over every `src/components/**\/*.tsx` file for
+   * `feature`/`ui` ("component") prompts — a lighter, no-browser-required sibling to the axe-core
+   * `accessibility` check above, catching structural issues (missing aria-label/alt/htmlFor, onClick
+   * without a role/keyboard handler, hardcoded colors, unlabeled dialogs) directly from the generated
+   * component source. `projectPath` defaults from this run's options when absent. When omitted, the
+   * check is not added (the five Contract-13 checks stand alone). Any error-severity issue on any
+   * scanned component FAILS the gate; a project with no `src/components/` directory, or a non-
+   * feature/ui prompt type, SKIPS (never a false failure).
+   */
+  componentAccessibility?: { projectPath?: string };
+  /** Override the component-accessibility runner (tests). Default: {@link checkProjectAccessibility}. */
+  runComponentAccessibilityCheck?: (projectPath: string) => Promise<ComponentAccessibilityReport[]>;
   /**
    * SEO-audit configuration (the OPTIONAL tenth check). When supplied, Sentinel boots the target app,
    * loads every page route, and validates each rendered page for search-engine readiness AFTER a UI
@@ -635,6 +653,8 @@ const DEFAULT_TSC_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 /** Cap on a single check's captured output rendered into the diagnostic report. */
 const MAX_OUTPUT_CHARS = 4000;
+/** Cap on a single check's captured output, in LINES, before it's stored in a {@link CheckResult}. */
+const DEFAULT_MAX_GATE_OUTPUT_LINES = 50;
 
 // ---------------------------------------------------------------------------
 // Default shell runner (guarded — never throws)
@@ -723,6 +743,42 @@ function clip(text: string, max = MAX_OUTPUT_CHARS): string {
   return `${t.slice(0, max)}\n… [${t.length - max} more chars truncated]`;
 }
 
+/**
+ * Truncate a gate's captured stdout/stderr to `maxLines` lines. A project with hundreds of
+ * TypeScript/ESLint/etc. errors otherwise sends every line into `CheckResult.output` — which
+ * feeds the diagnostic report and, via Build Brain recovery prompts, the NEXT prompt's context —
+ * even though only the first few errors are ever actionable. The full untruncated text is still
+ * written to `.forge/build.log` by the gate function itself (see `logFullOutputIfTruncated`)
+ * before this truncation is applied; only what is returned/stored here is capped.
+ */
+export function truncateGateOutput(output: string, maxLines = DEFAULT_MAX_GATE_OUTPUT_LINES): string {
+  const text = output ?? '';
+  const lines = text.split(/\r?\n/);
+  if (lines.length <= maxLines) return text;
+  const omitted = lines.length - maxLines;
+  return [...lines.slice(0, maxLines), `… and ${omitted} more lines truncated. See full output in .forge/build.log.`].join(
+    '\n'
+  );
+}
+
+/**
+ * Log the FULL, untruncated gate output to the log sink — ONLY when it is long enough that
+ * {@link truncateGateOutput} would actually elide something (avoids log spam on every passing
+ * check with short output). During a real Phase 3 build the default `log` sink is redirected to
+ * `.forge/build.log` (see `beginQuietLogging` in `tools/forge-logger.ts`), so this is how the full
+ * text stays available for human debugging even though it is never returned in `CheckResult.output`.
+ */
+function logFullOutputIfTruncated(
+  log: (m: string) => void,
+  checkLabel: string,
+  output: string,
+  maxLines = DEFAULT_MAX_GATE_OUTPUT_LINES
+): void {
+  const text = output ?? '';
+  if (text.trim() === '' || text.split(/\r?\n/).length <= maxLines) return;
+  log(`[sentinel] full untruncated output for '${checkLabel}' (see .forge/build.log):\n${text}`);
+}
+
 /** First non-empty trimmed line of a block of output (for terse `detail` strings). */
 function firstLine(text: string): string {
   return (
@@ -733,14 +789,14 @@ function firstLine(text: string): string {
   );
 }
 
-/** A passed check result with timing. */
+/** A passed check result with timing. Output is capped to {@link DEFAULT_MAX_GATE_OUTPUT_LINES}. */
 function pass(name: SentinelCheckName, detail: string, output: string, durationMs: number): CheckResult {
-  return { name, passed: true, skipped: false, detail, output, durationMs };
+  return { name, passed: true, skipped: false, detail, output: truncateGateOutput(output), durationMs };
 }
 
-/** A failed check result with timing. */
+/** A failed check result with timing. Output is capped to {@link DEFAULT_MAX_GATE_OUTPUT_LINES}. */
 function fail(name: SentinelCheckName, detail: string, output: string, durationMs: number): CheckResult {
-  return { name, passed: false, skipped: false, detail, output, durationMs };
+  return { name, passed: false, skipped: false, detail, output: truncateGateOutput(output), durationMs };
 }
 
 /** A skipped check result (precondition absent — neither pass nor fail). */
@@ -758,12 +814,14 @@ async function runCommandCheck(
   command: string,
   cwd: string,
   timeoutMs: number,
-  run: CommandRunner
+  run: CommandRunner,
+  log: (m: string) => void = () => {}
 ): Promise<CheckResult> {
   const startedAt = nowMs();
   const res = await run(command, cwd, timeoutMs);
   const durationMs = nowMs() - startedAt;
   const output = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, name, output);
 
   if (res.timedOut) {
     return fail(name, `\`${command}\` TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, output, durationMs);
@@ -1762,6 +1820,7 @@ async function runRing2VitestCheck(
   const res = await run('npx vitest run --reporter=json', projectPath, 5 * 60 * 1000);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'vitest', combined);
 
   if (res.timedOut) {
     return fail('vitest', 'Vitest TIMED OUT after 300s', combined, durationMs);
@@ -1846,6 +1905,7 @@ async function runRing2SemgrepCheck(
   const res = await run('npx semgrep --config=auto --json', projectPath, 5 * 60 * 1000);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'semgrep', combined);
 
   if (res.timedOut) {
     return fail('semgrep', 'Semgrep TIMED OUT after 300s', combined, durationMs);
@@ -1930,6 +1990,7 @@ async function runRing2KnipCheck(
   const res = await run('npx knip --reporter json', projectPath, 5 * 60 * 1000);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'knip', combined);
 
   if (res.timedOut) {
     return fail('knip', 'knip TIMED OUT after 300s', combined, durationMs);
@@ -2040,6 +2101,7 @@ async function runRing3TrivyCheck(
   );
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'trivy', combined);
 
   if (res.timedOut) {
     return fail('trivy', 'Trivy TIMED OUT after 300s', combined, durationMs);
@@ -2152,6 +2214,7 @@ async function runRing3GitleaksCheck(
   );
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'gitleaks', combined);
 
   if (res.timedOut) {
     return fail('gitleaks', 'Gitleaks TIMED OUT after 180s', combined, durationMs);
@@ -2325,6 +2388,7 @@ async function runRing3LighthouseCheck(
     3 * 60 * 1000
   );
   const lhCombined = [lhRes.stdout, lhRes.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'lighthouse', lhCombined);
 
   // Always stop the dev server.
   killChildProcess(devServer, log);
@@ -2495,6 +2559,7 @@ async function runRing1TypescriptCheck(
   const res = await run('npx tsc --noEmit --pretty false', projectPath, timeoutMs);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'typescript', combined);
 
   if (res.timedOut) {
     return fail('typescript', `TypeScript TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, combined, durationMs);
@@ -2578,6 +2643,7 @@ async function runRing1EslintCheck(
   }
 
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'eslint', combined);
   const jsonStr = res.stdout.trim();
 
   if (!jsonStr.startsWith('[')) {
@@ -2739,6 +2805,7 @@ async function runLintGate(
   const res = await run(command, projectPath, timeoutMs);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'lint', combined);
 
   if (res.timedOut) {
     log(`[GATE:lint] FAIL — TIMED OUT after ${Math.round(timeoutMs / 1000)}s`);
@@ -2798,6 +2865,7 @@ async function runFormatGate(
   const res = await run(command, projectPath, timeoutMs);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'format', combined);
 
   if (res.timedOut) {
     log(`[GATE:format] FAIL — TIMED OUT after ${Math.round(timeoutMs / 1000)}s`);
@@ -2954,10 +3022,12 @@ async function runBundleSizeGate(
       const why = firstLine(buildRes.stderr) || firstLine(buildRes.stdout) || `exit ${buildRes.exitCode ?? 'null'}`;
       log(`[GATE:bundle-size] FAIL — pnpm run build failed: ${why}`);
       log('[FAIL] Gate BUNDLE-SIZE: FAIL');
+      const buildCombined = [buildRes.stdout, buildRes.stderr].filter((s) => s.trim() !== '').join('\n');
+      logFullOutputIfTruncated(log, 'bundle_size', buildCombined);
       return fail(
         'bundle_size',
         `pnpm run build failed while refreshing .next/ for the bundle size gate: ${why}`,
-        [buildRes.stdout, buildRes.stderr].filter((s) => s.trim() !== '').join('\n'),
+        buildCombined,
         nowMs() - startedAt
       );
     }
@@ -3042,6 +3112,81 @@ async function runBundleSizeGate(
   log(`[GATE:bundle-size] FAIL — ${detail}`);
   log('[FAIL] Gate BUNDLE-SIZE: FAIL');
   return fail('bundle_size', detail, [`Total: ${baselineTotal} -> ${currentTotal} bytes (${totalPercentIncrease.toFixed(2)}%).`, ...perPageLines].join('\n'), durationMs);
+}
+
+/** Prompt types the Component Accessibility gate evaluates — the same feature/ui "component" set {@link BUNDLE_SIZE_GATE_PROMPT_TYPES} uses. */
+const COMPONENT_ACCESSIBILITY_GATE_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['feature', 'ui']);
+
+/**
+ * Component Accessibility gate. Runs {@link checkProjectAccessibility}'s static WCAG 2.1 AA scan
+ * (`src/ui-engine/accessibility-checker.ts`) over every `src/components/**\/*.tsx` file. Auto-skips
+ * for any prompt type other than feature/ui and for a project with no `src/components/` directory.
+ * Never throws (Iron Law 3) — every step degrades to SKIP or FAIL, never a fabricated PASS.
+ */
+async function runComponentAccessibilityGate(
+  projectPath: string,
+  promptType: PromptType | undefined,
+  checker: (projectPath: string) => Promise<ComponentAccessibilityReport[]>,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  if (!promptType || !COMPONENT_ACCESSIBILITY_GATE_PROMPT_TYPES.has(promptType)) {
+    return skip(
+      'component_accessibility',
+      `prompt type '${promptType ?? 'unknown'}' is not feature/ui — component accessibility gate skipped`
+    );
+  }
+
+  log('[GATE] Running gate: component-accessibility');
+  const startedAt = nowMs();
+
+  let reports: ComponentAccessibilityReport[];
+  try {
+    reports = await checker(projectPath);
+  } catch (error) {
+    log(`[GATE:component-accessibility] SKIP — checker threw (${describe(error)})`);
+    return skip('component_accessibility', `component accessibility checker threw — not evaluated (${describe(error)})`);
+  }
+
+  if (reports.length === 0) {
+    log('[GATE:component-accessibility] SKIP — no .tsx files found under src/components/');
+    return skip('component_accessibility', 'no .tsx files found under src/components/ — not evaluated');
+  }
+
+  const durationMs = nowMs() - startedAt;
+  const failing = reports.filter((r) => !r.passed);
+  const totalErrors = reports.reduce((sum, r) => sum + r.issues.filter((i) => i.severity === 'error').length, 0);
+  const totalWarnings = reports.reduce((sum, r) => sum + r.issues.filter((i) => i.severity === 'warning').length, 0);
+  const output = reports
+    .map(
+      (r) =>
+        `${r.filePath} — score ${r.score} (${r.passed ? 'PASS' : 'FAIL'})\n` +
+        r.issues.map((i) => `  [${i.severity}] ${i.rule}: ${i.description} (fix: ${i.fix})`).join('\n')
+    )
+    .join('\n\n');
+
+  if (failing.length > 0) {
+    log(
+      `[GATE:component-accessibility] FAIL — ${failing.length}/${reports.length} component(s) failed ` +
+        `(${totalErrors} error(s), ${totalWarnings} warning(s))`
+    );
+    log('[FAIL] Gate COMPONENT-ACCESSIBILITY: FAIL');
+    logFullOutputIfTruncated(log, 'component_accessibility', output);
+    return fail(
+      'component_accessibility',
+      `${failing.length}/${reports.length} component(s) failed the WCAG 2.1 AA static scan (${totalErrors} error(s), ${totalWarnings} warning(s))`,
+      output,
+      durationMs
+    );
+  }
+
+  log(`[GATE:component-accessibility] PASS — ${reports.length} component(s) scanned, 0 errors, ${totalWarnings} warning(s)`);
+  log('[PASS] Gate COMPONENT-ACCESSIBILITY: PASS');
+  return pass(
+    'component_accessibility',
+    `${reports.length} component(s) scanned — 0 errors, ${totalWarnings} warning(s)`,
+    output,
+    durationMs
+  );
 }
 
 /**
@@ -3339,7 +3484,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     record(pass('build', 'Skipped — no package.json present; project has no build script to run', '', 0));
   } else {
     log('check 3/7: Build (pnpm run build)');
-    record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run));
+    record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run, log));
   }
 
   // --- 3. File Integrity ---------------------------------------------------
@@ -3862,6 +4007,29 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     }
   }
 
+  // --- 16c. Component Accessibility Gate (OPTIONAL, static WCAG scan — feature/ui prompts) -------
+  // Not part of the mandatory Contract-13 five: appended only when `componentAccessibility` is
+  // supplied. Auto-skips for any prompt type other than feature/ui and when no `src/components/`
+  // directory exists. Runs `checkProjectAccessibility` (src/ui-engine/accessibility-checker.ts) —
+  // a lighter, no-browser-required sibling to the axe-core `accessibility` check above.
+  if (options.componentAccessibility) {
+    if (shouldSkipRest()) {
+      record(skipRest('component_accessibility'));
+    } else {
+      log('check 16c: Component Accessibility Gate (static WCAG 2.1 AA scan of src/components/**/*.tsx)');
+      const caPath = options.componentAccessibility.projectPath ?? projectPath;
+      const runCa = options.runComponentAccessibilityCheck ?? checkProjectAccessibility;
+      let caResult: CheckResult;
+      try {
+        caResult = await runComponentAccessibilityGate(caPath, options.promptType, runCa, log);
+      } catch (error) {
+        log(`WARNING: component accessibility gate failed (${describe(error)})`);
+        caResult = skip('component_accessibility', 'component accessibility gate threw — not evaluated');
+      }
+      record(caResult);
+    }
+  }
+
   // --- 17. Full Playwright Test Suite (OPTIONAL — not incremental; runs after every prompt) -----
   // Not part of the mandatory Contract-13 five: appended only when `playwright` is supplied. Unlike
   // the incremental-tester, this runs the COMPLETE Playwright suite (`pnpm playwright test`) every
@@ -3876,7 +4044,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       const playwrightPath = options.playwright.projectPath ?? projectPath;
       log(`check 17: Full Playwright Test Suite (${playwrightCmd})`);
       record(
-        await runCommandCheck('playwright', playwrightCmd, playwrightPath, playwrightTimeout, run)
+        await runCommandCheck('playwright', playwrightCmd, playwrightPath, playwrightTimeout, run, log)
       );
     }
   }

@@ -40,6 +40,7 @@
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -91,6 +92,20 @@ import {
   defaultSkillsLibraryDir,
   validateSkillFile,
 } from '../skills/index.js';
+import {
+  createCredentialVault,
+  createVercelDeployer,
+  createSupabaseMigrator,
+  validateEnv,
+} from '../autonomy/index.js';
+import {
+  UIComponentGenerator,
+  ensureDesignTokens,
+  generateStoriesForProject,
+  checkProjectAccessibility,
+  ensureComponentsInstalled,
+  type ComponentSpec,
+} from '../ui-engine/index.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -2447,6 +2462,439 @@ async function cmdSkillsAdd(skillFile: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `forge design component|tokens|storybook|audit|install-shadcn` — UI Engine (src/ui-engine/)
+// ---------------------------------------------------------------------------
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for the `forge design` command family (matches {@link skillsLog}). */
+function designLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge design` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function designFail(message: string): void {
+  designLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/**
+ * `forge design component <project-path> <component-name> --description <text> --props <comma-list>`
+ * — generates one production-grade component via {@link UIComponentGenerator} (skill-informed,
+ * shadcn-aware install, matching story + test written alongside), tagged with fresh synthetic
+ * `buildRunId`/`promptId` values since this command runs outside any real Phase 3 build.
+ */
+async function cmdDesignComponent(
+  pathArg: string,
+  componentName: string,
+  opts: { description?: string; props?: string }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const { description } = opts;
+  if (!description) {
+    designFail('forge design component requires --description "<text>".');
+    return;
+  }
+
+  const props = (opts.props ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  const spec: ComponentSpec = {
+    name: componentName,
+    description,
+    props,
+    dataSource: null,
+    interactions: [],
+    accessibility: [],
+  };
+
+  designLog('INFO', `forge design component — generating '${componentName}' in ${projectPath}`);
+  const buildRunId = randomUUID();
+  const promptId = randomUUID();
+
+  try {
+    const result = await withSpinner(`UI Engine — generate '${componentName}'`, () =>
+      new UIComponentGenerator().generate(spec, projectPath, buildRunId, promptId)
+    );
+    designLog('PASS', `component '${componentName}' generated → ${result.filePath}`);
+  } catch (error) {
+    designFail(`forge design component failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * `forge design tokens <project-path>` — runs {@link ensureDesignTokens} and reports whether
+ * tailwind.config.ts/globals.css were newly written or already present (checked before/after,
+ * since `ensureDesignTokens` itself never overwrites an existing config).
+ */
+async function cmdDesignTokens(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  designLog('INFO', `forge design tokens — ${projectPath}`);
+
+  const tailwindConfigCandidates = [join(projectPath, 'tailwind.config.ts'), join(projectPath, 'tailwind.config.js')];
+  const globalsCssCandidates = [
+    join(projectPath, 'src', 'app', 'globals.css'),
+    join(projectPath, 'app', 'globals.css'),
+    join(projectPath, 'src', 'styles', 'globals.css'),
+    join(projectPath, 'styles', 'globals.css'),
+  ];
+  const tailwindExistedBefore = tailwindConfigCandidates.some((p) => existsSync(p));
+  const globalsExistedBefore = globalsCssCandidates.some((p) => existsSync(p));
+
+  await withSpinner('UI Engine — design tokens', () => ensureDesignTokens(projectPath));
+
+  const tailwindPath = tailwindConfigCandidates.find((p) => existsSync(p)) ?? tailwindConfigCandidates[0]!;
+  const globalsPath = globalsCssCandidates.find((p) => existsSync(p)) ?? globalsCssCandidates[0]!;
+
+  designLog(
+    tailwindExistedBefore ? 'INFO' : 'PASS',
+    tailwindExistedBefore
+      ? `tailwind.config already present — left untouched (${tailwindPath})`
+      : `tailwind.config.ts written → ${tailwindPath}`
+  );
+  designLog(
+    globalsExistedBefore ? 'INFO' : 'PASS',
+    globalsExistedBefore
+      ? `globals.css already present — left untouched (${globalsPath})`
+      : `globals.css written → ${globalsPath}`
+  );
+}
+
+/**
+ * `forge design storybook <project-path>` — runs {@link generateStoriesForProject} and prints how
+ * many stories were generated vs. skipped (already had a story, or a per-component write failure).
+ */
+async function cmdDesignStorybook(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  designLog('INFO', `forge design storybook — ${projectPath}`);
+
+  const result = await withSpinner('UI Engine — generate Storybook stories', () =>
+    generateStoriesForProject(projectPath)
+  );
+
+  designLog('PASS', `${result.generated.length} stor${result.generated.length === 1 ? 'y' : 'ies'} generated`);
+  for (const f of result.generated) designLog('INFO', `  generated: ${f}`);
+  if (result.skipped.length > 0) {
+    designLog('INFO', `${result.skipped.length} skipped (story already exists, or generation failed):`);
+    for (const f of result.skipped) designLog('INFO', `  skipped: ${f}`);
+  }
+}
+
+/**
+ * `forge design audit <project-path>` — runs {@link checkProjectAccessibility} over every
+ * component and prints a per-component score, every issue with its fix, and an overall pass/fail
+ * (fails the command's exit code, matching Contract 13's "any single failure" posture, when any
+ * component's report did not pass).
+ */
+async function cmdDesignAudit(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  designLog('INFO', `forge design audit — ${projectPath}`);
+
+  const reports = await withSpinner('UI Engine — accessibility audit', () => checkProjectAccessibility(projectPath));
+
+  if (reports.length === 0) {
+    designLog('WARN', 'no components found under src/components/ — nothing to audit.');
+    return;
+  }
+
+  let overallPass = true;
+  for (const report of reports) {
+    if (!report.passed) overallPass = false;
+    designLog(
+      report.passed ? 'PASS' : 'FAIL',
+      `${report.filePath} — score ${report.score}/100 (${report.issues.length} issue(s))`
+    );
+    for (const issue of report.issues) {
+      designLog(
+        issue.severity === 'error' ? 'FAIL' : 'WARN',
+        `  [${issue.rule}] ${issue.description}${issue.element ? ` — ${issue.element}` : ''}`
+      );
+      designLog('INFO', `    fix: ${issue.fix}`);
+    }
+  }
+
+  const totalIssues = reports.reduce((sum, r) => sum + r.issues.length, 0);
+  designLog(
+    overallPass ? 'PASS' : 'FAIL',
+    `overall: ${reports.length} component(s) audited, ${totalIssues} issue(s) — ${overallPass ? 'PASS' : 'FAIL'}`
+  );
+  if (!overallPass) process.exitCode = 1;
+}
+
+/**
+ * `forge design install-shadcn <project-path> <component-names...>` — installs the listed
+ * shadcn/ui components (plus each one's declared dependencies) via {@link ensureComponentsInstalled}.
+ */
+async function cmdDesignInstallShadcn(pathArg: string, componentNames: string[]): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  if (componentNames.length === 0) {
+    designFail('forge design install-shadcn requires at least one component name.');
+    return;
+  }
+  designLog('INFO', `forge design install-shadcn — ${projectPath} — ${componentNames.join(', ')}`);
+
+  const installed = await withSpinner('UI Engine — install shadcn components', () =>
+    ensureComponentsInstalled(projectPath, componentNames)
+  );
+
+  if (installed.length === 0) {
+    designLog('INFO', 'no new components installed (all already present, or all installs failed — see warnings above).');
+    return;
+  }
+  designLog('PASS', `${installed.length} component(s) installed: ${installed.join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+// forge vault — per-project encrypted credential storage (src/autonomy/credential-vault.ts)
+// ---------------------------------------------------------------------------
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for the `forge vault` command family. */
+function vaultLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge vault` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function vaultFail(message: string): void {
+  vaultLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/** `forge vault set <project-path> <key> <value>` — encrypt and store one credential. */
+async function cmdVaultSet(pathArg: string, key: string, value: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const ok = await createCredentialVault().set(projectPath, key, value);
+  if (!ok) {
+    vaultFail(`could not store "${key}" for ${projectPath} — Build Memory unavailable or the write failed.`);
+    return;
+  }
+  vaultLog('PASS', `stored "${key}" for ${projectPath}`);
+}
+
+/** `forge vault get <project-path> <key>` — decrypt and print one credential's value. */
+async function cmdVaultGet(pathArg: string, key: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const value = await createCredentialVault().get(projectPath, key);
+  if (value === null) {
+    vaultFail(`no credential "${key}" found for ${projectPath} (or it could not be decrypted with the current vault key).`);
+    return;
+  }
+  vaultLog('PASS', `${key}=${value}`);
+}
+
+/** `forge vault list <project-path>` — list stored credential key names, never values. */
+async function cmdVaultList(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const keys = await createCredentialVault().listKeys(projectPath);
+  if (keys.length === 0) {
+    vaultLog('WARN', `no credentials stored for ${projectPath}`);
+    return;
+  }
+  vaultLog('PASS', `${keys.length} credential(s) stored for ${projectPath}:`);
+  for (const k of keys) vaultLog('INFO', `  ${k}`);
+}
+
+/** `forge vault inject <project-path>` — append every stored credential to .env.local (never overwrites). */
+async function cmdVaultInject(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const count = await createCredentialVault().injectIntoEnv(projectPath);
+  const envPath = join(projectPath, '.env.local');
+  if (count === 0) {
+    vaultLog('WARN', `nothing injected into ${envPath} — no stored credentials, or every stored key is already declared there.`);
+    return;
+  }
+  vaultLog('PASS', `injected ${count} credential(s) into ${envPath}`);
+}
+
+/** `forge vault delete <project-path> <key>` — remove one stored credential. */
+async function cmdVaultDelete(pathArg: string, key: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const deleted = await createCredentialVault().delete(projectPath, key);
+  if (!deleted) {
+    vaultFail(`no credential "${key}" found for ${projectPath} — nothing deleted.`);
+    return;
+  }
+  vaultLog('PASS', `deleted "${key}" for ${projectPath}`);
+}
+
+// ---------------------------------------------------------------------------
+// forge deploy auto — VercelDeployer + forge verify (src/autonomy/vercel-deployer.ts)
+// ---------------------------------------------------------------------------
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for `forge deploy auto`. */
+function deployAutoLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge deploy auto` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function deployAutoFail(message: string): void {
+  deployAutoLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/** `forge deploy auto <project-path> --env production|preview` — VercelDeployer.deploy, then forge verify. */
+async function cmdDeployAuto(pathArg: string, opts: { env?: string }): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const environment: 'production' | 'preview' = opts.env === 'production' ? 'production' : 'preview';
+  deployAutoLog('INFO', `forge deploy auto — ${projectPath} (${environment})`);
+
+  const deployer = createVercelDeployer();
+  const configured = await deployer.isConfigured(projectPath);
+  if (!configured) {
+    deployAutoFail(
+      `${projectPath} is not configured for autonomous Vercel deploy — no VERCEL_TOKEN (env or vault) or no ` +
+        `.vercel link. Run \`vercel link\` once, then \`forge vault set ${projectPath} VERCEL_TOKEN <token>\`.`
+    );
+    return;
+  }
+
+  const buildRunId = randomUUID();
+  deployAutoLog('INFO', 'uploading project files and creating the Vercel deployment...');
+  const result = await deployer.deploy(projectPath, buildRunId, environment);
+  if (result.status !== 'ready' || !result.deploymentUrl) {
+    deployAutoFail(
+      `Vercel deploy did not reach a ready state (status: ${result.status})${result.error ? ` — ${result.error}` : ''}`
+    );
+    return;
+  }
+  deployAutoLog('PASS', `Vercel deploy ready — ${result.deploymentUrl}`);
+
+  deployAutoLog('INFO', `running forge verify against ${result.deploymentUrl}`);
+  try {
+    const { runDeployVerification } = await import('../deploy/verify-runner.js');
+    const verifyResult = await runDeployVerification({
+      projectPath,
+      baseUrl: result.deploymentUrl,
+      latencyBudgetMs: DEFAULT_VERIFY_LATENCY_BUDGET_MS,
+    });
+    for (const r of verifyResult.routes) {
+      deployAutoLog(r.verdict === 'PASSED' ? 'PASS' : 'FAIL', `VERIFY: ${r.route} ${r.statusCode ?? 'ERR'} ${r.latencyMs}ms`);
+    }
+    if (verifyResult.passed) {
+      deployAutoLog('PASS', 'post-deploy verification passed.');
+    } else {
+      deployAutoFail('post-deploy verification found failing routes.');
+    }
+  } catch (error) {
+    deployAutoFail(`post-deploy verification failed to run: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// forge migrate — Supabase Management API migrations (src/autonomy/supabase-migrator.ts)
+// ---------------------------------------------------------------------------
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for the `forge migrate` command family. */
+function migrateLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge migrate` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function migrateFail(message: string): void {
+  migrateLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/** `forge migrate <project-path>` — apply every pending supabase/migrations/*.sql file, in order. */
+async function cmdMigrate(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const migrator = createSupabaseMigrator();
+  const configured = await migrator.isConfigured(projectPath);
+  if (!configured) {
+    migrateFail(
+      `${projectPath} is not configured for autonomous migrations — SUPABASE_ACCESS_TOKEN/SUPABASE_PROJECT_ID ` +
+        'not resolvable from the environment or the credential vault.'
+    );
+    return;
+  }
+
+  migrateLog('INFO', `applying pending migrations for ${projectPath}`);
+  const results = await migrator.applyPendingMigrations(projectPath);
+  if (results.length === 0) {
+    migrateLog('WARN', 'no migration files found under supabase/migrations/ (or nothing pending).');
+    return;
+  }
+
+  for (const r of results) {
+    const level: 'INFO' | 'PASS' | 'FAIL' = r.status === 'applied' ? 'PASS' : r.status === 'skipped' ? 'INFO' : 'FAIL';
+    migrateLog(level, `${r.migrationFile} — ${r.status}${r.error ? `: ${r.error}` : ''} (${r.durationMs}ms)`);
+  }
+
+  const failed = results.filter((r) => r.status === 'failed');
+  if (failed.length > 0) {
+    migrateFail(`${failed.length}/${results.length} migration(s) failed — later migrations were not attempted.`);
+    return;
+  }
+  migrateLog('PASS', `${results.length} migration(s) processed.`);
+}
+
+/** `forge migrate validate <project-path>` — static sanity sweep, never calls the Management API. */
+async function cmdMigrateValidate(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  migrateLog('INFO', `validating migrations for ${projectPath}`);
+  const result = await createSupabaseMigrator().validateMigrations(projectPath);
+  migrateLog('INFO', `${result.migrationCount} migration file(s) found.`);
+  if (result.valid) {
+    migrateLog('PASS', 'all migrations valid.');
+    return;
+  }
+  for (const e of result.errors) migrateLog('FAIL', e);
+  migrateFail(`${result.errors.length} validation error(s) found.`);
+}
+
+// ---------------------------------------------------------------------------
+// forge env check — environment variable validation (src/autonomy/env-validator.ts)
+// ---------------------------------------------------------------------------
+
+/** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for the `forge env` command family. */
+function envCheckLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge env check` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function envCheckFail(message: string): void {
+  envCheckLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/** `forge env check <project-path>` — resolve every required env var against process.env / .env.local / the vault, report gaps. */
+async function cmdEnvCheck(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  envCheckLog('INFO', `forge env check — ${projectPath}`);
+
+  const result = await validateEnv(projectPath);
+  for (const w of result.warnings) envCheckLog('WARN', w);
+
+  for (const requirement of result.missing) {
+    envCheckLog('FAIL', `MISSING: ${requirement.key} - ${requirement.description}`);
+    envCheckLog(
+      'INFO',
+      requirement.canBeVaulted
+        ? `  -> forge vault set ${projectPath} ${requirement.key} <value>`
+        : `  -> set ${requirement.key} directly in your environment or .env.local`
+    );
+  }
+  for (const entry of result.invalid) {
+    envCheckLog('WARN', `INVALID: ${entry.key} - ${entry.reason} (${entry.description})`);
+  }
+
+  if (!result.allRequired) {
+    envCheckFail(`${result.missing.length} required environment variable(s) missing.`);
+    return;
+  }
+  envCheckLog(
+    'PASS',
+    result.invalid.length === 0
+      ? 'all required environment variables are resolvable.'
+      : 'all required environment variables resolvable (see format warnings above).'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CLI wiring
 // ---------------------------------------------------------------------------
 
@@ -2545,9 +2993,18 @@ async function main(): Promise<void> {
     .argument('<path>', 'target project directory')
     .action((pathArg: string) => cmdScout(pathArg));
 
-  program
+  // `forge design <path> --idea` (Phase 0 + 1 architecture design) also carries the UI Engine
+  // subcommand tree (component/tokens/storybook/audit/install-shadcn), matching the `analyze`
+  // command's precedent of a parent argument+action alongside nested subcommands on the same
+  // Command instance — Commander resolves a subcommand-name match before parsing the parent's
+  // own positional argument, so `forge design ./proj --idea "..."` and `forge design component
+  // ./proj Foo --description "..."` both route correctly.
+  const design = program
     .command('design')
-    .description('Run Phase 0 + 1 only (PRD + Architecture). Stops at the Gate 2 review.')
+    .description(
+      'Run Phase 0 + 1 only (PRD + Architecture; stops at Gate 2), or use a UI Engine subcommand ' +
+        '(component / tokens / storybook / audit / install-shadcn)'
+    )
     .argument('<path>', 'target project directory')
     .option('--idea <text>', 'raw product idea (generates the PRD)')
     .option('--prd <path>', 'use an existing PRD file instead of generating one')
@@ -2555,6 +3012,42 @@ async function main(): Promise<void> {
     .action(async (pathArg: string, opts: { idea?: string; prd?: string; acceptBlockers?: boolean }) => {
       await cmdDesign(pathArg, opts);
     });
+
+  design
+    .command('component')
+    .description("Generate a world-class UI component via the UI Engine (skill-informed, shadcn-aware, story + test)")
+    .argument('<project-path>', 'target project directory')
+    .argument('<component-name>', 'component name (PascalCase)')
+    .requiredOption('--description <text>', 'what the component does and where it is used')
+    .option('--props <comma-list>', 'comma-separated prop names', '')
+    .action((pathArg: string, componentName: string, opts: { description?: string; props?: string }) =>
+      cmdDesignComponent(pathArg, componentName, opts)
+    );
+
+  design
+    .command('tokens')
+    .description('Ensure the project has a world-class default design token set (tailwind.config.ts + globals.css)')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdDesignTokens(pathArg));
+
+  design
+    .command('storybook')
+    .description('Generate Storybook stories for every component under src/components/ that is missing one')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdDesignStorybook(pathArg));
+
+  design
+    .command('audit')
+    .description('Run the static WCAG 2.1 AA accessibility checker over every component')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdDesignAudit(pathArg));
+
+  design
+    .command('install-shadcn')
+    .description('Install the given shadcn/ui components (and their declared dependencies) into the project')
+    .argument('<project-path>', 'target project directory')
+    .argument('<component-names...>', 'shadcn/ui component names to install')
+    .action((pathArg: string, componentNames: string[]) => cmdDesignInstallShadcn(pathArg, componentNames));
 
   program
     .command('resume')
@@ -2751,6 +3244,44 @@ async function main(): Promise<void> {
     .description('Validate a *.skill.md file and copy it into the skills library')
     .argument('<skill-file>', 'path to the skill template file to add')
     .action((skillFile: string) => cmdSkillsAdd(skillFile));
+
+  const vault = program
+    .command('vault')
+    .description('Per-project AES-256-GCM encrypted credential storage (set / get / list / inject / delete)');
+
+  vault
+    .command('set')
+    .description('Encrypt and store one credential for a project')
+    .argument('<project-path>', 'target project directory')
+    .argument('<key>', 'credential key, e.g. VERCEL_TOKEN')
+    .argument('<value>', 'credential value to encrypt and store')
+    .action((pathArg: string, key: string, value: string) => cmdVaultSet(pathArg, key, value));
+
+  vault
+    .command('get')
+    .description("Decrypt and print one credential's value")
+    .argument('<project-path>', 'target project directory')
+    .argument('<key>', 'credential key')
+    .action((pathArg: string, key: string) => cmdVaultGet(pathArg, key));
+
+  vault
+    .command('list')
+    .description('List stored credential key names for a project (values are never printed)')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdVaultList(pathArg));
+
+  vault
+    .command('inject')
+    .description('Append every stored credential to <project-path>/.env.local — never overwrites an existing key')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdVaultInject(pathArg));
+
+  vault
+    .command('delete')
+    .description('Remove one stored credential')
+    .argument('<project-path>', 'target project directory')
+    .argument('<key>', 'credential key')
+    .action((pathArg: string, key: string) => cmdVaultDelete(pathArg, key));
 
   const schedule = program
     .command('schedule')
@@ -3044,6 +3575,28 @@ async function main(): Promise<void> {
     .option('--set <value>', 'new halt threshold (0.0-1.0) to persist to Build Memory config')
     .action((opts: { set?: string }) => cmdSentinelThreshold(opts));
 
+  const migrate = program
+    .command('migrate')
+    .description('Apply pending supabase/migrations/*.sql files to the live Supabase project via the Management API')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdMigrate(pathArg));
+
+  migrate
+    .command('validate')
+    .description('Static sanity sweep over supabase/migrations/*.sql — never calls the Management API')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdMigrateValidate(pathArg));
+
+  const env = program
+    .command('env')
+    .description("Validate a project's environment variables against FORGE's own catalog and its own .env.example");
+
+  env
+    .command('check')
+    .description('Resolve every required env var against process.env / .env.local / the credential vault and report gaps')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdEnvCheck(pathArg));
+
   program
     .command('test')
     .description('Run the FORGE Enterprise Test Suite (TestOrchestrator) against a project')
@@ -3159,14 +3712,17 @@ async function main(): Promise<void> {
       } catch (err: unknown) { spinner.fail('SEQUENCE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
     });
 
-  program
+  const deploy = program
     .command('deploy')
     .description('Deploy a FORGE-built project and inject post-deploy monitoring snippet')
     .argument('<project-path>', 'Absolute path to the built project')
     .option('--endpoint <url>', 'Telemetry receiver URL for monitoring snippet injection')
     .option('--project-name <name>', 'Project name for telemetry (defaults to directory name)')
     .option('--slow-load-ms <ms>', 'Slow-load warning threshold in milliseconds', '3000')
-    .action(async (projectPath: string, opts: { endpoint?: string; projectName?: string; slowLoadMs?: string }) => {
+    .option('--production', 'Deploy to the Vercel production environment (default: preview)')
+    .option('--build-run-id <id>', 'Build Memory build_run id to associate this deployment with (default: a fresh id)')
+    .option('--skip-vercel', 'Skip the autonomous Vercel deploy step even if the project is configured for it')
+    .action(async (projectPath: string, opts: { endpoint?: string; projectName?: string; slowLoadMs?: string; production?: boolean; buildRunId?: string; skipVercel?: boolean }) => {
       const spinner = ora('Preparing deploy...').start();
       try {
         const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
@@ -3209,6 +3765,56 @@ async function main(): Promise<void> {
           console.log(chalk.yellow('\nNo --endpoint given — skipping monitoring snippet.'));
           console.log('Re-run with --endpoint <url> to generate a monitoring snippet.');
         }
+
+        // Autonomous Vercel deploy — replaces the operator manually running `vercel --prod`.
+        // Only attempted when the project is actually configured for it (token + .vercel link);
+        // otherwise this degrades to the manual-deploy instructions already printed above.
+        if (!opts.skipVercel) {
+          const { createVercelDeployer } = await import('../autonomy/vercel-deployer.js');
+          const deployer = createVercelDeployer();
+          const configured = await deployer.isConfigured(resolved);
+          if (configured) {
+            const buildRunId = opts.buildRunId ?? randomUUID();
+            const environment = opts.production ? 'production' : 'preview';
+            const vercelSpinner = ora(`Deploying to Vercel (${environment})...`).start();
+            const deployResult = await deployer.deploy(resolved, buildRunId, environment);
+            if (deployResult.status === 'ready' && deployResult.deploymentUrl) {
+              vercelSpinner.succeed(`Vercel deploy ready: ${deployResult.deploymentUrl}`);
+              console.log(chalk.green(`\n[PASS] VERCEL DEPLOY: ${deployResult.deploymentId ?? 'unknown'}`));
+
+              // Post-deploy verification (F9) against the live deployment URL.
+              const verifySpinner = ora('Running post-deploy verification...').start();
+              try {
+                const { runDeployVerification } = await import('../deploy/verify-runner.js');
+                const verifyResult = await runDeployVerification({
+                  projectPath: resolved,
+                  baseUrl: deployResult.deploymentUrl,
+                  latencyBudgetMs: DEFAULT_VERIFY_LATENCY_BUDGET_MS,
+                });
+                if (verifyResult.passed) {
+                  verifySpinner.succeed(`Post-deploy verification passed (${verifyResult.routes.length} route(s))`);
+                } else {
+                  verifySpinner.warn('Post-deploy verification found failing routes');
+                  for (const r of verifyResult.routes.filter((route) => route.verdict !== 'PASSED')) {
+                    console.error(chalk.red(`  [FAIL] VERIFY: ${r.route} ${r.statusCode ?? 'ERR'} ${r.latencyMs}ms`));
+                  }
+                  process.exitCode = 1;
+                }
+              } catch (verifyErr: unknown) {
+                verifySpinner.fail('Post-deploy verification failed to run');
+                console.error(chalk.red(verifyErr instanceof Error ? verifyErr.message : String(verifyErr)));
+              }
+            } else {
+              vercelSpinner.fail(`Vercel deploy did not become ready (status: ${deployResult.status})`);
+              if (deployResult.error) console.error(chalk.red(`  ${deployResult.error}`));
+              process.exitCode = 1;
+            }
+          } else {
+            console.log(chalk.yellow('\nProject not configured for autonomous Vercel deploy (no VERCEL_TOKEN or no .vercel link).'));
+            console.log('Run `vercel link` and store VERCEL_TOKEN (env or `forge credentials`) to enable it.');
+          }
+        }
+
         console.log(chalk.green('\nDeploy step complete. See .forge/BUILD_READY.md for launch instructions.'));
       } catch (err: unknown) {
         spinner.fail('DEPLOY failed');
@@ -3216,6 +3822,13 @@ async function main(): Promise<void> {
         process.exitCode = 1;
       }
     });
+
+  deploy
+    .command('auto')
+    .description('Deploy via VercelDeployer (REST API, no CLI subprocess), then run forge verify against the result')
+    .argument('<project-path>', 'target project directory')
+    .option('--env <environment>', 'production or preview', 'preview')
+    .action((pathArg: string, opts: { env?: string }) => cmdDeployAuto(pathArg, opts));
 
   program
     .command('verify')

@@ -9,8 +9,11 @@
  *   1. The queue entry's task description (from queue.yaml — see the Queue Generator s4-p02).
  *   2. RELEVANT governance excerpts — only the slices the entry actually needs, selected by
  *      its `governance_refs` (which documents) + `context_injection` (which sections within
- *      them: schema tables, behavioral-contract headings, interaction-map features). A
- *      referenced document with no matching section contributes a short overview excerpt.
+ *      them: schema tables, behavioral-contract headings, interaction-map features). When an
+ *      entry has no fine-grained marker for a document, the Governance Router
+ *      (`governance-router.ts`) selects the sections relevant to the entry's `prompt_type`
+ *      instead of an arbitrary head-of-document overview — a `schema` prompt does not need
+ *      UI-contract text, a `ui` prompt does not need schema-migration rules.
  *   3. Build Memory WARNINGS — known `error_patterns` whose `trigger_prompt_pattern` matches
  *      this entry's `prompt_type` and whose recorded stacks match the build's stack, rendered
  *      as "watch out for / prevention" guidance (Contract 8 leans on the same data).
@@ -48,6 +51,7 @@ import type { StackFingerprint } from '../tools/stack-detector.js';
 import type { ErrorPattern, JsonObject } from '../types/index.js';
 import { BuildMemory } from '../memory/index.js';
 import { filterRetiredPatterns } from '../learning/retirement-filter.js';
+import { parseGovernanceSections, routeGovernanceSections } from './governance-router.js';
 import {
   selectModel,
   estimateModelCostFromBudget,
@@ -56,6 +60,7 @@ import {
 import type { ClaudeModel, ModelSelection, ModelRouterOptions } from './model-router.js';
 import { logLine } from '../tools/forge-logger.js';
 import { handlePreToolUse } from '../learning/hooks-enhanced.js';
+import { injectSharedPreamble } from './shared-preamble.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -341,6 +346,15 @@ function matchersForDoc(docName: string, ci: ContextInjection): string[] {
   return [];
 }
 
+/**
+ * Governance docs considered for every prompt regardless of the entry's own `governance_refs` —
+ * Iron Laws (CLAUDE.md) and the current build-state summary (STATE_OF_THE_BUILD.md) are relevant
+ * to every prompt type (see governance-router.ts). Best-effort: a project without one of these
+ * docs yet (or a CLAUDE.md-less target project) is not treated as "missing" governance the way an
+ * explicitly referenced-but-absent doc is.
+ */
+const ALWAYS_GOVERNANCE_DOCS: readonly string[] = ['STATE_OF_THE_BUILD.md', 'CLAUDE.md'];
+
 /** Build the governance section of the prompt; returns the text plus used/missing doc lists. */
 function buildGovernanceSection(input: AssembleInput): {
   text: string;
@@ -351,15 +365,39 @@ function buildGovernanceSection(input: AssembleInput): {
   const missing: string[] = [];
   const parts: string[] = [];
 
-  for (const docName of input.entry.governance_refs) {
+  const referenced = input.entry.governance_refs;
+  const docNames = [...referenced];
+  for (const alwaysDoc of ALWAYS_GOVERNANCE_DOCS) {
+    if (!docNames.includes(alwaysDoc)) docNames.push(alwaysDoc);
+  }
+
+  for (const docName of docNames) {
     const content = input.governanceDocs[docName];
+    const isAlwaysOnly = !referenced.includes(docName);
     if (content === undefined || content.trim() === '') {
-      missing.push(docName);
+      if (!isAlwaysOnly) missing.push(docName);
       continue;
     }
+
     const matchers = matchersForDoc(docName, input.entry.context_injection);
-    const excerpt = extractMatchingSections(content, matchers, MAX_GOVERNANCE_CHARS_PER_DOC) ??
-      headOverview(content, overviewCapForDoc(docName));
+    let excerpt: string;
+    if (matchers.length > 0) {
+      // The entry names exact table / contract / interaction-map sections it needs — honor
+      // that precisely.
+      excerpt =
+        extractMatchingSections(content, matchers, MAX_GOVERNANCE_CHARS_PER_DOC) ??
+        headOverview(content, overviewCapForDoc(docName));
+    } else {
+      // No fine-grained ask from this entry. Governance Router (token efficiency): split the
+      // doc into logical sections and keep only the ones relevant to THIS prompt type instead
+      // of an arbitrary head-of-document overview — the actual source of the 60-70% wasted
+      // governance-injection tokens this router fixes.
+      const sections = parseGovernanceSections(docName, content);
+      const routed = routeGovernanceSections(input.entry.prompt_type, sections);
+      if (routed.length === 0) continue; // nothing in this doc applies to this prompt type
+      excerpt = capText(routed.map((s) => s.content).join('\n\n'), overviewCapForDoc(docName));
+    }
+
     used.push(docName);
     parts.push(`### ${docName}\n\n${excerpt}`);
   }
@@ -578,7 +616,13 @@ export async function assemblePrompt(
     // non-fatal — skip injection
   }
 
-  const prompt = `${GIT_BRANCH_RULE}\n\n${learningContextPrefix}${sections.join('\n\n')}`;
+  // 5b. Shared preamble (token efficiency) — the universal build/commit/never-guess/scope rules
+  //     are injected exactly once here rather than restated per queue.yaml entry; any equivalent
+  //     restatement already present in the task description or governance excerpts is stripped
+  //     first so the same instruction is never paid for twice in one prompt.
+  const prompt = injectSharedPreamble(
+    `${GIT_BRANCH_RULE}\n\n${learningContextPrefix}${sections.join('\n\n')}`
+  );
   const hash = hashPrompt(prompt);
 
   // 6. Automatic model selection (Model Router) — keyed on prompt type + recovery flag.

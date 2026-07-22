@@ -34,6 +34,7 @@ import { runTests } from '../testing/orchestrator.js';
 import { RunnerType, TriggerType, type TestRunResult } from '../testing/types.js';
 import { logLine } from '../tools/forge-logger.js';
 import { toAsciiGovernanceText } from '../tools/governance-text.js';
+import type { BuildHealth } from '../autonomy/health-monitor.js';
 
 const log = logLine('integration-bus');
 
@@ -341,8 +342,20 @@ export async function onEvolutionPromoted(
  * `rollbackAndReport`/`updateStateProgress` machinery (which handles the Contract-13 gate, not
  * this second observation layer) ever runs. Non-fatal (Contract 4) — a read or write failure is
  * logged and swallowed, never thrown, so this call can never block the halt it is documenting.
+ *
+ * `health`, when supplied, is the {@link BuildHealth} snapshot from the build-wide
+ * BuildHealthMonitor (`src/autonomy/health-monitor.ts`) at the moment of the halt — the third,
+ * build-wide observation layer above Sentinel Prime's own per-prompt one. Including it here means
+ * a human reading the halt diagnostic sees not just "this one prompt's confidence collapsed" but
+ * also whether the WHOLE build was already trending unhealthy (consecutive failures, a sagging
+ * rolling confidence average, runaway memory) leading up to it. Optional/omittable so existing
+ * callers (and tests) with no monitor instance to hand keep working unchanged.
  */
-export async function onSentinelPrimeHalt(sentinelRunId: string, projectPath: string): Promise<void> {
+export async function onSentinelPrimeHalt(
+  sentinelRunId: string,
+  projectPath: string,
+  health?: BuildHealth | null
+): Promise<void> {
   try {
     const run = loadSentinelPrimeRun('id = ?', sentinelRunId);
     if (!run) {
@@ -360,6 +373,15 @@ export async function onSentinelPrimeHalt(sentinelRunId: string, projectPath: st
         `governance ${run.confidenceScore.governanceScore.toFixed(2)})`,
       `- Halt reason: ${run.haltDecision.reason ?? 'unspecified'}`,
       `- Auto-recoverable: ${run.haltDecision.autoRecoverable ? 'yes' : 'no'}`,
+      ...(health
+        ? [
+            `- Build health: ${health.status} — ${health.promptsCompleted}/${health.promptsCompleted + health.promptsRemaining} ` +
+              `prompt(s) completed, ${health.consecutiveFailures} consecutive failure(s), ` +
+              `avg confidence ${health.averageConfidence.toFixed(2)}, memory ${health.memoryUsageMb}MB, ` +
+              `${health.runtimeMinutes}m runtime`,
+            ...(health.alerts.length > 0 ? [`- Build health alerts: ${health.alerts.join('; ')}`] : []),
+          ]
+        : []),
       `- Timestamp: ${nowIso()}`,
       '',
     ].join('\n');

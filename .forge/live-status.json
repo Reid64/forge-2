@@ -1,55 +1,36 @@
 {
-  "buildRunId": "34e41483-fa73-4b62-b8d8-d2eb7fd7121c",
+  "buildRunId": "e800be70-ae34-4728-a8af-fe5bfd8c0f9c",
   "project": "forge-2",
-  "startedAt": "2026-07-21T23:21:17.736Z",
-  "updatedAt": "2026-07-21T23:27:43.447Z",
+  "startedAt": "2026-07-22T03:43:46.846Z",
+  "updatedAt": "2026-07-22T03:43:47.656Z",
   "currentPrompt": {
     "index": 1,
     "id": "repair-000",
-    "name": "Fix type mismatch in src/retrofit",
+    "name": "Fix missing module in src/retrofit",
     "type": "feature",
-    "phase": "failed"
+    "phase": "executing"
   },
   "totals": {
     "completed": 0,
-    "failed": 1,
-    "remaining": 0,
-    "tokensEstimated": 9625,
-    "costEstimatedUsd": 0.13272,
-    "totalElapsedMs": 385145
+    "failed": 0,
+    "remaining": 4,
+    "tokensEstimated": 0,
+    "costEstimatedUsd": 0,
+    "totalElapsedMs": 0
   },
-  "lastSentinel": {
-    "passed": false,
-    "failedCheck": "file_delta"
-  },
+  "lastSentinel": null,
   "recentEvents": [
     {
-      "timestamp": "2026-07-21T23:21:18.062Z",
+      "timestamp": "2026-07-22T03:43:47.027Z",
       "message": "prompt 1 'repair-000' (feature): start"
     },
     {
-      "timestamp": "2026-07-21T23:21:18.086Z",
+      "timestamp": "2026-07-22T03:43:47.045Z",
       "message": "prompt 1 'repair-000' (feature): assembled"
     },
     {
-      "timestamp": "2026-07-21T23:21:18.868Z",
+      "timestamp": "2026-07-22T03:43:47.656Z",
       "message": "prompt 1 'repair-000' (feature): executing"
-    },
-    {
-      "timestamp": "2026-07-21T23:27:41.981Z",
-      "message": "prompt 1 'repair-000' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-07-21T23:27:41.984Z",
-      "message": "Sentinel FAIL (file_delta)"
-    },
-    {
-      "timestamp": "2026-07-21T23:27:42.964Z",
-      "message": "prompt 1 'repair-000' (feature): recovering"
-    },
-    {
-      "timestamp": "2026-07-21T23:27:43.202Z",
-      "message": "prompt 1 'repair-000' (feature): failed"
     }
   ],
   "brainInterventions": 0

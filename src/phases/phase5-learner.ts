@@ -46,10 +46,13 @@
  * and no target project source.
  */
 
+import { existsSync } from 'node:fs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { MemoryDb } from '../memory/client.js';
+import { createCredentialVault } from '../autonomy/credential-vault.js';
+import { createVercelDeployer } from '../autonomy/vercel-deployer.js';
 import {
   extractInstincts,
   extractSkills,
@@ -102,6 +105,19 @@ export interface GovernanceRule {
   stored: boolean;
 }
 
+/**
+ * Step 12 — Autonomous deployment (Autonomy: VercelDeployer, `src/autonomy/vercel-deployer.ts`).
+ * `null` when the deploy step was never attempted (no VERCEL_TOKEN / no vercel.json).
+ */
+export interface Phase5DeploymentResult {
+  attempted: boolean;
+  deploymentUrl: string | null;
+  deploySucceeded: boolean;
+  verifyRan: boolean;
+  verifyPassed: boolean;
+  verifyRouteCount: number;
+}
+
 /** The Phase-5 synthesis insight generated in step 4. */
 export interface SynthesisInsight {
   /** True when the insight was persisted to Build Memory. */
@@ -138,6 +154,8 @@ export interface Phase5Result {
   evolutionProposals: PendingEvolution[];
   /** Step 11 — EvolutionPromoter: pending_evolutions auto-promoted this pass (LEARNING_BLUEPRINT.md § EvolutionPromoter). */
   evolutionPromotions: PromotionResult[];
+  /** Step 12 — autonomous Vercel deployment + forge verify, when the project is configured for it. */
+  deployment: Phase5DeploymentResult;
   /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
@@ -384,6 +402,7 @@ function buildSummaryReport(
   additionalInsights: number,
   evolutionProposals: PendingEvolution[],
   evolutionPromotions: PromotionResult[],
+  deployment: Phase5DeploymentResult,
   warnings: string[],
   generatedAt: string
 ): string {
@@ -494,6 +513,17 @@ function buildSummaryReport(
   lines.push(`- Evolutions promoted: ${evolutionPromotions.length}`);
   for (const p of evolutionPromotions) {
     lines.push(`  - [${p.evolutionType}] ${p.effectApplied} (confidence ${(p.confidenceAtPromotion * 100).toFixed(0)}%)`);
+  }
+  lines.push('');
+
+  lines.push('## 12. Autonomous Deployment (VercelDeployer)');
+  if (!deployment.attempted) {
+    lines.push('- Skipped — no VERCEL_TOKEN (env or credential vault) and/or no vercel.json present.');
+  } else {
+    lines.push(`- Deploy: ${deployment.deploySucceeded ? 'READY' : 'FAILED'}${deployment.deploymentUrl ? ` — ${deployment.deploymentUrl}` : ''}`);
+    lines.push(
+      `- forge verify: ${deployment.verifyRan ? (deployment.verifyPassed ? `PASSED (${deployment.verifyRouteCount} route(s))` : `FAILED (${deployment.verifyRouteCount} route(s))`) : 'did not run'}`
+    );
   }
   lines.push('');
 
@@ -798,6 +828,80 @@ export async function runPhase5Learner(
   }
   log(`step 11 (EvolutionPromoter): ${evolutionPromotions.length} evolution(s) promoted`);
 
+  // 12. Autonomous deployment (Autonomy: VercelDeployer — src/autonomy/vercel-deployer.ts): after
+  // every learning step above has run, if this project has opted into autonomous deploy (a
+  // VERCEL_TOKEN resolvable from the environment or this project's credential vault, AND a
+  // vercel.json already present on disk — the project's own signal that it's linked/configured
+  // for Vercel), deploy straight to production and run forge verify against the result. Guarded
+  // (Contract 4): a deploy/verify failure here is logged and never blocks Phase 5's own
+  // completion or reopens the build. Skipped entirely (not merely no-op) when store is false —
+  // a pure-analysis pass has no business pushing a live deployment.
+  let deployment: Phase5DeploymentResult = {
+    attempted: false,
+    deploymentUrl: null,
+    deploySucceeded: false,
+    verifyRan: false,
+    verifyPassed: false,
+    verifyRouteCount: 0,
+  };
+  if (store) {
+    try {
+      const vault = createCredentialVault();
+      const hasVercelToken =
+        Boolean(process.env['VERCEL_TOKEN']) || (await vault.get(projectPath, 'VERCEL_TOKEN')) !== null;
+      const hasVercelJson = existsSync(join(projectPath, 'vercel.json'));
+
+      if (hasVercelToken && hasVercelJson) {
+        log('step 12 (deploy): VERCEL_TOKEN + vercel.json present — deploying to production');
+        deployment = { ...deployment, attempted: true };
+
+        const deployer = createVercelDeployer(vault);
+        const deployResult = await deployer.deploy(projectPath, buildRunId, 'production');
+        deployment = { ...deployment, deploymentUrl: deployResult.deploymentUrl, deploySucceeded: deployResult.status === 'ready' };
+
+        if (deployResult.status === 'ready' && deployResult.deploymentUrl) {
+          log(`step 12 (deploy): Vercel deploy ready — ${deployResult.deploymentUrl}`);
+          try {
+            const { runDeployVerification } = await import('../deploy/verify-runner.js');
+            const verifyResult = await runDeployVerification({
+              projectPath,
+              baseUrl: deployResult.deploymentUrl,
+              latencyBudgetMs: 3000,
+            });
+            deployment = {
+              ...deployment,
+              verifyRan: true,
+              verifyPassed: verifyResult.passed,
+              verifyRouteCount: verifyResult.routes.length,
+            };
+            log(`step 12 (forge verify): ${verifyResult.passed ? 'PASSED' : 'FAILED'} (${verifyResult.routes.length} route(s))`);
+            if (!verifyResult.passed) {
+              warnings.push('Post-deploy forge verify found failing routes — see the deployment for detail.');
+            }
+          } catch (error) {
+            warnings.push(`forge verify failed to run after deploy (${describe(error)}).`);
+            log(`WARNING: step 12 forge verify degraded (${describe(error)})`);
+          }
+        } else {
+          warnings.push(
+            `Autonomous Vercel deploy did not reach a ready state (status: ${deployResult.status}` +
+              `${deployResult.error ? `: ${deployResult.error}` : ''}).`
+          );
+          log(`WARNING: step 12 deploy did not reach ready (status ${deployResult.status})`);
+        }
+      } else {
+        const reasons = [
+          ...(hasVercelToken ? [] : ['no VERCEL_TOKEN']),
+          ...(hasVercelJson ? [] : ['no vercel.json']),
+        ];
+        log(`step 12 (deploy): skipped — ${reasons.join(', ')}`);
+      }
+    } catch (error) {
+      warnings.push(`Autonomous deployment step failed (${describe(error)}).`);
+      log(`WARNING: step 12 deploy degraded (${describe(error)})`);
+    }
+  }
+
   // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
@@ -814,6 +918,7 @@ export async function runPhase5Learner(
     additionalInsights,
     evolutionProposals,
     evolutionPromotions,
+    deployment,
     warnings,
     generatedAt
   );
@@ -856,6 +961,7 @@ export async function runPhase5Learner(
     additionalInsights,
     evolutionProposals,
     evolutionPromotions,
+    deployment,
     summaryReport,
     reportPath,
     warnings,

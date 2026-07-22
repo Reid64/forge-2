@@ -1,7 +1,65 @@
 - id: repair-000
-  name: Fix type mismatch in src/retrofit
+  name: Fix missing module in src/retrofit
   prompt_type: feature
   dependencies: []
+  governance_refs: []
+  estimated_tokens: 2000
+  context_injection:
+    schemaSections: []
+    behavioralSections: []
+    interactionMaps: []
+  description: >-
+    FORGE REPAIR MODE — TypeScript Strict Rules (enforced — follow exactly):
+
+    1. TypeScript strict mode: ALL variables that could be undefined MUST use optional chaining (?.) or nullish
+    coalescing (?? defaultValue). NEVER pass a possibly-undefined value where a concrete type is expected.
+
+    2. Unused variables: prefix with underscore (_req, _input) or remove entirely. ESLint will fail on unused variables.
+
+    3. Empty interfaces: use 'object' or 'unknown' instead of empty interface declarations.
+
+    4. If you create a new agent type, add it to the AgentType union in src/types/database.ts BEFORE using it in any
+    agent file.
+
+    5. Always add alt="" to img elements.
+
+    6. After writing code, mentally check: does every .property access handle the case where the parent could be
+    null/undefined?
+
+    7. Do NOT leave any console.log statements in production code.
+
+    8. When using Badge component, check BadgeProps interface for valid props — do not pass unsupported variant or size
+    props.
+
+
+    REPAIR TASK: Fix all TypeScript "missing module" errors
+
+    in file(s): src/retrofit/index.ts, src/retrofit/reconcile.ts
+
+
+    ERRORS TO FIX:
+      src/retrofit/index.ts(28,8): TS2307 — Cannot find module './deep-analysis.js' or its corresponding type declarations.
+      src/retrofit/index.ts(29,41): TS2307 — Cannot find module './deep-analysis.js' or its corresponding type declarations.
+      src/retrofit/reconcile.ts(11,90): TS2307 — Cannot find module './deep-analysis.js' or its corresponding type declarations.
+
+    INSTRUCTIONS:
+
+    1. Fix ALL errors listed above. Do not skip any.
+
+    2. Do not introduce new TypeScript errors while fixing these.
+
+    3. Do not change business logic — fix type errors only.
+
+    4. If a fix requires a new import, add it at the top of the file.
+
+    5. If a type is genuinely unknown, use `unknown` not `any`.
+
+    6. Verify your fix by mentally running `pnpm tsc --noEmit` before writing.
+- id: repair-001
+  name: Fix type mismatch in src/cli
+  prompt_type: feature
+  dependencies:
+    - repair-000
   governance_refs: []
   estimated_tokens: 2100
   context_injection:
@@ -34,15 +92,143 @@
 
     REPAIR TASK: Fix all TypeScript "type mismatch" errors
 
-    in file(s): src/retrofit/dead-code-detector.ts, src/retrofit/dependency-auditor.ts,
-    src/retrofit/orphaned-route-detector.ts, src/retrofit/schema-drift-detector.ts
+    in file(s): src/cli/index.ts
 
 
     ERRORS TO FIX:
-      src/retrofit/dead-code-detector.ts(380,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
-      src/retrofit/dependency-auditor.ts(355,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
-      src/retrofit/orphaned-route-detector.ts(289,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
-      src/retrofit/schema-drift-detector.ts(460,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
+      src/cli/index.ts(2904,17): TS2339 — Property 'DeadCodeDetector' does not exist on type 'typeof import("C:/Users/manag/Documents/forge-2/src/retrofit/index", { with: { "resolution-mode": "import" } })'.
+      src/cli/index.ts(2919,17): TS2339 — Property 'OrphanedRouteDetector' does not exist on type 'typeof import("C:/Users/manag/Documents/forge-2/src/retrofit/index", { with: { "resolution-mode": "import" } })'.
+      src/cli/index.ts(2937,17): TS2339 — Property 'SchemaDriftDetector' does not exist on type 'typeof import("C:/Users/manag/Documents/forge-2/src/retrofit/index", { with: { "resolution-mode": "import" } })'.
+      src/cli/index.ts(2952,17): TS2339 — Property 'DependencyAuditor' does not exist on type 'typeof import("C:/Users/manag/Documents/forge-2/src/retrofit/index", { with: { "resolution-mode": "import" } })'.
+
+    INSTRUCTIONS:
+
+    1. Fix ALL errors listed above. Do not skip any.
+
+    2. Do not introduce new TypeScript errors while fixing these.
+
+    3. Do not change business logic — fix type errors only.
+
+    4. If a fix requires a new import, add it at the top of the file.
+
+    5. If a type is genuinely unknown, use `unknown` not `any`.
+
+    6. Verify your fix by mentally running `pnpm tsc --noEmit` before writing.
+- id: repair-002
+  name: Fix other in src/cli
+  prompt_type: feature
+  dependencies:
+    - repair-001
+  governance_refs: []
+  estimated_tokens: 4200
+  context_injection:
+    schemaSections: []
+    behavioralSections: []
+    interactionMaps: []
+  description: >-
+    FORGE REPAIR MODE — TypeScript Strict Rules (enforced — follow exactly):
+
+    1. TypeScript strict mode: ALL variables that could be undefined MUST use optional chaining (?.) or nullish
+    coalescing (?? defaultValue). NEVER pass a possibly-undefined value where a concrete type is expected.
+
+    2. Unused variables: prefix with underscore (_req, _input) or remove entirely. ESLint will fail on unused variables.
+
+    3. Empty interfaces: use 'object' or 'unknown' instead of empty interface declarations.
+
+    4. If you create a new agent type, add it to the AgentType union in src/types/database.ts BEFORE using it in any
+    agent file.
+
+    5. Always add alt="" to img elements.
+
+    6. After writing code, mentally check: does every .property access handle the case where the parent could be
+    null/undefined?
+
+    7. Do NOT leave any console.log statements in production code.
+
+    8. When using Badge component, check BadgeProps interface for valid props — do not pass unsupported variant or size
+    props.
+
+
+    REPAIR TASK: Fix all TypeScript "other" errors
+
+    in file(s): src/cli/index.ts
+
+
+    ERRORS TO FIX:
+      src/cli/index.ts(245,48): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(254,63): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(255,75): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(256,69): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(257,75): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(260,26): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(2906,29): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2906,69): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2906,83): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(2922,14): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2923,11): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2923,25): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(2939,29): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2939,72): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2939,86): TS7006 — Parameter 'f' implicitly has an 'any' type.
+      src/cli/index.ts(2955,14): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2956,11): TS18046 — 'findings' is of type 'unknown'.
+      src/cli/index.ts(2956,25): TS7006 — Parameter 'f' implicitly has an 'any' type.
+
+    INSTRUCTIONS:
+
+    1. Fix ALL errors listed above. Do not skip any.
+
+    2. Do not introduce new TypeScript errors while fixing these.
+
+    3. Do not change business logic — fix type errors only.
+
+    4. If a fix requires a new import, add it at the top of the file.
+
+    5. If a type is genuinely unknown, use `unknown` not `any`.
+
+    6. Verify your fix by mentally running `pnpm tsc --noEmit` before writing.
+- id: repair-003
+  name: Fix other in src/retrofit
+  prompt_type: feature
+  dependencies:
+    - repair-002
+  governance_refs: []
+  estimated_tokens: 2000
+  context_injection:
+    schemaSections: []
+    behavioralSections: []
+    interactionMaps: []
+  description: >-
+    FORGE REPAIR MODE — TypeScript Strict Rules (enforced — follow exactly):
+
+    1. TypeScript strict mode: ALL variables that could be undefined MUST use optional chaining (?.) or nullish
+    coalescing (?? defaultValue). NEVER pass a possibly-undefined value where a concrete type is expected.
+
+    2. Unused variables: prefix with underscore (_req, _input) or remove entirely. ESLint will fail on unused variables.
+
+    3. Empty interfaces: use 'object' or 'unknown' instead of empty interface declarations.
+
+    4. If you create a new agent type, add it to the AgentType union in src/types/database.ts BEFORE using it in any
+    agent file.
+
+    5. Always add alt="" to img elements.
+
+    6. After writing code, mentally check: does every .property access handle the case where the parent could be
+    null/undefined?
+
+    7. Do NOT leave any console.log statements in production code.
+
+    8. When using Badge component, check BadgeProps interface for valid props — do not pass unsupported variant or size
+    props.
+
+
+    REPAIR TASK: Fix all TypeScript "other" errors
+
+    in file(s): src/retrofit/reconcile.ts
+
+
+    ERRORS TO FIX:
+      src/retrofit/reconcile.ts(119,39): TS7006 — Parameter 'f' implicitly has an 'any' type.
 
     INSTRUCTIONS:
 

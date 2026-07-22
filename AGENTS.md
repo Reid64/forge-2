@@ -1,6 +1,6 @@
 # FORGE 2.0 — Agents Registry
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 **Maintained by:** FORGE build system (auto-updated each run)
 
 ---
@@ -433,3 +433,158 @@ Generated `queue.yaml` is ordered by dependency tier:
 | `src/skills/templates/observability.skill.md` | tags: sentry, logging, monitoring |
 | `src/skills/templates/agent-architecture.skill.md` | tags: agents, typescript, async (currently unreachable via auto-detection — see gap above) |
 | `src/skills/templates/ui-components.skill.md` | tags: react, tailwind, shadcn, typescript |
+
+---
+
+## Agent: EnvValidator (src/autonomy/env-validator.ts)
+
+- **Purpose:** Phase 0's literal first action, before `ensureGitRepo` or anything else touches the target project — confirms every environment variable a build genuinely cannot proceed without is actually resolvable. Merges two catalogs: `FORGE_ENV_REQUIREMENTS` (18 of FORGE's own operational vars, all `required: false` — each already has a documented Contract-4 degrade path elsewhere in the codebase, e.g. SQLite Build Memory instead of Supabase, a deterministic PRD skeleton instead of a live model call) and `detectProjectEnvRequirements` (the target project's own `.env.example`, where a declared key with NO default value — `KEY=` with nothing after the `=` — is the project author's own signal that `required: true`). Resolves every requirement against, in order, `process.env` → `<projectPath>/.env.local` → CredentialVault, and validates a present value's declared `format` regex when one exists (reported `invalid`, distinct from `missing`). Never halts by itself — `EnvValidationResult.allRequired === false` is folded into Phase 0's existing `blockers` array exactly like every other Phase 0 gate (AgentShield, the toolchain audit, …).
+- **Status:** COMPLETE
+- **CLI:** `forge env check <project-path>` (standalone, on-demand); also runs automatically as Phase 0 step 0 of every `forge build`
+- **Entry Point:** `src/autonomy/env-validator.ts` → `validateEnv(projectPath: string): Promise<EnvValidationResult>`
+- **Exports:** `validateEnv`, `printEnvReport`, `detectProjectEnvRequirements`, `FORGE_ENV_REQUIREMENTS`, `EnvRequirement`, `EnvValidationResult`, `InvalidEnvEntry`
+- **Dependencies:** `src/autonomy/credential-vault.ts` (`createCredentialVault`, consulted as the third resolution source), `src/tools/forge-logger.ts` (`getLogger`)
+- **Database tables:** none directly — reads `process.env`/`.env.local`/`.env.example` off disk and (read-only) the `project_credentials` table via CredentialVault
+
+---
+
+## Agent: CredentialVault (src/autonomy/credential-vault.ts)
+
+- **Purpose:** per-project, AES-256-GCM-encrypted-at-rest local credential store, backing every other autonomy module's token/secret lookups (EnvValidator's third resolution source, SupabaseMigrator's/VercelDeployer's token fallback when no environment variable is set). The AES key is never persisted: derived from `FORGE_VAULT_KEY` (SHA-256-hashed to 32 bytes, any operator-supplied value) when set, else `SHA-256(hostname|OS username)` — a deliberate "local-first" posture (a vault populated on one machine cannot be decrypted on another, or by a different OS user, unless `FORGE_VAULT_KEY` is set explicitly and shared out of band) matching Contract 4's "degrade, never leak" philosophy. `injectIntoEnv` only ever appends genuinely-new `KEY=value` lines to `<projectPath>/.env.local` — a key already declared there (even empty) is left completely untouched. Every public method degrades gracefully: a Build Memory failure, a key mismatch, or a corrupted stored value returns a safe empty/null/false result, never throws.
+- **Status:** COMPLETE
+- **CLI:** `forge vault set <project-path> <key> <value>`, `forge vault get <project-path> <key>`, `forge vault list <project-path>`, `forge vault inject <project-path>`, `forge vault delete <project-path> <key>`; also invoked automatically as Phase 0 step 14 (`injectIntoEnv`) of every `forge build`
+- **Entry Point:** `src/autonomy/credential-vault.ts` → `class CredentialVault` / `createCredentialVault(key?: Buffer): CredentialVault`
+- **Exports:** `CredentialVault`, `createCredentialVault`, `deriveVaultKey`, `CredentialKeyInfo`, `credentialVaultLogger`
+- **Dependencies:** `node:crypto` (AES-256-GCM), `src/memory/client.ts` (`getClient`, `logMemoryWarning`), `src/tools/forge-logger.ts`
+- **Database tables:** `project_credentials` (schema 2.9.0 — read/write)
+
+---
+
+## Agent: SupabaseMigrator (src/autonomy/supabase-migrator.ts)
+
+- **Purpose:** applies a project's `supabase/migrations/*.sql` files to its live Supabase project directly via the Supabase Management API — no `supabase` CLI subprocess, no interactive `supabase login`. Credential resolution mirrors VercelDeployer's exactly: `SUPABASE_ACCESS_TOKEN`/`SUPABASE_PROJECT_ID` environment variables first, else the project's CredentialVault entry. Flow: list `*.sql` files under `supabase/migrations/` sorted chronologically by their leading `<timestamp>_<name>.sql` filename convention → fetch already-applied versions via `GET /v1/projects/{ref}/database/migrations` → apply every pending file's SQL via `POST /v1/projects/{ref}/database/query`, in order, halting the whole batch at the first failure (later migrations routinely depend on an earlier one, so continuing onto a known-broken schema risks compounding the damage). Every attempt (applied/skipped/failed) is persisted to `autonomy_actions`. `validateMigrations` is a separate, static, read-only sweep (filename convention, balanced parentheses, chronological ordering) that never calls the Management API and never requires configuration.
+- **Status:** COMPLETE
+- **CLI:** `forge migrate <project-path>` (apply pending migrations), `forge migrate validate <project-path>` (static sweep only); also invoked automatically by `phase3-executor.ts` immediately after a build finalizes `status: 'completed'`, gated on `SUPABASE_ACCESS_TOKEN` being set AND `migrator.isConfigured(projectPath)` — never on a `failed`/`halted` build, and a migration failure never reopens the already-finalized build (it appends a BLOCKER to STATE_OF_THE_BUILD.md instead)
+- **Entry Point:** `src/autonomy/supabase-migrator.ts` → `class SupabaseMigrator` / `createSupabaseMigrator(vault?): SupabaseMigrator`
+- **Exports:** `SupabaseMigrator`, `createSupabaseMigrator`, `extractMigrationVersion`, `MigrationResult`, `MigrationStatus`, `MigrationValidationResult`
+- **Dependencies:** `src/autonomy/credential-vault.ts` (token/ref fallback), `src/memory/client.ts` (`getClient`, `newId`, `nowIso`, `logMemoryWarning`), `src/tools/forge-logger.ts`, `fetch` (Supabase Management API — `https://api.supabase.com`)
+- **Database tables:** `autonomy_actions` (schema 2.9.0 — write); `project_credentials` (read, via CredentialVault)
+
+---
+
+## Agent: VercelDeployer (src/autonomy/vercel-deployer.ts)
+
+- **Purpose:** deploys a FORGE-built project to Vercel directly via the Vercel REST API — no `vercel` CLI subprocess, no interactive `vercel login`. Token resolution: `VERCEL_TOKEN` environment variable first, else the project's CredentialVault entry. Flow mirrors what `vercel deploy` does under the hood: walk the project directory (excluding `node_modules`/`.git`/`.next`/`.vercel`/`.forge`/`dist`/`build`/`coverage`/`.turbo`), SHA-1-hash and upload every file's raw bytes to `PUT /v2/files` (Vercel dedupes by digest — a 409 on an already-known digest counts as success), `POST /v13/deployments` referencing the uploaded files, then poll `GET /v13/deployments/{id}` every 10 seconds until a terminal `readyState` or a 10-minute ceiling. Every outcome is persisted to `deployment_history`. Also exposes `getProductionUrl` (current assigned domain) and `rollback` (revert live traffic to a prior successful deployment via `POST /v9/projects/{id}/rollback`).
+- **Status:** COMPLETE
+- **CLI:** `forge deploy auto <project-path> --env production|preview` (deploy, then run `forge verify` against the result); also invoked automatically as Phase 5 step 12 of every `forge build` when both a resolvable `VERCEL_TOKEN` and an existing `vercel.json` are present
+- **Entry Point:** `src/autonomy/vercel-deployer.ts` → `class VercelDeployer` / `createVercelDeployer(vault?): VercelDeployer`
+- **Exports:** `VercelDeployer`, `createVercelDeployer`, `DeploymentResult`, `DeploymentStatus`
+- **Dependencies:** `src/autonomy/credential-vault.ts` (token fallback), `src/memory/client.ts` (`getClient`, `newId`, `nowIso`, `logMemoryWarning`), `src/tools/forge-logger.ts`, `src/deploy/verify-runner.ts` (`runDeployVerification`, invoked by the Phase 5 wiring and by `forge deploy auto` after a ready deployment), `fetch` (Vercel REST API — `https://api.vercel.com`)
+- **Database tables:** `deployment_history` (schema 2.9.0 — write); `project_credentials` (read, via CredentialVault)
+
+---
+
+## Agent: AutonomousGateResolver (src/autonomy/gate-resolver.ts)
+
+- **Purpose:** sits between ArtifactHealthScorer's scoring step and HumanGateEvaluator in the System 1 `GapAuditor` pipeline (`src/resurrection/gap-auditor.ts`'s `runGapAudit`, immediately after `scoreAll`, before `evaluateGates`). Where `isArchitecturalGap` only decides which gaps are architectural, `AutonomousGateResolver` goes one step further for every gap that is NOT architectural: it actually invokes `RegenerationEngine` to resolve it, then re-scores the artifact and escalates to human if the re-score did not actually improve — never fabricating a resolution the code did not verify (Iron Law 3). Rules, strictly enforced: CRITICAL always requires human, never auto-resolved, no flag overrides this (Contract R-3's fifth structural gate); MAJOR requires human when the artifact's `composite_score` is below `REGEN_THRESHOLDS.GATE_BELOW` (0.3), else auto-resolves; MINOR always attempts auto-resolution. Resolver-auto-resolved artifacts are excluded from the pre-existing tier-based `regenerateAll` pass in the same `runGapAudit` call to avoid writing the same governance file twice.
+- **Status:** COMPLETE
+- **CLI:** none standalone — runs automatically inside every `runGapAudit` call (`forge audit`/`forge resurrect --resume`/RETROFIT-mode `phase-chain.ts` entry points that invoke it)
+- **Entry Point:** `src/autonomy/gate-resolver.ts` → `class AutonomousGateResolver` / `createAutonomousGateResolver(): AutonomousGateResolver` → `resolveGaps(gaps, options): Promise<GateResolutionResult[]>`
+- **Exports:** `AutonomousGateResolver`, `createAutonomousGateResolver`, `computeGapId`, `partitionResolutions`, `summarizeResolutions`, `GateResolutionResult`, `ResolveGapsOptions`
+- **Dependencies:** `src/resurrection/regeneration-engine.ts` (`regenerate`), `src/resurrection/types.ts` (`REGEN_THRESHOLDS`, `ArtifactName`, `ArtifactScore`, `Gap`, `GapSeverity`), `src/learning/database.ts` (`getMachineId`), `src/retrofit/types.ts` (`ScanReport`)
+- **Database tables:** none directly — a successful auto-resolution rides on System 1's existing `gap_audit_runs`/`artifact_health_scores` tables via `RegenerationEngine`; a deferral-to-human decision is not currently persisted anywhere beyond a console log line (known gap, see `STATE_OF_THE_BUILD.md` § Autonomy Upgrades)
+
+---
+
+## Agent: BuildHealthMonitor (src/autonomy/health-monitor.ts)
+
+- **Purpose:** a third, build-wide observation layer sitting above both the mandatory per-prompt Contract 13 gate and Sentinel Prime (System 5) — neither of which judges more than one prompt at a time, so neither notices a build that is repeatedly limping through recovery, whose Sentinel Prime confidence is trending down prompt over prompt, or whose Node process is slowly leaking memory across a multi-hour run. Tracks consecutive Sentinel-failed prompts, a rolling 10-prompt confidence average, and process RSS memory across the whole run via a 60-second background sampling interval. `getHealth()` computes a `healthy`/`degraded`/`critical` status: CRITICAL on ANY of `consecutiveFailures >= 3`, `averageConfidence < 0.3`, or `memoryUsageMb > 6000`; DEGRADED (checked only once CRITICAL is ruled out) on ANY of `consecutiveFailures >= 1`, `averageConfidence < 0.5`, or `memoryUsageMb > 4000`. `shouldPause()` is the one method with a side effect beyond bookkeeping: on a CRITICAL read it writes `<projectPath>/.forge/health-{timestamp}.json`, logs the pause, and waits out a 2-minute in-process cooldown before returning — the caller does not implement the wait itself. BuildHealthMonitor OBSERVES; it never gates — Contract 13's five checks and Sentinel Prime's `HaltDecision` remain the only things that can actually halt a build.
+- **Status:** COMPLETE
+- **CLI:** none standalone — one instance per `runPhase3Executor` call, started before the prompt loop and stopped in the `finally` block; its final `BuildHealth` snapshot is also passed into `onSentinelPrimeHalt` (Integration Bus) when a Sentinel Prime halt occurs mid-build
+- **Entry Point:** `src/autonomy/health-monitor.ts` → `class BuildHealthMonitor` / `createBuildHealthMonitor(projectPath, log?): BuildHealthMonitor`
+- **Exports:** `BuildHealthMonitor`, `createBuildHealthMonitor`, `BuildHealth`, `BuildHealthStatus`
+- **Dependencies:** `node:fs` (`.forge/health-*.json` report writes), `node:process` (`process.memoryUsage().rss`) — no Build Memory client import
+- **Database tables:** none — health reports are written to `<projectPath>/.forge/health-*.json` on disk only (known gap, see `STATE_OF_THE_BUILD.md` § Autonomy Upgrades)
+
+### Files (Autonomy Upgrades, src/autonomy/)
+
+| File | Purpose |
+|------|---------|
+| `src/autonomy/index.ts` | Barrel export — re-exports all six modules below |
+| `src/autonomy/env-validator.ts` | EnvValidator — Phase 0 step 0, merges FORGE's + the target project's env requirement catalogs |
+| `src/autonomy/credential-vault.ts` | CredentialVault — AES-256-GCM per-project credential store (`project_credentials`) |
+| `src/autonomy/supabase-migrator.ts` | SupabaseMigrator — applies `supabase/migrations/*.sql` via the Management API (`autonomy_actions`) |
+| `src/autonomy/vercel-deployer.ts` | VercelDeployer — deploys via the Vercel REST API (`deployment_history`) |
+| `src/autonomy/gate-resolver.ts` | AutonomousGateResolver — auto-resolves non-CRITICAL governance gaps via RegenerationEngine |
+| `src/autonomy/health-monitor.ts` | BuildHealthMonitor — build-wide consecutive-failure/confidence/memory monitor with auto-pause |
+
+---
+
+## Agent: ShadcnInstaller (src/ui-engine/shadcn-installer.ts)
+
+- **Purpose:** deterministic shadcn/ui component installer for a FORGE-built project. `SHADCN_COMPONENTS` is a static catalog (component name → its own declared dependencies, e.g. `dialog` depending on `button`); `detectInstalledComponents` reads which are already present under the project's shadcn install path, `installComponent` writes a component (and recursively ensures its dependencies) if missing, and `ensureComponentsInstalled` is the batch entry point Phase 3 calls before a `ui`/`feature` prompt executes. `detectRequiredComponents` is a keyword scan of the assembled prompt text for shadcn/ui component names, so the installer only ever installs what a given prompt is actually about to need — never the whole catalog speculatively.
+- **Status:** COMPLETE
+- **CLI:** `forge design install-shadcn <project-path> <component-names...>`; also invoked automatically inside Phase 3 (`SHADCN_INSTALL_PROMPT_TYPES = {'ui','feature'}`) immediately before claude executes a matching prompt
+- **Entry Point:** `src/ui-engine/shadcn-installer.ts` → `ensureComponentsInstalled(projectPath: string, componentNames: string[]): Promise<string[]>` (returns newly-installed component names)
+- **Exports:** `SHADCN_COMPONENTS`, `detectInstalledComponents`, `installComponent`, `ensureComponentsInstalled`, `detectRequiredComponents`, `ShadcnComponent`
+- **Dependencies:** `node:fs`/`node:path` only — no Build Memory client import
+- **Database tables:** none
+
+---
+
+## Agent: UIComponentGenerator (src/ui-engine/component-generator.ts)
+
+- **Purpose:** generates one production-grade UI component from a `ComponentSpec` (name, description, props, data source, interactions, accessibility requirements) — skill-informed and shadcn-aware, instructed to use Tailwind `dark:` prefix classes on every color/background/border utility (UI-4) so every generated component is dark-mode-aware by construction. Persists the generated code, alongside its `build_run_id`/`prompt_id` provenance, to the new `design_artifacts` table (schema 3.0.0) for reuse/audit. Per UI-5, calls `generateStory` (StorybookGenerator) at generation time so a matching `.stories.tsx` is written alongside every component, not as a separate opt-in step.
+- **Status:** COMPLETE
+- **CLI:** `forge design component <project-path> <component-name> --description "<text>" --props <comma-list>`
+- **Entry Point:** `src/ui-engine/component-generator.ts` → `class UIComponentGenerator` → `generate(spec: ComponentSpec, projectPath: string, buildRunId: string, promptId: string): Promise<GeneratedComponent>`
+- **Exports:** `UIComponentGenerator`, `createUIComponentGenerator`, `ComponentSpec`, `GeneratedComponent`
+- **Dependencies:** `src/ui-engine/storybook-generator.ts` (`generateStory`), `src/memory/client.ts` (`getClient`, `newId`, `nowIso`) for the `design_artifacts` write, `node:fs`/`node:path`
+- **Database tables:** `design_artifacts` (schema 3.0.0 — write)
+
+---
+
+## Agent: DesignTokenManager (src/ui-engine/design-token-manager.ts)
+
+- **Purpose:** establishes and maintains a project's design-token baseline — `DEFAULT_DESIGN_TOKENS` (colors, typography, spacing, radii, shadows), `detectProjectTokens` (reads any existing Tailwind config to avoid clobbering an operator's own palette), `generateTailwindConfig`/`generateGlobalsCss` (dark-mode-aware from the first write — UI-4), and `ensureDesignTokens`, the guarded entry point Phase 3 calls once before the first prompt of every build (UI-1). Never overwrites an existing `tailwind.config.*`/`globals.css` — checked before/after so `forge design tokens` can report whether a file was newly written or left untouched.
+- **Status:** COMPLETE
+- **CLI:** `forge design tokens <project-path>`; also invoked automatically as the first step of every non-dry-run Phase 3 build, before prompt 1
+- **Entry Point:** `src/ui-engine/design-token-manager.ts` → `ensureDesignTokens(projectPath: string): Promise<void>`
+- **Exports:** `DEFAULT_DESIGN_TOKENS`, `detectProjectTokens`, `generateTailwindConfig`, `generateGlobalsCss`, `ensureDesignTokens`, `DesignTokens`
+- **Dependencies:** `node:fs`/`node:path` only — no Build Memory client import
+- **Database tables:** none
+
+---
+
+## Agent: StorybookGenerator (src/ui-engine/storybook-generator.ts)
+
+- **Purpose:** scaffolds and generates Storybook stories for a project's components. `detectStorybookInstalled` checks for an existing Storybook setup; `generateStory` writes one component's `.stories.tsx` (called directly by UIComponentGenerator at generation time, per UI-5); `generateStoriesForProject` sweeps every component under a project for one missing a story (skipping any that already has one) — the retroactive path for components generated before UI Engine existed, or by a route other than UIComponentGenerator; `generateStorybookIndex` writes the project-level Storybook index.
+- **Status:** COMPLETE
+- **CLI:** `forge design storybook <project-path>` (runs `generateStoriesForProject`, reports generated vs. skipped)
+- **Entry Point:** `src/ui-engine/storybook-generator.ts` → `generateStoriesForProject(projectPath: string): Promise<{ generated: string[]; skipped: string[] }>`
+- **Exports:** `detectStorybookInstalled`, `generateStory`, `generateStoriesForProject`, `generateStorybookIndex`
+- **Dependencies:** `node:fs`/`node:path` only — no Build Memory client import
+- **Database tables:** none
+
+---
+
+## Agent: AccessibilityChecker (src/ui-engine/accessibility-checker.ts)
+
+- **Purpose:** static WCAG 2.1 AA source scan over React/TSX component code — no headless browser, no `axe-core` runtime dependency. `checkComponentAccessibility` evaluates a single file's source against a rule catalog (missing `alt` text, missing form labels, non-semantic interactive elements, missing `dark:` variants per UI-4, and more), producing per-issue `severity`/`rule`/`description`/`fix` plus a per-file `score`/`passed`; `checkProjectAccessibility` sweeps every `.tsx` under `src/components/`. Backs two independent call sites (UI-3): a warn-only Phase 3 post-prompt scan (`phase3-executor.ts`, never flips `disposition`) and the real, failing Sentinel `component_accessibility` gate (`phase4-sentinel.ts`'s `runComponentAccessibilityGate`, `COMPONENT_ACCESSIBILITY_GATE_PROMPT_TYPES = {'feature','ui'}`).
+- **Status:** COMPLETE
+- **CLI:** `forge design audit <project-path>` (runs `checkProjectAccessibility`, prints per-component score/issues/fixes, non-zero exit on any failing component); also invoked automatically after every `ui`/`feature` prompt in Phase 3 (warn-only) and as a genuine Sentinel gate in Phase 4
+- **Entry Point:** `src/ui-engine/accessibility-checker.ts` → `checkProjectAccessibility(projectPath: string): Promise<AccessibilityReport[]>`
+- **Exports:** `checkComponentAccessibility`, `checkProjectAccessibility`, `AccessibilityIssue`, `AccessibilityReport`
+- **Dependencies:** `node:fs`/`node:path` only — no Build Memory client import
+- **Database tables:** none
+
+### Files (UI Engine, src/ui-engine/)
+
+| File | Purpose |
+|------|---------|
+| `src/ui-engine/index.ts` | Barrel export — re-exports all five modules' public surface |
+| `src/ui-engine/shadcn-installer.ts` | ShadcnInstaller — component catalog, detect/install, prompt-text keyword scan |
+| `src/ui-engine/component-generator.ts` | UIComponentGenerator — generates a component, persists to `design_artifacts`, calls StorybookGenerator |
+| `src/ui-engine/design-token-manager.ts` | DesignTokenManager — Tailwind config + globals.css baseline, dark-mode-aware |
+| `src/ui-engine/storybook-generator.ts` | StorybookGenerator — per-component and whole-project Storybook story generation |
+| `src/ui-engine/accessibility-checker.ts` | AccessibilityChecker — static WCAG 2.1 AA source scan, backs both the Phase 3 warn-only check and the Sentinel gate |

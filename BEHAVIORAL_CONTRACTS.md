@@ -370,3 +370,206 @@ file against this shape via `validateSkillFile` before copying it into the libra
 problem found (missing frontmatter, unparseable YAML, non-object frontmatter, empty body) rather
 than a bare pass/fail — a malformed file is rejected at `add` time, never silently loaded (or
 silently skipped with no explanation) at Phase 3 execution time.
+
+## Autonomy Upgrades Contracts
+
+Source: `src/autonomy/` modules (Autonomy-Upgrades-specific, prose style of
+BEHAVIORAL_CONTRACTS.md, matching the R-series/SP-series/ORC-series/RET-series/SKL-series
+precedent above). Autonomy Upgrades reduce the human touchpoints required to run FORGE end-to-end
+— environment validation, credential storage/injection, autonomous Supabase migration, autonomous
+Vercel deployment, autonomous resolution of non-architectural governance gaps, and a build-wide
+health monitor — without weakening any existing gate. See `STATE_OF_THE_BUILD.md` § Autonomy
+Upgrades for the note distinguishing this work from REBUILD Session 3's differently-scoped
+"Autonomy" (`forge compile`/`--auto-resume`) milestone.
+
+### Contract AUT-1: EnvValidator Runs Before Any Other Phase 0 Action
+`validateEnv`/`printEnvReport` (`src/autonomy/env-validator.ts`) MUST run as the literal first
+statement of `runPhase0Scout`, before `ensureGitRepo` (greenfield git init, Session 5 finding #3)
+and before every other Phase 0 gate (AgentShield, the toolchain audit, …). A build MUST NOT reach
+git initialization, dependency scanning, or any file-touching Phase 0 step while a required
+environment variable — from either FORGE's own catalog or the target project's `.env.example` —
+remains unresolved. Missing required variables are folded into Phase 0's existing `blockers`
+array exactly like every other Phase 0 gate; this is a structural ordering requirement, not a
+separate silent-halt path.
+
+### Contract AUT-2: CredentialVault Injection Runs Before Phase 3 Execution On Every Build
+`CredentialVault.injectIntoEnv(projectPath)` MUST run during Phase 0 (step 14, after GitHub
+Actions generation) on every `forge build` invocation that reaches that point, so that every
+stored credential for a project is available in `.env.local` before Phase 3 ever spawns its first
+`claude -p` subprocess. Injection MUST only append genuinely-new `KEY=value` lines — an existing
+declared key (even an empty one) MUST NOT be overwritten, matching CredentialVault's own
+`injectIntoEnv` contract. A vault read/write failure degrades to zero keys injected (logged), it
+MUST NOT halt Phase 0.
+
+### Contract AUT-3: Supabase Migrations Apply Automatically After Phase 3 When SUPABASE_ACCESS_TOKEN Is Present
+`SupabaseMigrator.applyPendingMigrations` MUST run automatically immediately after a build's
+`build_runs.status` finalizes to `'completed'`, whenever `process.env['SUPABASE_ACCESS_TOKEN']` is
+set AND `SupabaseMigrator.isConfigured(projectPath)` resolves both a token and a project ref. It
+MUST NOT run on a `'failed'`/`'halted'` build — a build that never went green has no business
+pushing schema changes to a live database. A migration failure discovered at this stage MUST NOT
+reopen or fail the already-finalized `build_runs` row (Contract 4); it is recorded as a BLOCKER
+appended to STATE_OF_THE_BUILD.md for human follow-up instead, and the migration batch halts at
+the first failure so later, possibly-dependent migrations are never applied onto a known-broken
+schema state.
+
+### Contract AUT-4: Vercel Deployment Triggers After Phase 5 When the Project Is Deploy-Configured
+`VercelDeployer.deploy(..., 'production')` MUST run automatically as Phase 5 step 12, after every
+other Phase 5 learning step, whenever the project is deploy-configured: a resolvable `VERCEL_TOKEN`
+(environment variable or CredentialVault entry) AND an existing `vercel.json` on disk — the
+project's own signal that it has already been linked to Vercel. Both conditions are required; a
+resolvable token alone (with no `vercel.json`) MUST NOT trigger a deploy, since FORGE has no way to
+know which Vercel project to deploy to without that link. Following a `ready` deployment, `forge
+verify` (`runDeployVerification`) MUST run against the resulting URL and its outcome MUST be
+folded into the Phase 5 summary report. A deploy or verify failure at this stage MUST NOT block or
+reopen Phase 5's own completion (Contract 4) — it is recorded as a warning in the summary report.
+
+### Contract AUT-5: CRITICAL Gaps Are Never Auto-Resolved, Regardless of Any Flag
+`AutonomousGateResolver.resolveGaps` MUST check `gap.severity === 'CRITICAL'` first, unconditionally,
+before consulting `nonInteractive`, `compositeScore`, or any other field of `ResolveGapsOptions`. A
+CRITICAL gap (a missing schema table with no migration, a `BEHAVIORAL_CONTRACTS`-vs-code
+contradiction, or a governance doc missing from disk entirely) MUST always be deferred to
+`HumanGateEvaluator` via `deferCritical` — no present or future option, flag, or non-interactive
+mode MAY route a CRITICAL gap around this deferral. This is the same non-bypassable posture
+Contract 2's four human gates and Contract R-3's fifth gate already establish for FORGE as a whole,
+now enforced a second, independent time at the `AutonomousGateResolver` layer specifically.
+
+### Contract AUT-6: BuildHealthMonitor Pauses on Sustained Failure, Low Confidence, or Excess Memory
+`BuildHealthMonitor.getHealth()` MUST report `status: 'critical'` whenever ANY of the following
+holds: 3 or more consecutive Sentinel-failed prompts, a rolling 10-prompt average confidence below
+0.3, or process RSS memory above 6000MB (6GB) — these three conditions are independently
+sufficient, not jointly required. On a CRITICAL read, `shouldPause()` MUST write a
+`.forge/health-{timestamp}.json` report and wait out a 2-minute in-process cooldown before letting
+the build's prompt loop continue. BuildHealthMonitor observes and pauses; it MUST NOT itself halt a
+build — Contract 13's five checks and Sentinel Prime's `HaltDecision` (Contract SP-2) remain the
+only mechanisms that can actually halt one.
+
+### Contract AUT-7: Every Autonomy Action Is Persisted to Its Schema-2.9.0 Build Memory Table
+Every autonomy action MUST be persisted to Build Memory in the table appropriate to its module,
+not silently to nowhere: `CredentialVault.set`/`delete` write to `project_credentials`,
+`SupabaseMigrator`'s per-migration-file attempts (`applied`/`skipped`/`failed`) write to
+`autonomy_actions`, and `VercelDeployer`'s per-deployment attempts write to `deployment_history` —
+three distinct schema-2.9.0 tables, not one shared table despite the similar naming. Per Contract
+4, every one of these writes is best-effort: a Build Memory failure is logged and swallowed, never
+a halting error, and never prevents the underlying migration/deployment/credential operation from
+completing on its own terms.
+
+## Token Optimization Contracts
+
+Source: `src/engine/governance-router.ts`, `src/engine/shared-preamble.ts`, and the token-cost
+gates threaded through `src/sentinel-prime/`, `src/phases/phase4-sentinel.ts`, and `src/skills/`
+(Token-Optimization-specific, prose style of BEHAVIORAL_CONTRACTS.md, matching the R-series/
+SP-series/ORC-series/RET-series/SKL-series/AUT-series precedent above). Every FORGE build re-pays
+the full token cost of its governance/skill/gate-output payload on every single `claude -p`
+subprocess call (Contract 5 — no caching is possible across those calls, per the Prompt Caching
+Investigation elsewhere in this file's history). Token Optimization narrows what actually rides
+along in that payload without weakening any existing gate: governance docs are sliced to the
+sections a prompt's type actually needs, universal instructions are stated once instead of
+per-prompt, gate output is capped, an expensive critic pass is gated behind real doubt, and skill
+templates are filtered to the stack (and now also the prompt type) they actually apply to.
+
+### Contract TOK-1: Governance Docs Are Injected By Section Relevance, Never In Full
+`parseGovernanceSections`/`routeGovernanceSections` (`src/engine/governance-router.ts`), wired into
+`src/engine/prompt-assembler.ts`, MUST split a routed governance document (`SCHEMA_REGISTRY.md`,
+`BEHAVIORAL_CONTRACTS.md`, `CLAUDE.md`, `STATE_OF_THE_BUILD.md`) into its `##`/`###` sections and
+keep only the sections tagged relevant to the current prompt's `prompt_type` (or tagged `'*'`,
+universal) before injection — never the whole document, and never an arbitrary head-of-document
+truncation in place of real relevance filtering. A document this module has no routing rule for
+(`classifyDoc`'s `'other'` branch) degrades to every section tagged `'*'` — unchanged prior
+behavior, not a narrowing regression, for any governance doc outside the four named above.
+
+### Contract TOK-2: DecisionValidator Only Fires Below the Confidence Threshold
+`SentinelPrime.runFullObservation`'s DecisionValidator critic pass (Contract SP-1's mandatory
+per-prompt Sentinel Prime run is unaffected — this contract governs only step 3 of that sequence)
+MUST be skipped whenever `ExecutionMonitor` and `GovernanceEnforcer` both already passed for this
+prompt AND the build's rolling average confidence over roughly the last 5 prompts is at or above
+`getValidatorThreshold()` (`src/sentinel-prime/confidence-scorer.ts`; `forge_meta` override,
+default 0.80). A skipped pass MUST receive the documented default-pass `intentFulfillmentScore`
+(0.85, comfortably above `INTENT_FULFILLMENT_THRESHOLD`'s 0.75) — never a fabricated fail, and
+never a silent skip with no recorded score. Either signal failing, or no rolling-confidence data
+yet available, MUST fall through to running the full critic pass, matching pre-gate behavior.
+
+### Contract TOK-3: Sentinel Gate Output Is Truncated Before Context Injection
+Every `SentinelCheckResult.output` field (`src/phases/phase4-sentinel.ts`) MUST be capped via
+`truncateGateOutput` (`DEFAULT_MAX_GATE_OUTPUT_LINES = 50`) at the point the pass/fail result is
+constructed (`passCheck`/`failCheck`), before that result ever becomes `PreviousSentinelStatus`
+context injected into the next prompt via `buildSentinelSection`. The full, untruncated output MUST
+still be written to `.forge/build.log` when truncation actually elided something — this contract
+governs only what rides into the NEXT prompt's assembled context, never what is available for human
+or Build-Brain forensic review of a failure.
+
+### Contract TOK-4: Skill Templates Are Injected Only For the Detected Project Stack
+`buildSkillsContext`/`injectIntoContext` (`src/skills/index.ts`) MUST inject only the skill
+templates whose frontmatter `tags` intersect `detectProjectStack(projectPath)`'s output — never
+every template in the library regardless of stack (Contract SKL-2's existing stack-matching
+requirement). Within a stack-matched skill, a non-empty `applicablePromptTypes` frontmatter field
+MUST further narrow injection to prompts of a listed type (an empty `applicablePromptTypes` list
+means "every prompt type this skill's stack tags already apply to," not "every prompt
+unconditionally"). `STACK_DETECTORS` MUST include a `typescript` entry (closing the gap flagged in
+`STATE_OF_THE_BUILD.md` § Skills Library, where `typescript-strict.skill.md` could never
+auto-inject) so a skill tagged `typescript` can be matched by real stack detection rather than
+requiring a name-based special case.
+
+### Contract TOK-5: The Shared Preamble Is Injected Once Per Prompt, Never Duplicated
+`injectSharedPreamble` (`src/engine/shared-preamble.ts`) MUST prepend `SHARED_PREAMBLE`'s four
+universal rules (build-and-confirm-zero-errors, add-and-commit, never-guess-file-contents,
+stay-in-project-scope) to an assembled prompt exactly once. Any queue.yaml-authored restatement of
+one of those same four rules MUST be stripped — via `stripSharedPreambleDuplicates`, applied to
+`entry.description` in `coerceQueueEntry` before the entry ever reaches the assembler, and again
+(idempotently) by `injectSharedPreamble` itself at assembly time — so the same guidance is never
+paid for twice in one prompt's token cost, regardless of whether the duplication originated in the
+queue.yaml source or a re-run of the injection itself.
+
+## UI Engine Contracts
+
+Source: `src/ui-engine/` module docs (UI-Engine-specific, prose style of BEHAVIORAL_CONTRACTS.md,
+matching the R-series/SP-series/ORC-series/RET-series/SKL-series/AUT-series/TOK-series precedent
+above). UI Engine gives FORGE a deterministic production layer for UI work — a shadcn/ui installer,
+a design-token baseline manager, a skill-informed component generator, a Storybook scaffolder, and a
+static WCAG 2.1 AA accessibility checker — so component quality and accessibility are not left
+entirely to whatever a given prompt happens to produce.
+
+### Contract UI-1: Design Tokens MUST Be Configured Before the First Prompt of Every Build
+`ensureDesignTokens` (`src/ui-engine/design-token-manager.ts`) MUST run once, before the first Phase
+3 prompt of every non-dry-run build (`phase3-executor.ts:1355-1362`) — never per-prompt, and never
+skipped for a real (non-simulation) run. It MUST NOT overwrite a project's own
+`tailwind.config.*`/`globals.css` if either already exists; this is a one-time baseline write, not a
+per-build reset. A failure here degrades to a logged warning (Contract 4 posture) and never blocks
+the build.
+
+### Contract UI-2: shadcn/ui Components MUST Be Used For All Primitive UI Elements
+For every prompt whose type is `ui`/`feature` (FORGE's `PromptType` union has no dedicated
+`component`/`page` member; these are the real UI-producing analogs, matching the RET-3/SKL-2
+precedent), `detectRequiredComponents`/`ensureComponentsInstalled`
+(`src/ui-engine/shadcn-installer.ts`) MUST run before claude executes the prompt, installing any
+shadcn/ui component the assembled prompt text references that is not yet present in the target
+project — so claude is never left to invoke the shadcn/ui CLI itself mid-prompt, and a generated
+component's primitive elements draw from the installed catalog rather than a hand-rolled
+reimplementation of the same primitive.
+
+### Contract UI-3: Accessibility Check Runs After Every Component/Page Prompt
+Every `ui`/`feature` prompt MUST be checked for WCAG 2.1 AA issues via
+`checkComponentAccessibility`/`checkProjectAccessibility` (`src/ui-engine/accessibility-checker.ts`)
+at two independent layers: a warn-only Phase 3 scan of every `.tsx` file the prompt touched, logged
+and written to the governance dir but never flipping `disposition` (`phase3-executor.ts:2432-2455`);
+and a real, failing Sentinel `component_accessibility` gate (`phase4-sentinel.ts`'s
+`runComponentAccessibilityGate`) that SKIPs for any other prompt type or an absent
+`src/components/` directory, but genuinely FAILs the build when any component's report does not
+pass. The Phase 3 scan being warn-only does not weaken this contract — the Sentinel gate is the
+actual enforcement mechanism, matching Contract 13's "ALL must pass, any single failure halts"
+posture for the gate that actually gates.
+
+### Contract UI-4: All Components Support Dark Mode Via Tailwind `dark:` Prefix
+`generateTailwindConfig`/`generateGlobalsCss` (`src/ui-engine/design-token-manager.ts`) MUST build
+dark-mode support into the design-token baseline from the first write, not as an opt-in
+configuration step. Every component `UIComponentGenerator.generate()` produces MUST be instructed to
+use Tailwind `dark:` prefix classes on every color/background/border utility (the accessibility
+checker's own rule catalog states this explicitly), so a generated component is dark-mode-aware by
+construction rather than requiring a follow-up retrofit prompt.
+
+### Contract UI-5: Storybook Stories Generated For Every New Component
+`UIComponentGenerator.generate()` MUST call `generateStory` (`src/ui-engine/storybook-generator.ts`)
+at component-generation time, writing a matching `.stories.tsx` alongside every generated component
+— never as a separate, optional step an operator must remember to run. `generateStoriesForProject`
+additionally exists for a whole-project retroactive sweep (`forge design storybook`) over components
+that predate UI Engine or were generated by a path other than `UIComponentGenerator`, skipping any
+component that already has a story rather than overwriting it.

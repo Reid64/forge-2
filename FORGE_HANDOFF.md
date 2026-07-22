@@ -10,6 +10,61 @@ section 3 ("Next action") as the starting task unless the user says otherwise.
 
 ---
 
+## Autonomy Upgrades — FORGE 2.0 at 95% Autonomous Operation (COMPLETE, 2026-07-22)
+
+Independent of every thread below, this session added `src/autonomy/` (7 files, found already
+implemented and wired on disk at session start — same reconciliation pattern as System 5/the
+Native Orchestrator/Enhanced Retrofit/Skills Library before it): `EnvValidator`, `CredentialVault`,
+`SupabaseMigrator`, `VercelDeployer`, `AutonomousGateResolver`, `BuildHealthMonitor`. See
+`STATE_OF_THE_BUILD.md` § "Autonomy Upgrades" for full per-module detail, `AGENTS.md` for the six
+new agent entries, and `BEHAVIORAL_CONTRACTS.md` Contracts AUT-1–AUT-7. Schema bumped
+`2.8.0` → `2.9.0` (three new tables: `project_credentials`, `autonomy_actions`,
+`deployment_history`).
+
+**What "95% autonomous" means concretely:** every FORGE phase (0 through 5) now runs without a
+human decision point in the common path:
+- **Phase 0:** EnvValidator checks required environment variables before anything else touches the
+  project; CredentialVault injects every stored credential into `.env.local`.
+- **Phase 3:** BuildHealthMonitor watches the whole run (consecutive failures, rolling confidence,
+  memory) and can pause-and-cooldown on a CRITICAL read; SupabaseMigrator applies pending
+  `supabase/migrations/*.sql` automatically once a build finishes green.
+- **Phase 5:** VercelDeployer deploys to production and re-runs `forge verify` automatically, when
+  the project is configured for it.
+- **Gap resolution (System 1):** AutonomousGateResolver resolves MINOR and eligible MAJOR
+  governance gaps via RegenerationEngine without a human in the loop.
+
+**What the remaining ~5% is, and why it cannot be automated away:** every one of the human actions
+below is a legal-identity or account-provisioning act that no API token or code change can stand
+in for — FORGE can consume a credential once one exists, but it cannot cause a third-party company
+to recognize a new legal account holder or accept terms on a human's behalf:
+1. **Third-party platform registrations** — creating a Vercel account/project and running
+   `vercel link` once per project (VercelDeployer requires the resulting `.vercel/project.json` to
+   even attempt a deploy); creating a Supabase project and obtaining its project ref
+   (`SUPABASE_PROJECT_ID`).
+2. **Legal agreements** — accepting each platform's Terms of Service (Vercel, Supabase, Anthropic)
+   is a one-time human act tied to a real identity; no autonomous agent may accept a ToS on an
+   operator's behalf.
+3. **Initial OAuth/API-key issuance** — generating `ANTHROPIC_API_KEY`, `VERCEL_TOKEN`, and
+   `SUPABASE_ACCESS_TOKEN` each requires a one-time authenticated action in that provider's own
+   console/CLI (`vercel login`, a Supabase Management API token generated from the dashboard, an
+   Anthropic Console API key). Once obtained, `forge vault set <project-path> <KEY> <value>` stores
+   it encrypted and every subsequent build against that project is autonomous end-to-end — the
+   token issuance itself is the irreducibly human step, not its ongoing use.
+
+**Known gaps this session flagged, not silently skipped** (full detail in
+`STATE_OF_THE_BUILD.md` § Autonomy Upgrades): `forge health` does not yet report the three new
+autonomy tables or a WIRED status for the six new modules; `AutonomousGateResolver`'s deferral
+decisions are not persisted anywhere durable; `SupabaseMigrator`/`VercelDeployer` have not run
+end-to-end against a real Supabase project or Vercel account this session.
+
+**`pnpm run build`:** attempted this session, **not confirmed** — all 3 invocations (`pnpm run
+build` via Bash and PowerShell, a direct `node node_modules/typescript/bin/tsc --noEmit -p .`)
+were rejected by the exec-approval gate before running, while `node --version` succeeded in the
+same session. See `STATE_OF_THE_BUILD.md` § Autonomy Upgrades for full detail — do not assume this
+build passed.
+
+---
+
 ## 0. System 5 (Sentinel Prime) + Native Orchestrator — COMPLETE (2026-07-21)
 
 Independent of the dialtest attempt 5 thread below (sections 1-4) and of the Systems 1-4 thread

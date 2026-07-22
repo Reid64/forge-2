@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '2.8.0';
+export const CURRENT_SCHEMA_VERSION = '3.0.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -615,6 +615,72 @@ const DEEP_ANALYSIS_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_dependency_audit_findings_package ON dependency_audit_findings(package_name);
 `;
 
+/**
+ * Autonomy tables (schema bump 2.8.0 -> 2.9.0): per-project local credential storage, a log of
+ * autonomous actions taken during a build, and deployment history.
+ */
+const AUTONOMY_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS project_credentials (
+      id                TEXT PRIMARY KEY,
+      project_path      TEXT NOT NULL,
+      credential_key    TEXT NOT NULL,
+      credential_value  TEXT NOT NULL,
+      created_at        TEXT NOT NULL,
+      UNIQUE(project_path, credential_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_credentials_path ON project_credentials(project_path);
+
+    CREATE TABLE IF NOT EXISTS autonomy_actions (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      action_type    TEXT NOT NULL,
+      target         TEXT NOT NULL,
+      status         TEXT NOT NULL,
+      result         TEXT,
+      error          TEXT,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_autonomy_actions_build ON autonomy_actions(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_autonomy_actions_status ON autonomy_actions(status);
+
+    CREATE TABLE IF NOT EXISTS deployment_history (
+      id              TEXT PRIMARY KEY,
+      build_run_id    TEXT NOT NULL,
+      project_path    TEXT NOT NULL,
+      platform        TEXT NOT NULL,
+      deployment_id   TEXT,
+      deployment_url  TEXT,
+      status          TEXT NOT NULL,
+      deployed_at     TEXT,
+      verified_at     TEXT,
+      created_at      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deployment_history_build ON deployment_history(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_deployment_history_project ON deployment_history(project_path);
+`;
+
+/**
+ * Design artifacts table (schema bump 2.9.0 -> 3.0.0): generated UI component code emitted by
+ * the design-intelligence pipeline, kept alongside its prompt/build provenance for reuse.
+ */
+const DESIGN_ARTIFACTS_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS design_artifacts (
+      id               TEXT PRIMARY KEY,
+      build_run_id     TEXT NOT NULL,
+      prompt_id        TEXT NOT NULL,
+      component_name   TEXT NOT NULL,
+      description      TEXT NOT NULL,
+      generated_code   TEXT NOT NULL,
+      framework        TEXT NOT NULL DEFAULT 'react',
+      styling          TEXT NOT NULL DEFAULT 'tailwind',
+      file_path        TEXT,
+      applied          INTEGER NOT NULL DEFAULT 0,
+      created_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_artifacts_build ON design_artifacts(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_design_artifacts_prompt ON design_artifacts(prompt_id);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -649,6 +715,12 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'orphaned_routes',
   'schema_drift_findings',
   'dependency_audit_findings',
+  // Autonomy tables (schema 2.9.0)
+  'project_credentials',
+  'autonomy_actions',
+  'deployment_history',
+  // Design artifacts (schema 3.0.0)
+  'design_artifacts',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -963,6 +1035,10 @@ export function initializeForgeMemory(dbPath?: string): void {
   } catch {
     /* column already present — idempotent across repeated init calls */
   }
+  // 2.8.0 -> 2.9.0 (Autonomy): project_credentials, autonomy_actions, deployment_history.
+  db.exec(AUTONOMY_SCHEMA_SQL);
+  // 2.9.0 -> 3.0.0 (Design Artifacts): generated UI component code + provenance.
+  db.exec(DESIGN_ARTIFACTS_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

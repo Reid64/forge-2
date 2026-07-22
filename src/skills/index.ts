@@ -35,7 +35,14 @@ export interface SkillsLibrary {
   skills: Skill[];
   getByDomain(domain: string): Skill[];
   getByTags(tags: string[]): Skill[];
-  getForPrompt(promptType: string): Skill[];
+  /**
+   * Skills relevant to `promptType`, per each skill's `applicablePromptTypes` frontmatter.
+   * When `projectStack` is also given, the result is further narrowed to skills whose tags
+   * intersect the stack — so a stack-specific skill (e.g. `supabase`) only appears when that
+   * tech is actually detected in the target project, never unconditionally for every build.
+   * Deliberately minimal: this must never return "all skills" for a broad prompt type like `api`.
+   */
+  getForPrompt(promptType: string, projectStack?: string[]): Skill[];
   /** Prepend the skills matching `projectStack` (by tag) to `promptText`, formatted as one block. Returns `promptText` unchanged when nothing matches. */
   injectIntoContext(promptText: string, projectStack: string[]): string;
 }
@@ -154,12 +161,15 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
       const wanted = new Set(tags.map((t) => t.toLowerCase()));
       return skills.filter((s) => s.tags.some((t) => wanted.has(t.toLowerCase())));
     },
-    getForPrompt(promptType: string): Skill[] {
-      return skills.filter(
+    getForPrompt(promptType: string, projectStack?: string[]): Skill[] {
+      const byType = skills.filter(
         (s) =>
           s.applicablePromptTypes.length === 0 ||
           s.applicablePromptTypes.some((t) => t.toLowerCase() === promptType.toLowerCase())
       );
+      if (!projectStack || projectStack.length === 0) return byType;
+      const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
+      return byType.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
     },
     injectIntoContext(promptText: string, projectStack: string[]): string {
       const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
@@ -170,9 +180,21 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
   };
 }
 
-/** Technology → the `package.json` dependency names that indicate its presence. */
-const STACK_DETECTORS: ReadonlyArray<{ tech: string; packages: readonly string[] }> = [
+/**
+ * Technology → how to detect its presence: an exact `package.json` dependency name
+ * (`packages`), a dependency-name prefix (`packagePrefixes` — e.g. any `@radix-ui/*`
+ * package, since shadcn/ui projects pull in one Radix package per primitive rather than
+ * a single umbrella package), and/or a marker file at the project root (`files`).
+ */
+const STACK_DETECTORS: ReadonlyArray<{
+  tech: string;
+  packages?: readonly string[];
+  packagePrefixes?: readonly string[];
+  files?: readonly string[];
+}> = [
   { tech: 'nextjs', packages: ['next'] },
+  { tech: 'react', packages: ['react'] },
+  { tech: 'typescript', packages: ['typescript'] },
   { tech: 'supabase', packages: ['@supabase/supabase-js', '@supabase/ssr', '@supabase/auth-helpers-nextjs'] },
   { tech: 'tailwind', packages: ['tailwindcss'] },
   { tech: 'twilio', packages: ['twilio'] },
@@ -181,12 +203,14 @@ const STACK_DETECTORS: ReadonlyArray<{ tech: string; packages: readonly string[]
   { tech: 'drizzle', packages: ['drizzle-orm'] },
   { tech: 'vitest', packages: ['vitest'] },
   { tech: 'playwright', packages: ['playwright', '@playwright/test'] },
+  { tech: 'shadcn', packagePrefixes: ['@radix-ui/'], files: ['components.json'] },
 ];
 
 /**
  * Detect the target project's tech stack by reading its `package.json` `dependencies` +
- * `devDependencies`. Returns the subset of `STACK_DETECTORS` technologies present. A missing/
- * unparseable `package.json` degrades to `[]` (never throws).
+ * `devDependencies` (exact-name and prefix matches) plus, for detectors that declare one, a
+ * marker file's presence at the project root. Returns the subset of `STACK_DETECTORS`
+ * technologies present. A missing/unparseable `package.json` degrades to `[]` (never throws).
  */
 export function detectProjectStack(projectPath: string): string[] {
   try {
@@ -194,13 +218,17 @@ export function detectProjectStack(projectPath: string): string[] {
     if (!existsSync(pkgPath)) return [];
     const raw = readFileSync(pkgPath, 'utf8');
     const pkg = JSON.parse(raw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-    const allDeps = new Set<string>([
+    const allDeps = [
       ...Object.keys(pkg.dependencies ?? {}),
       ...Object.keys(pkg.devDependencies ?? {}),
-    ]);
+    ];
+    const allDepsSet = new Set<string>(allDeps);
     const detected: string[] = [];
-    for (const { tech, packages } of STACK_DETECTORS) {
-      if (packages.some((p) => allDeps.has(p))) detected.push(tech);
+    for (const { tech, packages, packagePrefixes, files } of STACK_DETECTORS) {
+      const matchesPackage = (packages ?? []).some((p) => allDepsSet.has(p));
+      const matchesPrefix = (packagePrefixes ?? []).some((prefix) => allDeps.some((d) => d.startsWith(prefix)));
+      const matchesFile = (files ?? []).some((f) => existsSync(join(projectPath, f)));
+      if (matchesPackage || matchesPrefix || matchesFile) detected.push(tech);
     }
     return detected;
   } catch {

@@ -15,6 +15,7 @@ import { createGapAuditRun, getArtifactScoresForRun, updateGapAuditRun } from '.
 import { buildEnterprisePatternsGapReport, buildGovernanceReconciliationReport, generateArchitectureHealthReport } from '../retrofit/diagnose.js';
 import { runScan } from '../retrofit/scan.js';
 import type { ScanReport, ScanScope } from '../retrofit/types.js';
+import { createAutonomousGateResolver } from '../autonomy/gate-resolver.js';
 import { meanComposite, scoreAll } from './artifact-scorer.js';
 import { findGovernanceDoc } from './governance-gaps.js';
 import { buildContinuationPlan } from './continuation-planner.js';
@@ -29,6 +30,7 @@ import type {
   GapAuditOptions,
   GapAuditResult,
   HaltPoint,
+  RegenResult,
 } from './types.js';
 import { ARTIFACT_NAMES, REGEN_THRESHOLDS } from './types.js';
 
@@ -154,22 +156,68 @@ export async function runGapAudit(options: GapAuditOptions): Promise<GapAuditRes
     if (doc) allDocs[artifact] = doc.content;
   }
 
-  // Partition: AUTO tier -> RegenerationEngine; HUMAN_GATE tier -> HumanGateEvaluator.
+  // Autonomy layer (src/autonomy/gate-resolver.ts): runs after scoring, before
+  // HumanGateEvaluator. Auto-resolves MINOR gaps and eligible MAJOR gaps (composite_score at or
+  // above REGEN_THRESHOLDS.GATE_BELOW) directly via RegenerationEngine; CRITICAL gaps and
+  // ineligible MAJOR gaps fall through to the pre-existing isArchitecturalGap-driven human gate
+  // below, unchanged.
+  const gateResolver = createAutonomousGateResolver();
+  const resolutions =
+    gaps.length > 0
+      ? await gateResolver.resolveGaps(gaps, {
+          nonInteractive: options.nonInteractive ?? false,
+          compositeScore: healthScoreBefore ?? 0,
+          projectPath: options.projectPath,
+          projectName,
+          scanReport,
+          gapAuditRunId: auditRunId,
+          allDocs,
+          scores,
+        })
+      : [];
+  const resolverAutoResolvedArtifacts = new Set(resolutions.filter((r) => r.wasAutoResolved).map((r) => r.artifact));
+
+  // Partition: AUTO tier -> RegenerationEngine; HUMAN_GATE tier -> HumanGateEvaluator. A gap the
+  // resolver already decided requires human takes precedence over isArchitecturalGap; gaps the
+  // resolver never saw (nonexistent — resolutions is 1:1 with gaps here) fall back to it.
   const scoreByArtifact = new Map(scores.map((s) => [s.artifact_name, s]));
-  const gatedGaps = gaps.filter((g) => isArchitecturalGap(g, scoreByArtifact.get(g.artifact)));
+  const gatedGaps = gaps.filter((g, i) => resolutions[i]?.requiresHuman ?? isArchitecturalGap(g, scoreByArtifact.get(g.artifact)));
 
   const gateOutcome = gatedGaps.length > 0 ? await evaluateGates(gatedGaps, { nonInteractive: options.nonInteractive }) : null;
   const humanApprovedArtifacts = (gateOutcome?.decisions ?? []).filter((d) => d.approved).map((d) => d.gap.artifact);
 
-  const regenResults = await regenerateAll({
+  // Artifacts fully handled by the resolver (no remaining gated gap for them) are excluded from
+  // the tier-based regeneration pass below to avoid writing the same file twice; an artifact
+  // that still has an unresolved gated gap stays in scope so a later human approval still works.
+  const artifactsWithGatedGaps = new Set(gatedGaps.map((g) => g.artifact));
+  const scoresForTierRegen = scores.filter(
+    (s) => !resolverAutoResolvedArtifacts.has(s.artifact_name) || artifactsWithGatedGaps.has(s.artifact_name)
+  );
+
+  const tierRegenResults = await regenerateAll({
     projectPath: options.projectPath,
     projectName,
-    scores,
+    scores: scoresForTierRegen,
     scanReport,
     gapAuditRunId: auditRunId,
     allDocs,
     humanApprovedArtifacts,
   });
+
+  // Merge in one synthetic RegenResult per artifact the resolver itself regenerated, so
+  // downstream rescoring/reporting/counting sees the resolver's writes too.
+  const resolverRegenByArtifact = new Map<ArtifactName, RegenResult>();
+  for (const r of resolutions) {
+    if (!r.wasAutoResolved) continue;
+    resolverRegenByArtifact.set(r.artifact, {
+      artifact: r.artifact,
+      attempted: true,
+      wrote: true,
+      healthScoreBefore: r.healthScoreBefore ?? scoreByArtifact.get(r.artifact)?.composite_score ?? healthScoreBefore ?? 0,
+      healthScoreAfter: r.healthScoreAfter ?? null,
+    });
+  }
+  const regenResults = [...tierRegenResults, ...resolverRegenByArtifact.values()];
 
   // Re-score regenerated artifacts for health_score_after.
   const regeneratedNames = new Set(regenResults.filter((r) => r.wrote).map((r) => r.artifact));

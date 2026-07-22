@@ -36,6 +36,33 @@ const HALT_COMPOSITE_THRESHOLD = 0.4;
 /** Composite score floor for a halted run to still be considered auto-recoverable. */
 const AUTO_RECOVER_COMPOSITE_FLOOR = 0.3;
 
+/** Default DecisionValidator confidence-gate threshold, used when no `forge_meta` override is set. */
+export const DEFAULT_VALIDATOR_THRESHOLD = 0.8;
+
+/** Build Memory `forge_meta` key the DecisionValidator confidence-gate threshold is stored under. */
+const VALIDATOR_THRESHOLD_META_KEY = 'sentinel_validator_threshold';
+
+/**
+ * Read the DecisionValidator confidence-gate threshold from Build Memory (`forge_meta`), falling
+ * back to {@link DEFAULT_VALIDATOR_THRESHOLD} when Build Memory is unreachable, no override has
+ * been set, or the stored value is malformed/out of range. Never throws (Contract 4).
+ */
+export function getValidatorThreshold(): number {
+  try {
+    const db = getClient();
+    if (!db) return DEFAULT_VALIDATOR_THRESHOLD;
+    const row = db.prepare('SELECT value FROM forge_meta WHERE key = ?').get(VALIDATOR_THRESHOLD_META_KEY) as
+      | { value: string }
+      | undefined;
+    if (!row) return DEFAULT_VALIDATOR_THRESHOLD;
+    const value = Number.parseFloat(row.value);
+    return Number.isFinite(value) && value >= 0 && value <= 1 ? value : DEFAULT_VALIDATOR_THRESHOLD;
+  } catch (error) {
+    logMemoryWarning('sentinel-prime.getValidatorThreshold', error);
+    return DEFAULT_VALIDATOR_THRESHOLD;
+  }
+}
+
 /** Clamp a number into `[0, 1]`. */
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));

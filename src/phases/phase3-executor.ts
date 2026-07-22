@@ -153,6 +153,12 @@ import { onSentinelFailure, onSentinelPrimeHalt } from '../integration/bus.js';
 import { SentinelPrime } from '../sentinel-prime/index.js';
 import { createExecutionMonitor, executionMonitorSingleton } from '../sentinel-prime/execution-monitor.js';
 import { buildSkillsContext } from '../skills/index.js';
+import { detectRequiredComponents, ensureComponentsInstalled } from '../ui-engine/shadcn-installer.js';
+import { ensureDesignTokens } from '../ui-engine/design-token-manager.js';
+import { checkComponentAccessibility, type AccessibilityReport } from '../ui-engine/accessibility-checker.js';
+import { stripSharedPreambleDuplicates } from '../engine/shared-preamble.js';
+import { createSupabaseMigrator, type MigrationResult } from '../autonomy/supabase-migrator.js';
+import { BuildHealthMonitor } from '../autonomy/health-monitor.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -206,6 +212,19 @@ export interface PromptOutcome {
   recovery: AutoRecoveryResult | null;
   /** Short human-readable note on what happened. */
   note: string;
+  /**
+   * Sentinel Prime's composite confidence score (0-1) for this prompt, when Sentinel Prime ran.
+   * null/absent for skipped, dry-run, and error-path outcomes -- BuildHealthMonitor
+   * falls back to a pass/fail proxy (1/0) in that case (src/autonomy/health-monitor.ts).
+   */
+  confidenceScore?: number | null;
+  /**
+   * UI Engine (Task 3/4): count of static WCAG 2.1 AA issues `checkComponentAccessibility` found
+   * across this prompt's modified/created `.tsx` files. `null`/absent when the check did not run
+   * (not a component/page prompt, or the prompt did not pass all Sentinel gates). Warn-only —
+   * never affects `disposition`.
+   */
+  accessibilityIssueCount?: number | null;
 }
 
 /** Final status of the whole Phase 3 run. */
@@ -489,6 +508,8 @@ export const GOVERNANCE_DOC_NAMES: readonly string[] = [
   'AGENTS.md',
   'TESTING.md',
   'DESIGN_SYSTEM.md',
+  'STATE_OF_THE_BUILD.md',
+  'CLAUDE.md',
 ];
 
 // ---------------------------------------------------------------------------
@@ -497,6 +518,14 @@ export const GOVERNANCE_DOC_NAMES: readonly string[] = [
 
 /** Prompt types whose work is inherently slower than average generation (a full test/deploy run). */
 const LONG_TIMEOUT_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['test', 'deploy']);
+
+/**
+ * Prompt types the ShadcnInstaller (`src/ui-engine/shadcn-installer.ts`) scans for required
+ * components. FORGE's `PromptType` union has no `component`/`page` member (queue entries are
+ * typed `schema`/`auth`/`api`/`ui`/`feature`/`agent`/`test`/`deploy`), so `ui`/`feature` are the
+ * real UI-producing analogs — the same mapping Enhanced Retrofit's RET-3 bundle-size gate uses.
+ */
+const SHADCN_INSTALL_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['ui', 'feature']);
 
 interface TimeoutBudgetConfig {
   timeoutMinutes: number;
@@ -694,7 +723,10 @@ export function coerceQueueEntry(
     governance_refs: asStringArray(o.governance_refs),
     estimated_tokens: typeof o.estimated_tokens === 'number' ? o.estimated_tokens : 0,
     context_injection: asContextInjection(o.context_injection),
-    description: asString(o.description),
+    // Queue runner (token efficiency): strip any queue.yaml-authored restatement of the
+    // universal build/commit/never-guess/scope rules — the assembler injects those exactly
+    // once via shared-preamble.ts, so a per-entry copy is dead weight, not a safeguard.
+    description: stripSharedPreambleDuplicates(asString(o.description)),
   };
   const group = asString(o.parallel_group).trim();
   if (group !== '') entry.parallel_group = group;
@@ -1250,6 +1282,13 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   );
   const liveStatus = new LiveStatusWriter(projectPath, projectName, buildRunId, schedule.order.length);
 
+  // Build-wide health monitoring (Autonomy: BuildHealthMonitor â€” src/autonomy/health-monitor.ts):
+  // a third layer above the per-prompt Contract-13 gate and Sentinel Prime, watching consecutive
+  // failures, a rolling confidence average, and process memory across the WHOLE run, with the
+  // ability to auto-pause on a CRITICAL read. Skipped for dry runs â€” nothing executes to monitor.
+  const healthMonitor = new BuildHealthMonitor(projectPath, (m) => log(`health: ${m}`));
+  if (!dryRun) healthMonitor.start(schedule.order.length);
+
   // Learning engine â€” non-critical, failures are caught internally
   await onRunStart(projectPath, buildRunId ?? machineId, ['typescript', 'nextjs'], projectName).catch(() => ({ knowledge: { rules: [], skills: [], fixPatterns: [], outcomes: [], evolutions: [] }, resumeState: null }));
 
@@ -1292,6 +1331,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     brainInterventions: { count: 0 },
     elevatedRuleIds: new Set<string>(),
     liveStatus,
+    healthMonitor,
     log,
     hookManager,
     instincts,
@@ -1305,6 +1345,21 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   let halted = false;
   let haltReason: string | null = null;
   let haltedAt: { index: number; id: string } | null = null;
+
+  // UI ENGINE (Task 1): ensure a consistent design-token baseline (tailwind.config.ts +
+  // globals.css) exists before the FIRST prompt of every real build run. Never overwrites a
+  // project's own tokens if either file already exists (design-token-manager.ts's own guard) â€”
+  // this is a one-time-per-build baseline, not a per-prompt operation. Skipped for dry runs
+  // (nothing executes; a simulation must never touch the target project's files). Guarded/non-
+  // fatal (Contract 4 posture): a failure here degrades to a warning, never blocks the build.
+  if (!dryRun) {
+    try {
+      await ensureDesignTokens(ctx.projectPath);
+      log('[UI ENGINE] Design tokens configured');
+    } catch (error) {
+      log(`[UI ENGINE] design token setup non-fatal â€” ${describe(error)}`);
+    }
+  }
 
   for (let i = 0; i < schedule.order.length; i++) {
     const entry = schedule.order[i];
@@ -1438,6 +1493,17 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       totalElapsedMs,
     });
 
+    // Build-wide health check (Autonomy: BuildHealthMonitor): record this prompt's outcome, then
+    // pause (report + 2-minute cooldown, handled entirely inside shouldPause()) if the build has
+    // gone CRITICAL. Falls back to a pass/fail proxy when Sentinel Prime did not produce a
+    // composite confidence score for this outcome (skipped/dry-run/error-path outcomes never
+    // reach this branch, but the fallback keeps the call site correct regardless).
+    healthMonitor.recordPromptResult(
+      outcome.disposition === 'completed',
+      outcome.confidenceScore ?? (outcome.disposition === 'completed' ? 1 : 0)
+    );
+    await healthMonitor.shouldPause();
+
     if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
 
     // Carry this prompt's Sentinel status into the next prompt (Contract 13).
@@ -1498,6 +1564,40 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       elevatedRuleIds: ctx.elevatedRuleIds,
       log,
     });
+
+    // Autonomous Supabase migration (Contract 4 — best-effort, non-fatal): once every prompt has
+    // cleared its Sentinel gates and the build_run itself is finalized as 'completed', apply any
+    // pending supabase/migrations/*.sql files directly via the Management API. Never runs on a
+    // 'failed'/'halted' build — a build that never went green has no business pushing schema
+    // changes to a live database. A migration failure here is logged and swallowed; it never
+    // reopens or fails an already-finalized build_run.
+    if (status === 'completed') {
+      try {
+        const migrator = createSupabaseMigrator();
+        if (process.env['SUPABASE_ACCESS_TOKEN'] && (await migrator.isConfigured(projectPath))) {
+          const migrationResults = await migrator.applyPendingMigrations(projectPath, buildRunId);
+          for (const r of migrationResults) {
+            log(`SupabaseMigrator: ${r.migrationFile} — ${r.status}${r.error ? `: ${r.error}` : ''} (${r.durationMs}ms)`);
+          }
+          const failedMigrations = migrationResults.filter((r) => r.status === 'failed');
+          if (failedMigrations.length > 0) {
+            log(
+              `SupabaseMigrator: ${failedMigrations.length}/${migrationResults.length} migration(s) FAILED — ` +
+                'build already completed and is NOT being halted for this (Contract 4); writing a BLOCKER to ' +
+                'STATE_OF_THE_BUILD.md for human follow-up.'
+            );
+            await appendMigrationBlocker(governanceDir, buildRunId, failedMigrations);
+          } else if (migrationResults.some((r) => r.status === 'applied')) {
+            log(
+              `SupabaseMigrator: applied ${migrationResults.filter((r) => r.status === 'applied').length} migration(s), ` +
+                `skipped ${migrationResults.filter((r) => r.status === 'skipped').length}.`
+            );
+          }
+        }
+      } catch (error) {
+        log(`SupabaseMigrator non-fatal — ${describe(error)}`);
+      }
+    }
   }
 
   await onRunEnd(buildRunId ?? '', projectPath, {
@@ -1605,6 +1705,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       clearDeathForensicsState();
     }
 
+    // Build-wide health monitoring: stop the memory-sampling interval and log the final snapshot.
+    // Always runs (including on an unexpected throw), matching the run-lock cleanup above.
+    if (!dryRun) healthMonitor.stop();
+
     // Restore stdout LAST â€” handleSessionEnd (above) still has more [SESSION]/[FORGE Learning]
     // console output to emit, and it must land in the log file too, not on stdout.
     releaseStdoutQuietMode();
@@ -1690,6 +1794,8 @@ interface LoopContext {
   elevatedRuleIds: Set<string>;
   /** Live build-status writer (Task 3 â€” Session 4). Always present; a disk failure just no-ops. */
   liveStatus: LiveStatusWriter;
+  /** Build-wide health monitor (Autonomy: BuildHealthMonitor) â€” read for the Sentinel Prime halt record. */
+  healthMonitor: BuildHealthMonitor;
   log: (message: string) => void;
   /** Hook manager for pre_prompt / post_prompt lifecycle events. */
   hookManager: HookManager;
@@ -1824,6 +1930,25 @@ async function executePrompt(
       }
     } catch {
       /* best-effort â€” Contract 4 posture: skill injection never blocks execution */
+    }
+
+    // b2.6. SHADCN INSTALLER â€” for component/page/feature prompt types (FORGE's `PromptType`
+    // union has no dedicated `component`/`page` member; `ui`/`feature` are the real UI-producing
+    // analogs, the same mapping RET-3's bundle-size gate uses), scan the assembled prompt text
+    // for shadcn/ui component keywords and install anything missing in the target project BEFORE
+    // claude runs, so it never has to stop mid-build to run the shadcn/ui CLI itself.
+    if (SHADCN_INSTALL_PROMPT_TYPES.has(entry.prompt_type)) {
+      try {
+        const requiredComponents = detectRequiredComponents(promptText);
+        if (requiredComponents.length > 0) {
+          const newlyInstalled = await ensureComponentsInstalled(ctx.projectPath, requiredComponents);
+          if (newlyInstalled.length > 0) {
+            log(`[UI ENGINE] Installed ${newlyInstalled.length} shadcn components: ${newlyInstalled.join(', ')}`);
+          }
+        }
+      } catch {
+        /* best-effort â€” Contract 4 posture: component auto-install never blocks execution */
+      }
     }
 
     // b3. MODEL ROUTING â€” classify prompt complexity, select the optimal Claude model,
@@ -2056,6 +2181,9 @@ async function executePrompt(
       gatesPassed: sentinel.passed,
       modifiedFiles: sentinelPrimeModifiedFiles,
       gitDiff: gitDiffFull,
+      // Token-cost gate (System 5): only pay for DecisionValidator's full critic pass when the
+      // build hasn't been consistently confident over roughly its last 5 prompts.
+      recentAverageConfidence: ctx.healthMonitor.getRecentAverageConfidence(5),
     });
 
     renderProgress(
@@ -2069,7 +2197,7 @@ async function executePrompt(
         `[SENTINEL PRIME] HALT â€” ${sentinelPrimeResult.haltDecision.reason ?? 'unknown reason'}`
       );
       try {
-        await onSentinelPrimeHalt(sentinelPrimeResult.id, ctx.projectPath);
+        await onSentinelPrimeHalt(sentinelPrimeResult.id, ctx.projectPath, ctx.healthMonitor.getHealth());
       } catch (error) {
         log(`integration bus onSentinelPrimeHalt failed: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -2294,6 +2422,38 @@ async function executePrompt(
       note = `Sentinel failed (${sentinel.failedCheck ?? 'unknown'}) â€” Autonomous Recovery disabled, escalating (Contract 14).`;
     }
 
+    // UI ENGINE (Task 3/4): once this prompt has passed all Sentinel gates (`disposition ===
+    // 'completed'`) AND is a component/page prompt (`ui`/`feature` are the real `PromptType`
+    // analogs â€” see SHADCN_INSTALL_PROMPT_TYPES), statically scan every `.tsx` file this prompt
+    // touched for WCAG 2.1 AA issues. Warn-only: never touches `disposition` (Contract 4 posture)
+    // â€” a real accessibility defect is surfaced to the operator, not a reason to fail a build that
+    // already passed every mandatory gate.
+    let accessibilityIssueCount: number | null = null;
+    if (disposition === 'completed' && SHADCN_INSTALL_PROMPT_TYPES.has(entry.prompt_type)) {
+      accessibilityIssueCount = 0;
+      const tsxFiles = [...changed.created, ...changed.modified].filter((f) => f.endsWith('.tsx'));
+      for (const relativeFile of tsxFiles) {
+        try {
+          const code = await readFile(join(ctx.projectPath, relativeFile), 'utf8');
+          const report = checkComponentAccessibility(relativeFile, code);
+          if (report.issues.length > 0) {
+            accessibilityIssueCount += report.issues.length;
+            log(`[UI ENGINE] ACCESSIBILITY: ${report.issues.length} issues found in ${relativeFile}`);
+            await appendAccessibilityReport(
+              join(ctx.projectPath, ctx.governanceDirName),
+              ctx.buildRunId,
+              entry,
+              index,
+              relativeFile,
+              report
+            );
+          }
+        } catch (error) {
+          log(`[UI ENGINE] accessibility check non-fatal for ${relativeFile} â€” ${describe(error)}`);
+        }
+      }
+    }
+
     await ctx.liveStatus.promptPhase({
       index,
       id: entry.id,
@@ -2385,7 +2545,9 @@ async function executePrompt(
     if (decomposition?.decomposed) note = `${note} (${decomposition.note})`;
 
     const durationMs = Date.now() - promptStartedAt;
-    log(`prompt ${index} '${entry.id}': ${disposition} â€” ${note} (${humanDuration(durationMs)})`);
+    const accessibilitySummarySuffix =
+      accessibilityIssueCount !== null ? `, ${accessibilityIssueCount} accessibility issue(s)` : '';
+    log(`prompt ${index} '${entry.id}': ${disposition} â€” ${note} (${humanDuration(durationMs)})${accessibilitySummarySuffix}`);
     if (disposition === 'completed') {
       renderProgress(
         'PASS',
@@ -2416,6 +2578,8 @@ async function executePrompt(
       sentinel,
       recovery,
       note,
+      confidenceScore: sentinelPrimeResult.confidenceScore.composite,
+      accessibilityIssueCount,
     };
   } catch (error) {
     // Defensive: the collaborators never throw, but if one does, fail this prompt (don't crash).
@@ -2970,6 +3134,67 @@ async function defaultUpdateStateProgress(governanceDir: string, line: string): 
     await appendFile(target, toAsciiGovernanceText(`\n> ${nowIso()} ${line}\n`), 'utf8');
   } catch {
     /* non-fatal â€” the state document update must never block the build */
+  }
+}
+
+/**
+ * Autonomous Supabase migration failures happen AFTER the build_run is already finalized
+ * 'completed' â€” they must never reopen or fail that build (Contract 4), but a failed migration
+ * against a live database is exactly the kind of thing a human needs to see. Appends a BLOCKER
+ * entry to STATE_OF_THE_BUILD.md (deliberately outside Sentinel's protected doc set, same
+ * convention as `onSentinelPrimeHalt`'s SESSION_STATE.md blocker in src/integration/bus.ts).
+ * Guarded â€” a write failure here must never affect an already-finalized build.
+ */
+async function appendMigrationBlocker(
+  governanceDir: string,
+  buildRunId: string | null,
+  failed: readonly MigrationResult[]
+): Promise<void> {
+  try {
+    const block = [
+      '',
+      '## [FORGE Phase 3] BLOCKER — SupabaseMigrator',
+      `- Build: ${buildRunId ?? '(stateless)'}`,
+      ...failed.map((f) => `- Migration FAILED: ${f.migrationFile} — ${f.error ?? 'unknown error'}`),
+      `- Timestamp: ${nowIso()}`,
+      '',
+    ].join('\n');
+    await mkdir(governanceDir, { recursive: true });
+    await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
+  } catch {
+    /* non-fatal â€” a blocker write failure must never affect an already-finalized build */
+  }
+}
+
+/**
+ * UI ENGINE (Task 3): append a non-blocking accessibility WARNING to STATE_OF_THE_BUILD.md's
+ * build report, mirroring {@link appendMigrationBlocker}'s precedent for a different non-fatal,
+ * report-worthy condition â€” except this is a WARNING section, never a BLOCKER, since accessibility
+ * issues never fail the build (warn-only).
+ */
+async function appendAccessibilityReport(
+  governanceDir: string,
+  buildRunId: string | null,
+  entry: QueueEntry,
+  index: number,
+  filePath: string,
+  report: AccessibilityReport
+): Promise<void> {
+  try {
+    const block = [
+      '',
+      '## [FORGE Phase 3] WARNING â€” UI Engine accessibility',
+      `- Build: ${buildRunId ?? '(stateless)'}`,
+      `- Prompt ${index} '${entry.id}' (${entry.prompt_type}): ${filePath}`,
+      ...report.issues.map((i) => `- [${i.severity}] ${i.rule}: ${i.description} Fix: ${i.fix}`),
+      `- Score: ${report.score}/100`,
+      `- Timestamp: ${nowIso()}`,
+      '',
+    ].join('\n');
+    await mkdir(governanceDir, { recursive: true });
+    await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
+  } catch {
+    /* non-fatal â€” an accessibility-report write failure must never affect the build's disposition */
   }
 }
 
