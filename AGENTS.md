@@ -588,3 +588,57 @@ Generated `queue.yaml` is ordered by dependency tier:
 | `src/ui-engine/design-token-manager.ts` | DesignTokenManager — Tailwind config + globals.css baseline, dark-mode-aware |
 | `src/ui-engine/storybook-generator.ts` | StorybookGenerator — per-component and whole-project Storybook story generation |
 | `src/ui-engine/accessibility-checker.ts` | AccessibilityChecker — static WCAG 2.1 AA source scan, backs both the Phase 3 warn-only check and the Sentinel gate |
+
+---
+
+## Agent: ArchitectureGuardian (src/architecture-guardian/index.ts)
+
+- **Purpose:** pre-prompt enterprise-standards enforcer that prevents thin builds, stubs, and mock data from ever reaching production output. Runs a two-call contract once per Phase 3 prompt: `prePrompt` classifies the prompt's build target (`classifyPrompt`, api-route/ui-component/agent/database/test/generic) and enhances the assembled prompt text with explicit enforcement instructions for every enterprise standard/pattern not already signaled in it (`EnterpriseEnforcer.enforce`, `approved` always `true` — this layer enhances, it never rejects); `postPrompt` (`PostOutputValidator.validate`) scans every file the prompt actually modified for thin implementations, stub/placeholder markers, hardcoded mock data, swallowed errors, and improper logging, computing a real 0-100 quality score that can short-circuit the Contract 13 Sentinel gate with a forced failure when a critical violation or a sub-60 score is found.
+- **Status:** COMPLETE
+- **CLI:** none — purely an internal Phase 3 hook, no standalone `forge guardian ...` command family (known gap, see `STATE_OF_THE_BUILD.md` § Architecture Guardian)
+- **Entry Point:** `src/architecture-guardian/index.ts` → `class ArchitectureGuardian` / `createArchitectureGuardian()` → `prePrompt(promptEntry, projectPath): GuardianValidation`, `postPrompt(projectPath, modifiedFiles, classification): Promise<OutputValidation>`
+- **Exports:** `ArchitectureGuardian`, `createArchitectureGuardian`, `PromptClassification`, `GuardianValidation`, `EnterpriseStandard`, `ENTERPRISE_STANDARDS`, `classifyPrompt`, `listClassificationRules`, `BuildTarget`, `EnterpriseEnforcer`, `createEnterpriseEnforcer`, `PostOutputValidator`, `createPostOutputValidator`, `OutputValidation`, `OutputViolation`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso` — for the `autonomy_actions` audit write), `node:fs`/`node:path` (`PostOutputValidator`'s file reads)
+- **Database tables:** `autonomy_actions` (schema 2.9.0 — write, `action_type: 'architecture_guardian'`; reuses the existing table rather than adding a new one)
+
+### Files (Architecture Guardian, src/architecture-guardian/)
+
+| File | Purpose |
+|------|---------|
+| `src/architecture-guardian/types.ts` | `PromptClassification`/`GuardianValidation`/`EnterpriseStandard` shapes, `ENTERPRISE_STANDARDS` (11 baseline standards) |
+| `src/architecture-guardian/classifier.ts` | `classifyPrompt` — deterministic keyword/regex build-target classifier (never a model call) |
+| `src/architecture-guardian/enforcer.ts` | `EnterpriseEnforcer` — pre-prompt instruction-gap detection + additive enhancement, never rejects |
+| `src/architecture-guardian/post-validator.ts` | `PostOutputValidator` — post-prompt 5-check scan (thin implementation, stubs, mock data, swallowed errors, improper logging), real pass/fail + quality score |
+| `src/architecture-guardian/index.ts` | `ArchitectureGuardian` composition root — wires classifier → enforcer (pre-prompt) and validator (post-prompt) |
+
+---
+
+## Agent: UXIntelligenceAgent (src/skills/ux-intelligence.ts)
+
+- **Purpose:** reads whatever PRD/blueprint text already exists on disk (greenfield or partial-build), detects the product's industry vertical from a fixed keyword table (`detectIndustryVertical` — fintech/healthcare/legal/creative/enterprise/commerce/education, or `saas` as the default), and selects a starter design system tuned to that vertical's conventions (`selectDesignSystem` — an 8-color palette, a 3-role typography pair, layout density, motion profile, plus a `reasoning` string). Writes the result to `<project>/governance/DESIGN_SYSTEM.md` as an early BASELINE that Phase 1B's fuller UI/UX Pro Max generation (when it runs) is expected to supersede — a build that never reaches Phase 1B still has industry-appropriate design intent on disk rather than none. Deliberately simple and dependency-free: no LLM call, no external skill invocation, a fixed hand-curated lookup table of 8 starter design systems.
+- **Status:** COMPLETE
+- **CLI:** none — runs automatically as Phase 0 step 15 of every `forge build`; no standalone `forge design-vertical ...` command exists
+- **Entry Point:** `src/skills/ux-intelligence.ts` → `detectIndustryVertical(prdContent): string` → `selectDesignSystem(vertical): DesignDecision` → `writeDesignSystemDoc(decision, projectPath): void`
+- **Exports:** `detectIndustryVertical`, `selectDesignSystem`, `readProjectPrdContent`, `writeDesignSystemDoc`, `INDUSTRY_VERTICALS`, `ColorPalette`, `TypographyPair`, `LayoutDensity`, `MotionProfile`, `DesignDecision`
+- **Dependencies:** `src/tools/governance-text.ts` (`toAsciiGovernanceText`, mojibake-safe governance writes), `node:fs`/`node:path` only — no Build Memory client import, no LLM call
+- **Database tables:** none — writes `<project>/governance/DESIGN_SYSTEM.md` directly to disk, zero Build Memory writes
+
+---
+
+## Agent: ComplianceDetectorAgent (src/skills/compliance-detector.ts)
+
+- **Purpose:** reads whatever PRD/blueprint text already exists on disk and detects which regulatory regimes — HIPAA, GDPR, PCI-DSS, SOX — a product plausibly falls under (`detectComplianceRegimes`, a fixed keyword table evaluated independently per regime, so a build can trigger more than one at once, e.g. a healthcare SaaS billing patients by card is both HIPAA and PCI-DSS). Injects the concrete technical requirements and prohibited patterns each detected regime imposes (encryption at rest, audit logging, minimum data-retention windows, RBAC, breach-notification workflows, and more) into `<project>/governance/COMPLIANCE_REQUIREMENTS.md` (`writeComplianceDoc`) so Phase 3 prompts and a human reviewer have a concrete, regime-specific checklist to act on before code is written, not after. Deliberately errs toward false positives over false negatives — a PRD merely mentioning "patient" in passing is flagged HIPAA-adjacent, because the cost of an unnecessary compliance doc is a few extra lines of governance text while the cost of a missed regime is a build that ships without legally-required protections.
+- **Status:** COMPLETE
+- **CLI:** none — runs automatically as Phase 0 step 16 of every `forge build`, immediately after UXIntelligenceAgent; no standalone `forge compliance ...` command exists
+- **Entry Point:** `src/skills/compliance-detector.ts` → `detectComplianceRegimes(prdContent, blueprintContent): ComplianceRequirements` → `writeComplianceDoc(requirements, projectPath): void`
+- **Exports:** `detectComplianceRegimes`, `writeComplianceDoc`, `ComplianceRequirements`
+- **Dependencies:** `src/tools/governance-text.ts` (`toAsciiGovernanceText`), `node:fs`/`node:path` only — no Build Memory client import, no LLM call
+- **Database tables:** none — writes `<project>/governance/COMPLIANCE_REQUIREMENTS.md` directly to disk, zero Build Memory writes
+
+### Files (Elite Skills Library additions, src/skills/)
+
+| File | Purpose |
+|------|---------|
+| `src/skills/ux-intelligence.ts` | UXIntelligenceAgent — PRD-vertical-driven design-system baseline selector |
+| `src/skills/compliance-detector.ts` | ComplianceDetectorAgent — HIPAA/GDPR/PCI-DSS/SOX detector |
+| `src/skills/templates/*.skill.md` (29 new files) | New elite skill templates spanning architecture, security, data, AI/agent, performance, product/business/UX, reliability, and deploy domains — see `STATE_OF_THE_BUILD.md` § Elite Skills Library for the full per-template breakdown |

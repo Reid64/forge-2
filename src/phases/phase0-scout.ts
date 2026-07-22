@@ -55,6 +55,13 @@ import { onSessionStart } from '../memory/session-hooks.js';
 import { ensureGitHubActions } from '../retrofit/github-actions-generator.js';
 import { createCredentialVault } from '../autonomy/credential-vault.js';
 import { validateEnv, printEnvReport } from '../autonomy/env-validator.js';
+import {
+  detectIndustryVertical,
+  selectDesignSystem,
+  writeDesignSystemDoc,
+  readProjectPrdContent,
+} from '../skills/ux-intelligence.js';
+import { detectComplianceRegimes, writeComplianceDoc } from '../skills/compliance-detector.js';
 import type { SecurityReport, SessionContext } from '../types/index.js';
 
 const execAsync = promisify(exec);
@@ -252,6 +259,25 @@ async function isForgeInstallation(projectPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Read and concatenate the first-found candidates of `relPaths` under `projectPath`. Guarded —
+ * an unreadable/absent candidate is skipped, never thrown. Used to load PRD.md/BLUEPRINT.md
+ * content separately (rather than combined, as `ux-intelligence.ts`'s `readProjectPrdContent`
+ * does) for the Compliance Detector, which takes each as its own parameter.
+ */
+async function readGovernanceCandidates(projectPath: string, relPaths: readonly string[]): Promise<string> {
+  const chunks: string[] = [];
+  for (const relPath of relPaths) {
+    try {
+      const fullPath = join(projectPath, relPath);
+      if (await pathExists(fullPath)) chunks.push(await readFile(fullPath, 'utf8'));
+    } catch {
+      /* unreadable candidate — skip it, never throw */
+    }
+  }
+  return chunks.join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +958,50 @@ export async function runPhase0Scout(
     const detail = error instanceof Error ? error.message : String(error);
     log(`WARNING: credential vault injection error — ${detail}`);
     toolchainManifest.warnings.push(`Credential vault injection error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 15: UX Intelligence — auto-select a starter design system from the
+  // detected industry vertical and write DESIGN_SYSTEM.md. Non-blocking; a later
+  // Phase 1B UI/UX Pro Max generation (when it runs) supersedes this baseline.
+  // -------------------------------------------------------------------------
+  log('step 15: UX Intelligence — design system auto-selection');
+  try {
+    const prdContent = readProjectPrdContent(projectPath);
+    const vertical = detectIndustryVertical(prdContent);
+    const decision = selectDesignSystem(vertical);
+    writeDesignSystemDoc(decision, projectPath);
+    log(`[UX INTELLIGENCE] Vertical: ${vertical} Design system written.`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: UX Intelligence design system selection error — ${detail}`);
+    toolchainManifest.warnings.push(`UX Intelligence design system selection error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 16: Compliance Detector — detect HIPAA/GDPR/PCI-DSS/SOX signal from
+  // PRD.md/BLUEPRINT.md and write COMPLIANCE_REQUIREMENTS.md. Non-blocking; a
+  // detected regime informs Phase 3 prompts via skill injection, it does not
+  // gate Phase 0 on its own.
+  // -------------------------------------------------------------------------
+  log('step 16: compliance detection');
+  try {
+    const prdContent = await readGovernanceCandidates(projectPath, ['PRD.md', join('governance', 'PRD.md')]);
+    const blueprintContent = await readGovernanceCandidates(projectPath, [
+      'BLUEPRINT.md',
+      join('governance', 'BLUEPRINT.md'),
+    ]);
+    const complianceRequirements = detectComplianceRegimes(prdContent, blueprintContent);
+    writeComplianceDoc(complianceRequirements, projectPath);
+    log(
+      `[COMPLIANCE] Detected regimes: ${
+        complianceRequirements.regimes.length > 0 ? complianceRequirements.regimes.join(', ') : 'none'
+      }`
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: compliance detection error — ${detail}`);
+    toolchainManifest.warnings.push(`Compliance detection error: ${detail}`);
   }
 
   // Recompute passed — AgentShield (step 9) may have added blockers after the

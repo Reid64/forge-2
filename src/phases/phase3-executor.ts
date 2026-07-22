@@ -112,6 +112,7 @@ import {
   type SentinelResult,
   type SentinelOptions,
   type AutoRecoveryResult,
+  type CheckResult,
 } from './phase4-sentinel.js';
 import { analyzeSentinelFailure, type BrainDiagnosis } from '../engine/build-brain.js';
 import {
@@ -159,6 +160,15 @@ import { checkComponentAccessibility, type AccessibilityReport } from '../ui-eng
 import { stripSharedPreambleDuplicates } from '../engine/shared-preamble.js';
 import { createSupabaseMigrator, type MigrationResult } from '../autonomy/supabase-migrator.js';
 import { BuildHealthMonitor } from '../autonomy/health-monitor.js';
+import {
+  ArchitectureGuardian,
+  createArchitectureGuardian,
+  classifyPrompt,
+  type GuardianValidation,
+  type PromptClassification,
+  type OutputValidation,
+} from '../architecture-guardian/index.js';
+import { getClient, logMemoryWarning, newId } from '../memory/client.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -493,6 +503,12 @@ export interface Phase3Options {
    * execution. Default: empty (no instincts). Load via {@link extractInstincts} externally.
    */
   instincts?: Instinct[];
+  /**
+   * Architecture Guardian instance (pre-prompt enterprise-standards enforcement + post-prompt
+   * output validation, `src/architecture-guardian/index.ts`). Default: a fresh
+   * {@link createArchitectureGuardian}. Injectable so tests can substitute a fake/spy.
+   */
+  architectureGuardian?: ArchitectureGuardian;
 }
 
 // ---------------------------------------------------------------------------
@@ -648,6 +664,131 @@ export function findOutOfBoundsPaths(stdout: string, projectPath: string): strin
     found.add(raw);
   }
   return [...found];
+}
+
+// ---------------------------------------------------------------------------
+// Architecture Guardian wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist one prompt's Architecture Guardian pass (pre-prompt {@link GuardianValidation} +
+ * post-prompt {@link OutputValidation}) to Build Memory's `autonomy_actions` table (schema
+ * 2.9.0 — `src/learning/database.ts`) for audit trail, mirroring
+ * `src/autonomy/supabase-migrator.ts`'s `persistAutonomyAction` pattern exactly: best-effort
+ * (Contract 4), never throws, a missing/unreachable Build Memory connection is a silent no-op.
+ */
+function persistGuardianAudit(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  guardianValidation: GuardianValidation,
+  outputValidation: OutputValidation
+): void {
+  const db = getClient();
+  if (!db) return;
+  try {
+    db.prepare(
+      `INSERT INTO autonomy_actions (id, build_run_id, action_type, target, status, result, error, created_at)
+       VALUES (@id, @build_run_id, 'architecture_guardian', @target, @status, @result, @error, @created_at)`
+    ).run({
+      id: newId(),
+      build_run_id: ctx.buildRunId ?? '',
+      target: `prompt-${index}-${entry.id}`,
+      status: outputValidation.passed ? 'passed' : 'failed',
+      result: JSON.stringify({
+        guardianValidation: {
+          approved: guardianValidation.approved,
+          enforcementsApplied: guardianValidation.enforcementsApplied,
+          rejectionReason: guardianValidation.rejectionReason,
+          estimatedOutputLines: guardianValidation.estimatedOutputLines,
+        },
+        outputValidation: {
+          passed: outputValidation.passed,
+          qualityScore: outputValidation.qualityScore,
+          filesChecked: outputValidation.filesChecked,
+          violations: outputValidation.violations,
+          recommendation: outputValidation.recommendation,
+        },
+      }),
+      error: null,
+      created_at: nowIso(),
+    });
+  } catch (error) {
+    logMemoryWarning('phase3-executor.persistGuardianAudit', error);
+  }
+}
+
+/**
+ * Architecture Guardian's post-output gate: runs AFTER claude has produced its diff (and FORGE has
+ * committed it) and BEFORE the Contract-13 Sentinel gate. Scans every file this prompt actually
+ * touched for the failure modes `EnterpriseEnforcer`'s pre-prompt instructions were trying to
+ * prevent (`prePrompt`, called earlier for this same prompt).
+ *
+ * When the output has a CRITICAL violation, or its quality score falls below the pass floor, the
+ * (potentially slow) Sentinel run below is skipped entirely — a synthetic failed {@link SentinelResult}
+ * is returned instead, so the prompt "triggers autonomous recovery immediately without waiting for
+ * [the] Sentinel gate": the existing Sentinel-failure/Autonomous-Recovery path (the disposition
+ * switch further down `executePrompt`) treats it exactly like any other Sentinel failure. Returns
+ * `null` when Guardian found nothing severe enough to skip Sentinel — the caller then runs Sentinel
+ * normally. Never throws (Contract 4): a `postPrompt` failure degrades to `null` (proceed normally).
+ */
+async function runGuardianPostCheck(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  guardianClassification: PromptClassification,
+  guardianValidation: GuardianValidation
+): Promise<SentinelResult | null> {
+  const changed = filesChanged(ctx);
+  const modifiedFiles = [...changed.created, ...changed.modified];
+
+  let outputValidation: OutputValidation;
+  try {
+    outputValidation = await ctx.guardian.postPrompt(ctx.projectPath, modifiedFiles, guardianClassification);
+  } catch (error) {
+    ctx.log(`prompt ${index} '${entry.id}': [GUARDIAN] postPrompt non-fatal â€” ${describe(error)}`);
+    return null;
+  }
+
+  const criticalViolations = outputValidation.violations.filter((v) => v.severity === 'critical');
+  if (!outputValidation.passed && criticalViolations.length > 0) {
+    ctx.log(
+      `[GUARDIAN] CRITICAL VIOLATIONS FOUND in ${entry.id}: ` +
+        criticalViolations.map((v) => `${v.violationType} @ ${v.filePath} â€” ${v.description}`).join(' | ')
+    );
+  }
+  if (outputValidation.qualityScore < 60) {
+    ctx.log(`[GUARDIAN] Quality score ${outputValidation.qualityScore}/100 â€” triggering recovery`);
+  }
+  ctx.log(
+    `[GUARDIAN] Quality: ${outputValidation.qualityScore}/100 â€” ${guardianValidation.enforcementsApplied.length} enforcements applied`
+  );
+
+  persistGuardianAudit(ctx, entry, index, guardianValidation, outputValidation);
+
+  const shouldForceFailure =
+    (!outputValidation.passed && criticalViolations.length > 0) || outputValidation.qualityScore < 60;
+  if (!shouldForceFailure) return null;
+
+  const violationLines = outputValidation.violations
+    .map((v) => `[${v.severity.toUpperCase()}] ${v.violationType} ${v.filePath}: ${v.description}`)
+    .join('\n');
+  const check: CheckResult = {
+    name: 'architecture',
+    passed: false,
+    skipped: false,
+    detail: `Architecture Guardian: quality ${outputValidation.qualityScore}/100, ${criticalViolations.length} critical violation(s)`,
+    output: violationLines || outputValidation.recommendation,
+    durationMs: 0,
+  };
+  return {
+    passed: false,
+    checks: [check],
+    failedCheck: 'architecture',
+    diagnosticReport:
+      `Architecture Guardian forced prompt ${index} '${entry.id}' to fail before the Sentinel gate ran.\n\n` +
+      `${violationLines || outputValidation.recommendation}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1273,6 +1414,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   })();
   const instincts: Instinct[] = options.instincts ?? [];
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
+  const architectureGuardian = options.architectureGuardian ?? createArchitectureGuardian();
   const timeoutBudgetConfig = await loadTimeoutBudgetConfig(projectPath);
   const timeoutBudgetMsFor = makeTimeoutBudgetResolver(timeoutBudgetConfig);
   log(
@@ -1336,6 +1478,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     hookManager,
     instincts,
     costTracker,
+    guardian: architectureGuardian,
   };
 
   const outcomes: PromptOutcome[] = [];
@@ -1803,6 +1946,8 @@ interface LoopContext {
   instincts: Instinct[];
   /** Accumulates per-prompt model cost estimates across the build. */
   costTracker: ModelCostTracker;
+  /** Architecture Guardian (pre-prompt enforcement + post-prompt output validation). */
+  guardian: ArchitectureGuardian;
 }
 
 /** Build the Sentinel options for this build (shared by the main run + recovery re-runs). */
@@ -1816,6 +1961,10 @@ function sentinelOptionsFor(
     governanceDirName: ctx.governanceDirName,
     schemaPromptsHaveRun,
     promptType,
+    // Bundle Size gate (RET-3 / Contract RET-3): supplied unconditionally â€” the gate itself
+    // auto-skips for any prompt type other than feature/ui and for a non-Next.js project (no
+    // next.config.*), so it is always safe to hand it a projectPath here.
+    bundleSize: { projectPath: ctx.projectPath },
   };
 }
 
@@ -1951,6 +2100,25 @@ async function executePrompt(
       }
     }
 
+    // b2.7. ARCHITECTURE GUARDIAN (pre-prompt) â€” classify this prompt's build target and enforce
+    // enterprise-grade standards against it (`src/architecture-guardian/index.ts`), replacing
+    // `promptText` with the enhanced version before it reaches claude. Runs after every other
+    // prompt-text-shaping step above (skills library, shadcn installer) so the enhanced prompt
+    // reflects everything already added, and before model routing (b3) so complexity/cost are
+    // estimated from the final text. Never blocks (`approved` is always true â€” see enforcer.ts).
+    const guardianValidation = ctx.guardian.prePrompt(
+      { id: entry.id, promptType: entry.prompt_type, promptText },
+      ctx.projectPath
+    );
+    if (guardianValidation.enhancedPrompt !== promptText) {
+      promptText = guardianValidation.enhancedPrompt;
+    }
+    for (const enforcement of guardianValidation.enforcementsApplied) {
+      log(`[GUARDIAN] Enforced: ${enforcement} on ${entry.id}`);
+    }
+    const guardianClassification: PromptClassification =
+      ctx.guardian.getLastClassification() ?? classifyPrompt(promptText, entry.prompt_type);
+
     // b3. MODEL ROUTING â€” classify prompt complexity, select the optimal Claude model,
     // and record the estimated cost for this prompt (telemetry; never blocks execution).
     const modelSelection = selectModelForEntry(entry);
@@ -2059,9 +2227,14 @@ async function executePrompt(
       run = decomposition.aggregateRun;
       // VS Code integration layer: record this prompt's changeset before the gating Sentinel below.
       await appendChangeset(ctx, entry, index, filesChanged(ctx));
+      // ARCHITECTURE GUARDIAN (post-prompt) â€” after claude's work is committed, before this
+      // prompt's gating Sentinel result is settled. A CRITICAL violation / sub-60 quality score
+      // overrides the decomposer's own final Sentinel with a forced failure (see
+      // runGuardianPostCheck's doc comment).
+      const guardianForcedSentinel = await runGuardianPostCheck(ctx, entry, index, guardianClassification, guardianValidation);
       // Reuse the decomposer's between-sub-steps Sentinel as THIS prompt's gate (avoids a redundant
       // whole-prompt re-run); fall back only if it executed nothing (never, for a >threshold prompt).
-      sentinel = decomposition.finalSentinel ?? (await ctx.runSentinelImpl(sentinelOptions));
+      sentinel = guardianForcedSentinel ?? decomposition.finalSentinel ?? (await ctx.runSentinelImpl(sentinelOptions));
       if (!run.success) {
         log(`prompt ${index} '${entry.id}': decomposed run not green â€” ${decomposition.note}`);
       }
@@ -2123,8 +2296,15 @@ async function executePrompt(
       // VS Code integration layer: record this prompt's changeset before Sentinel runs.
       await appendChangeset(ctx, entry, index, filesChanged(ctx));
 
-      // h. Run the Phase 4 Sentinel (the five Contract-13 checks).
-      sentinel = await ctx.runSentinelImpl(sentinelOptions);
+      // ARCHITECTURE GUARDIAN (post-prompt) â€” after claude's work is committed, BEFORE the
+      // Contract-13 Sentinel gate (h). A CRITICAL violation / sub-60 quality score short-circuits
+      // the Sentinel run below entirely, so autonomous recovery fires immediately rather than
+      // waiting on tsc/build to independently discover the same problem.
+      const guardianForcedSentinel = await runGuardianPostCheck(ctx, entry, index, guardianClassification, guardianValidation);
+
+      // h. Run the Phase 4 Sentinel (the five Contract-13 checks) â€” skipped when Guardian already
+      // forced a failure above.
+      sentinel = guardianForcedSentinel ?? (await ctx.runSentinelImpl(sentinelOptions));
     }
 
     renderProgress('GATE', `Sentinel â€” ${sentinel.checks.length} check(s)`);

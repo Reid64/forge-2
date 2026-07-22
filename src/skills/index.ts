@@ -19,6 +19,8 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load as parseYaml } from 'js-yaml';
+import { readProjectPrdContent } from './ux-intelligence.js';
+import { detectComplianceRegimes } from './compliance-detector.js';
 
 /** One reusable engineering-standards skill, parsed from a `*.skill.md` file. */
 export interface Skill {
@@ -37,10 +39,13 @@ export interface SkillsLibrary {
   getByTags(tags: string[]): Skill[];
   /**
    * Skills relevant to `promptType`, per each skill's `applicablePromptTypes` frontmatter.
-   * When `projectStack` is also given, the result is further narrowed to skills whose tags
-   * intersect the stack — so a stack-specific skill (e.g. `supabase`) only appears when that
-   * tech is actually detected in the target project, never unconditionally for every build.
-   * Deliberately minimal: this must never return "all skills" for a broad prompt type like `api`.
+   * When `projectStack` is also given, the result is the union of two independent selections:
+   * (1) stack-specific skills — skills whose tags intersect the detected stack (e.g. `supabase`
+   * only appears when that tech is actually detected), and (2) curated "always relevant" elite
+   * skills for `promptType` (see {@link ALWAYS_RELEVANT_BY_PROMPT_TYPE}) that apply to any
+   * project of that prompt type regardless of stack, plus `ux-intelligence` for every prompt
+   * type and `compliance` whenever any regulatory regime was detected in the stack. Deliberately
+   * minimal: this must never return "all skills" for a broad prompt type like `api`.
    */
   getForPrompt(promptType: string, projectStack?: string[]): Skill[];
   /** Prepend the skills matching `projectStack` (by tag) to `promptText`, formatted as one block. Returns `promptText` unchanged when nothing matches. */
@@ -124,6 +129,37 @@ export function validateSkillFile(
   return { valid: true, errors: [], skill };
 }
 
+/**
+ * Curated "elite" engineering-standard skill ids that are always relevant for a given prompt
+ * type, regardless of stack-tag detection — security, reliability, and performance patterns that
+ * apply to any project of that prompt type, not just a project whose `package.json` happens to
+ * declare a matching dependency. Layered on top of (not a replacement for) the stack-tag-
+ * intersection match in {@link SkillsLibrary.getForPrompt}, which still governs stack-specific
+ * skills like `supabase`/`stripe`/`twilio`. `component`/`page` are not real FORGE `PromptType`
+ * values (the union has `ui`/`feature` instead — see `phase4-sentinel.ts`'s `RET-3` precedent),
+ * but `getForPrompt` accepts any string, so both are supported here for parity with the
+ * `applicablePromptTypes` frontmatter several templates already declare.
+ */
+const ALWAYS_RELEVANT_BY_PROMPT_TYPE: Readonly<Record<string, readonly string[]>> = {
+  database: ['database-indexing', 'multi-tenancy', 'audit-logging', 'soft-delete'],
+  api: ['security-owasp', 'jwt-patterns', 'rbac', 'retry-patterns', 'webhook-reliability', 'circuit-breaker'],
+  feature: ['feature-flags', 'zero-downtime-deploy'],
+  component: ['core-web-vitals', 'mobile-first', 'ux-copywriting'],
+  page: ['core-web-vitals', 'mobile-first', 'ux-copywriting'],
+};
+
+/** Skill ids injected into every prompt type, unconditionally. */
+const ALWAYS_RELEVANT_SKILL_IDS: readonly string[] = ['ux-intelligence'];
+
+/** Skill ids injected into `agent` prompts only when `ai` is present in the detected stack. */
+const AGENT_AI_SKILL_IDS: readonly string[] = ['prompt-engineering', 'tool-calling', 'agent-memory', 'rag-patterns'];
+
+/** Detected-stack tags that indicate at least one regulatory compliance regime was found in the PRD. */
+const COMPLIANCE_STACK_TAGS: readonly string[] = ['compliance-hipaa', 'compliance-gdpr', 'compliance-pci'];
+
+/** Skill ids injected into every prompt type once any {@link COMPLIANCE_STACK_TAGS} regime is detected. */
+const COMPLIANCE_SKILL_IDS: readonly string[] = ['compliance'];
+
 /** Render matching skills as one Markdown block, prefixed with {@link SKILLS_CONTEXT_HEADER}. */
 function renderSkillsBlock(skills: readonly Skill[]): string {
   const sections = skills.map((s) => `### ${s.name} (${s.domain})\n\n${s.template}`);
@@ -162,14 +198,29 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
       return skills.filter((s) => s.tags.some((t) => wanted.has(t.toLowerCase())));
     },
     getForPrompt(promptType: string, projectStack?: string[]): Skill[] {
+      const type = promptType.toLowerCase();
+      const stackTags = new Set((projectStack ?? []).map((t) => t.toLowerCase()));
+
       const byType = skills.filter(
         (s) =>
           s.applicablePromptTypes.length === 0 ||
-          s.applicablePromptTypes.some((t) => t.toLowerCase() === promptType.toLowerCase())
+          s.applicablePromptTypes.some((t) => t.toLowerCase() === type)
       );
-      if (!projectStack || projectStack.length === 0) return byType;
-      const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
-      return byType.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
+      const stackMatched = stackTags.size === 0 ? byType : byType.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
+
+      const alwaysIds = new Set<string>(ALWAYS_RELEVANT_SKILL_IDS);
+      for (const id of ALWAYS_RELEVANT_BY_PROMPT_TYPE[type] ?? []) alwaysIds.add(id);
+      if (type === 'agent' && stackTags.has('ai')) {
+        for (const id of AGENT_AI_SKILL_IDS) alwaysIds.add(id);
+      }
+      if (COMPLIANCE_STACK_TAGS.some((tag) => stackTags.has(tag))) {
+        for (const id of COMPLIANCE_SKILL_IDS) alwaysIds.add(id);
+      }
+
+      const merged = new Map<string, Skill>();
+      for (const s of stackMatched) merged.set(s.id, s);
+      for (const s of skills) if (alwaysIds.has(s.id)) merged.set(s.id, s);
+      return [...merged.values()];
     },
     injectIntoContext(promptText: string, projectStack: string[]): string {
       const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
@@ -204,36 +255,61 @@ const STACK_DETECTORS: ReadonlyArray<{
   { tech: 'vitest', packages: ['vitest'] },
   { tech: 'playwright', packages: ['playwright', '@playwright/test'] },
   { tech: 'shadcn', packagePrefixes: ['@radix-ui/'], files: ['components.json'] },
+  { tech: 'redis', packages: ['ioredis', 'redis'] },
+  { tech: 'i18n', packages: ['next-intl', 'react-i18next'] },
+  { tech: 'background-jobs', packages: ['bullmq', 'pg-boss', 'inngest'] },
+  { tech: 'ai', packages: ['openai'], packagePrefixes: ['@anthropic-ai/'] },
 ];
 
 /**
- * Detect the target project's tech stack by reading its `package.json` `dependencies` +
- * `devDependencies` (exact-name and prefix matches) plus, for detectors that declare one, a
- * marker file's presence at the project root. Returns the subset of `STACK_DETECTORS`
- * technologies present. A missing/unparseable `package.json` degrades to `[]` (never throws).
+ * Detect the target project's tech stack. Two independent sources feed the result: (1)
+ * `package.json` `dependencies`/`devDependencies` (exact-name and prefix matches) plus, for
+ * detectors that declare one, a marker file's presence at the project root, matched against
+ * {@link STACK_DETECTORS} — degrades to contributing nothing on a missing/unparseable
+ * `package.json`; and (2) a PRD/blueprint keyword scan for regulatory compliance regimes (via
+ * {@link readProjectPrdContent}/{@link detectComplianceRegimes}, the same detector
+ * `src/skills/compliance-detector.ts` uses for Phase 0's `COMPLIANCE_REQUIREMENTS.md`), which
+ * contributes `compliance-hipaa`/`compliance-gdpr`/`compliance-pci` tags independently of
+ * `package.json` — a project has PRD text well before it has a `package.json`. Both sources are
+ * best-effort; a failure in either degrades to that source contributing nothing, never throws.
  */
 export function detectProjectStack(projectPath: string): string[] {
+  const detected: string[] = [];
+
   try {
     const pkgPath = join(projectPath, 'package.json');
-    if (!existsSync(pkgPath)) return [];
-    const raw = readFileSync(pkgPath, 'utf8');
-    const pkg = JSON.parse(raw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-    const allDeps = [
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...Object.keys(pkg.devDependencies ?? {}),
-    ];
-    const allDepsSet = new Set<string>(allDeps);
-    const detected: string[] = [];
-    for (const { tech, packages, packagePrefixes, files } of STACK_DETECTORS) {
-      const matchesPackage = (packages ?? []).some((p) => allDepsSet.has(p));
-      const matchesPrefix = (packagePrefixes ?? []).some((prefix) => allDeps.some((d) => d.startsWith(prefix)));
-      const matchesFile = (files ?? []).some((f) => existsSync(join(projectPath, f)));
-      if (matchesPackage || matchesPrefix || matchesFile) detected.push(tech);
+    if (existsSync(pkgPath)) {
+      const raw = readFileSync(pkgPath, 'utf8');
+      const pkg = JSON.parse(raw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+      const allDeps = [
+        ...Object.keys(pkg.dependencies ?? {}),
+        ...Object.keys(pkg.devDependencies ?? {}),
+      ];
+      const allDepsSet = new Set<string>(allDeps);
+      for (const { tech, packages, packagePrefixes, files } of STACK_DETECTORS) {
+        const matchesPackage = (packages ?? []).some((p) => allDepsSet.has(p));
+        const matchesPrefix = (packagePrefixes ?? []).some((prefix) => allDeps.some((d) => d.startsWith(prefix)));
+        const matchesFile = (files ?? []).some((f) => existsSync(join(projectPath, f)));
+        if (matchesPackage || matchesPrefix || matchesFile) detected.push(tech);
+      }
     }
-    return detected;
   } catch {
-    return [];
+    /* unreadable/unparseable package.json — package-based detection contributes nothing, never throws */
   }
+
+  try {
+    const prdContent = readProjectPrdContent(projectPath);
+    if (prdContent.trim() !== '') {
+      const regimes = detectComplianceRegimes(prdContent, '');
+      if (regimes.hipaa) detected.push('compliance-hipaa');
+      if (regimes.gdpr) detected.push('compliance-gdpr');
+      if (regimes.pciDss) detected.push('compliance-pci');
+    }
+  } catch {
+    /* unreadable PRD or detection failure — compliance tags contribute nothing, never throws */
+  }
+
+  return detected;
 }
 
 /**
