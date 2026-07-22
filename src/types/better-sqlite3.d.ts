@@ -12,6 +12,7 @@ declare module 'better-sqlite3' {
       exec(source: string): void;
       close(): void;
       pragma(source: string, simplify?: boolean): unknown;
+      transaction<F extends (...args: any[]) => any>(fn: F): F;
     }
     interface Statement {
       run(...bindParameters: unknown[]): RunResult;

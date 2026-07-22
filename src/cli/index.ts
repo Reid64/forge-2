@@ -23,6 +23,7 @@
  *   estimate <path>   Cost/time estimate without building (F17)
  *   repair <path>     Repair a broken TypeScript repo (diagnose → cluster → queue → execute → verify)
  *   verify <url>      Post-deploy HTTP health check: GET every src/app/api route against a live URL (F9)
+ *   analyze <path>    Deep analysis: dead code, orphaned routes, schema drift, deps, coverage, CI (see subcommands)
  *
  * House style carried over from the phases: nothing here throws to the top level —
  * a failed command sets `process.exitCode` and prints a diagnostic. Build Memory
@@ -37,7 +38,7 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 
 import { Command } from 'commander';
@@ -57,6 +58,7 @@ import { runPhase5Learner } from '../phases/phase5-learner.js';
 import { runProjectAutopsy, renderAutopsyReportMarkdown, type AutopsyReport } from '../tools/project-autopsy.js';
 import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.js';
 import type { AdversaryResult } from '../analysis/adversarial-review.js';
+import type { DeepAnalysisReport } from '../retrofit/index.js';
 import { checkAdversaryBlockers as checkAdversaryBlockersCore, resolveAcceptBlockers } from './adversary-gate.js';
 import { looksLikeProjectPath } from '../tools/path-heuristics.js';
 import { runRepairMode } from './repair-command.js';
@@ -82,6 +84,13 @@ import type {
   GovernanceEnforcerResult,
   ValidationResult,
 } from '../sentinel-prime/types.js';
+import {
+  detectProjectStack,
+  loadSkillsLibrary,
+  buildSkillsContext,
+  defaultSkillsLibraryDir,
+  validateSkillFile,
+} from '../skills/index.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -215,6 +224,44 @@ function printWarnings(warnings: readonly string[]): void {
   if (warnings.length === 0) return;
   console.log(chalk.yellow(`  ${warnings.length} warning(s):`));
   for (const w of warnings) console.log(chalk.dim(`    • ${w}`));
+}
+
+/** One category's findings under a bold heading, capped at 10 with a "+N more" note (`forge analyze`). */
+function printFindingList(heading: string, lines: readonly string[]): void {
+  console.log(chalk.bold(`\n  ${heading}:`));
+  if (lines.length === 0) {
+    console.log(chalk.dim('    none found'));
+    return;
+  }
+  for (const line of lines.slice(0, 10)) console.log(`    ${line}`);
+  if (lines.length > 10) console.log(chalk.dim(`    … and ${lines.length - 10} more`));
+}
+
+/**
+ * Renders a full {@link DeepAnalysisReport} to the console (`forge analyze`): per-category
+ * totals, the top 10 most critical findings in each category, and the overall health score.
+ */
+function printDeepAnalysisReport(report: DeepAnalysisReport): void {
+  const coverageGaps = report.coverage.filter((f) => f.priority !== 'low').length;
+  console.log(
+    chalk.dim(
+      `  dead code: ${report.deadCode.length}    orphaned routes: ${report.orphanedRoutes.length}    ` +
+        `schema drift: ${report.schemaDrift.length}    dependency issues: ${report.dependencies.length}    ` +
+        `coverage gaps: ${coverageGaps}`
+    )
+  );
+
+  printFindingList('Dead Code — top 10', report.deadCode.map((f) => `${f.filePath}:${f.lineNumber} — ${f.reason}`));
+  printFindingList('Orphaned Routes — top 10', report.orphanedRoutes.map((f) => `${f.routePath} (${f.filePath}) — ${f.reason}`));
+  printFindingList('Schema Drift — top 10', report.schemaDrift.map((f) => `[${f.severity}] ${f.tableName} — ${f.detail}`));
+  printFindingList('Dependency Issues — top 10', report.dependencies.map((f) => `[${f.findingType}] ${f.packageName} — ${f.detail}`));
+  printFindingList(
+    'Coverage Baseline — top 10',
+    report.coverage.map((f) => `[${f.priority}] ${f.filePath} — ${f.coveragePercent}%${f.hasTestFile ? '' : ' — NO TEST FILE'}`)
+  );
+
+  const scoreColor = report.healthScore >= 70 ? chalk.green : report.healthScore >= 40 ? chalk.yellow : chalk.red;
+  console.log(`\n  ${chalk.bold('Overall health score:')} ${scoreColor(`${report.healthScore}/100`)}`);
 }
 
 /** Mark the current command as failed and print the reason. */
@@ -2265,6 +2312,141 @@ async function cmdSentinelThreshold(opts: { set?: string }): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `forge skills list|show|inject|add` — stack-detected skills library diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Print one line in the `[yyyy-MM-dd HH:mm:ss] [LEVEL]` format (FORGE 1.0 parity, matching
+ * {@link tsPrefix}/{@link withSpinner}) — every status/summary line `forge skills` prints uses
+ * this, per the command's spec. Raw file/prompt CONTENT the subcommands display (a skill's
+ * template body, an assembled prompt) is printed verbatim below a banner line instead, since
+ * prefixing every line of that content would corrupt it for the debugging use case it exists for.
+ */
+function skillsLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
+  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+}
+
+/** Mark `forge skills` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
+function skillsFail(message: string): void {
+  skillsLog('FAIL', message);
+  getLogger('cli').error(message);
+  process.exitCode = 1;
+}
+
+/** `forge skills list <project-path>` — detect the stack, list every skill that would be injected. */
+async function cmdSkillsList(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  skillsLog('INFO', `forge skills list — ${projectPath}`);
+
+  const stack = detectProjectStack(projectPath);
+  if (stack.length === 0) {
+    skillsLog('WARN', 'no stack detected (missing/unreadable package.json, or no dependency matches a known technology) — no skills would be injected.');
+    return;
+  }
+  skillsLog('INFO', `detected stack: ${stack.join(', ')}`);
+
+  const skillsDir = defaultSkillsLibraryDir();
+  const library = loadSkillsLibrary(skillsDir);
+  if (library.skills.length === 0) {
+    skillsLog('WARN', `no skill templates found under ${skillsDir} — nothing would be injected.`);
+    return;
+  }
+
+  const matching = library.getByTags(stack);
+  if (matching.length === 0) {
+    skillsLog('WARN', `${library.skills.length} skill(s) loaded from ${skillsDir}, but none match this stack's tags.`);
+    return;
+  }
+
+  skillsLog('PASS', `${matching.length}/${library.skills.length} skill(s) would be injected for this project:`);
+  for (const s of matching) {
+    skillsLog(
+      'INFO',
+      `  ${s.id}  (${s.domain})  tags=[${s.tags.join(', ')}]  applicablePromptTypes=[${s.applicablePromptTypes.join(', ') || 'any'}]`
+    );
+  }
+}
+
+/** `forge skills show <skill-id>` — print one skill's full template content. */
+async function cmdSkillsShow(skillId: string): Promise<void> {
+  const skillsDir = defaultSkillsLibraryDir();
+  const library = loadSkillsLibrary(skillsDir);
+  const skill = library.skills.find((s) => s.id === skillId);
+  if (!skill) {
+    const available = library.skills.map((s) => s.id).join(', ') || '(none loaded)';
+    skillsFail(`no skill "${skillId}" found under ${skillsDir}. Available: ${available}`);
+    return;
+  }
+
+  skillsLog('PASS', `${skill.id} — ${skill.name} (${skill.domain})`);
+  skillsLog('INFO', `tags: ${skill.tags.join(', ') || '(none)'}`);
+  skillsLog('INFO', `applicablePromptTypes: ${skill.applicablePromptTypes.join(', ') || '(any)'}`);
+  console.log('\n--- BEGIN TEMPLATE CONTENT ---\n');
+  console.log(skill.template);
+  console.log('\n--- END TEMPLATE CONTENT ---');
+}
+
+/** `forge skills inject <project-path> <prompt-text>` — show the full prompt with skills injected, for debugging. */
+async function cmdSkillsInject(pathArg: string, promptText: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  skillsLog('INFO', `forge skills inject — ${projectPath}`);
+
+  const stack = detectProjectStack(projectPath);
+  skillsLog(
+    'INFO',
+    stack.length > 0 ? `detected stack: ${stack.join(', ')}` : 'no stack detected — prompt will be sent unmodified.'
+  );
+
+  const injected = buildSkillsContext(projectPath, promptText);
+  const wasInjected = injected !== promptText;
+  skillsLog(
+    wasInjected ? 'PASS' : 'WARN',
+    wasInjected ? 'skills matched — full assembled prompt (as sent to Claude Code) follows:' : 'no skills matched — prompt is unmodified:'
+  );
+  console.log('\n--- BEGIN ASSEMBLED PROMPT ---\n');
+  console.log(injected);
+  console.log('\n--- END ASSEMBLED PROMPT ---');
+}
+
+/** `forge skills add <skill-file>` — validate a `*.skill.md` file, then copy it into the skills library. */
+async function cmdSkillsAdd(skillFile: string): Promise<void> {
+  const sourcePath = resolve(skillFile);
+  let raw: string;
+  try {
+    raw = readFileSync(sourcePath, 'utf8');
+  } catch (error) {
+    skillsFail(`could not read "${sourcePath}": ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  const fallbackId = basename(sourcePath).replace(/\.skill\.md$/i, '').replace(/\.md$/i, '');
+  const validation = validateSkillFile(raw, fallbackId);
+  if (!validation.valid || !validation.skill) {
+    skillsFail(`"${sourcePath}" is not a valid skill template:`);
+    for (const e of validation.errors) console.error(chalk.red(`    • ${e}`));
+    return;
+  }
+
+  const skillsDir = defaultSkillsLibraryDir();
+  const destPath = join(skillsDir, `${validation.skill.id}.skill.md`);
+  const replacing = existsSync(destPath);
+
+  try {
+    mkdirSync(skillsDir, { recursive: true });
+    copyFileSync(sourcePath, destPath);
+  } catch (error) {
+    skillsFail(`could not copy to "${destPath}": ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  skillsLog('PASS', `${replacing ? 'replaced' : 'added'} skill "${validation.skill.id}" → ${destPath}`);
+  skillsLog(
+    'INFO',
+    `domain=${validation.skill.domain}  tags=[${validation.skill.tags.join(', ')}]  applicablePromptTypes=[${validation.skill.applicablePromptTypes.join(', ') || 'any'}]`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CLI wiring
 // ---------------------------------------------------------------------------
 
@@ -2541,6 +2723,35 @@ async function main(): Promise<void> {
     .option('--library-path <path>', 'FORGE base directory containing the library/ subfolder', DEFAULT_LIBRARY_BASE_PATH)
     .action((project: string, opts: { libraryPath?: string }) => cmdLibraryScaffold(project, opts));
 
+  const skills = program
+    .command('skills')
+    .description("Inspect and manage the stack-detected skills library (list / show / inject / add)");
+
+  skills
+    .command('list')
+    .description("Detect a project's tech stack and list every skill that would be injected into its prompts")
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdSkillsList(pathArg));
+
+  skills
+    .command('show')
+    .description('Print the full template content of one skill')
+    .argument('<skill-id>', 'skill id (the frontmatter "id", or the filename without .skill.md)')
+    .action((skillId: string) => cmdSkillsShow(skillId));
+
+  skills
+    .command('inject')
+    .description('Show the full prompt that would be sent to Claude Code with matching skills injected, for debugging')
+    .argument('<project-path>', 'target project directory')
+    .argument('<prompt-text>', 'the prompt text to inject skills into')
+    .action((pathArg: string, promptText: string) => cmdSkillsInject(pathArg, promptText));
+
+  skills
+    .command('add')
+    .description('Validate a *.skill.md file and copy it into the skills library')
+    .argument('<skill-file>', 'path to the skill template file to add')
+    .action((skillFile: string) => cmdSkillsAdd(skillFile));
+
   const schedule = program
     .command('schedule')
     .description('Manage cron-scheduled recurring tasks (list / add / remove / trigger)');
@@ -2656,6 +2867,134 @@ async function main(): Promise<void> {
         spinner.fail('RETROFIT failed');
         console.error(chalk.red(err instanceof Error ? err.message : String(err)));
         process.exitCode = 1;
+      }
+    });
+
+  const analyze = program
+    .command('analyze')
+    .description(
+      'Deep analysis: dead code, orphaned routes, schema drift, dependency audit, coverage baseline, GitHub Actions CI'
+    )
+    .argument('[project-path]', 'Absolute path to the project to analyze — runs all five modules in sequence')
+    .action(async (projectPathArg?: string) => {
+      if (!projectPathArg) {
+        analyze.help();
+        return;
+      }
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { runDeepAnalysis, writeDeepAnalysisReport } = await import('../retrofit/index.js');
+        process.stdout.write(`\n${tsPrefix('INFO')} ${chalk.bold(`Deep Analysis — ${projectPath}`)}\n`);
+        const report = await withSpinner('Deep Analysis — all 5 modules', () => runDeepAnalysis(projectPath));
+        printDeepAnalysisReport(report);
+        const reportPath = await writeDeepAnalysisReport(report);
+        process.stdout.write(`\n${tsPrefix('PASS')} ${chalk.green(`Full report written to ${reportPath}`)}\n`);
+      } catch (err: unknown) {
+        fail(`forge analyze failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('dead-code')
+    .description('Run DeadCodeDetector only')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { DeadCodeDetector } = await import('../retrofit/index.js');
+        const findings = await withSpinner('Deep Analysis — Dead Code', () => new DeadCodeDetector().detect(projectPath));
+        printFindingList(`${findings.length} dead code finding(s)`, findings.map((f) => `${f.filePath}:${f.lineNumber} — ${f.reason}`));
+      } catch (err: unknown) {
+        fail(`forge analyze dead-code failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('routes')
+    .description('Run OrphanedRouteDetector only')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { OrphanedRouteDetector } = await import('../retrofit/index.js');
+        const findings = await withSpinner('Deep Analysis — Orphaned Routes', () => new OrphanedRouteDetector().detect(projectPath));
+        printFindingList(
+          `${findings.length} orphaned route finding(s)`,
+          findings.map((f) => `${f.routePath} (${f.filePath}) — ${f.reason}`)
+        );
+      } catch (err: unknown) {
+        fail(`forge analyze routes failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('schema')
+    .description('Run SchemaDriftDetector only')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { SchemaDriftDetector } = await import('../retrofit/index.js');
+        const findings = await withSpinner('Deep Analysis — Schema Drift', () => new SchemaDriftDetector().detect(projectPath));
+        printFindingList(`${findings.length} schema drift finding(s)`, findings.map((f) => `[${f.severity}] ${f.tableName} — ${f.detail}`));
+      } catch (err: unknown) {
+        fail(`forge analyze schema failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('deps')
+    .description('Run DependencyAuditor only')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { DependencyAuditor } = await import('../retrofit/index.js');
+        const findings = await withSpinner('Deep Analysis — Dependency Audit', () => new DependencyAuditor().audit(projectPath));
+        printFindingList(
+          `${findings.length} dependency finding(s)`,
+          findings.map((f) => `[${f.findingType}] ${f.packageName} — ${f.detail}`)
+        );
+      } catch (err: unknown) {
+        fail(`forge analyze deps failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('coverage')
+    .description('Run CoverageBaseline only')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { CoverageBaseline } = await import('../retrofit/index.js');
+        const findings = await withSpinner('Deep Analysis — Coverage Baseline', () => new CoverageBaseline().analyze(projectPath));
+        printFindingList(
+          `${findings.length} testable file(s) analyzed`,
+          findings.map((f) => `[${f.priority}] ${f.filePath} — ${f.coveragePercent}%${f.hasTestFile ? '' : ' — NO TEST FILE'}`)
+        );
+      } catch (err: unknown) {
+        fail(`forge analyze coverage failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+  analyze
+    .command('ci')
+    .description('Run ensureGitHubActions only (generate/refresh GitHub Actions workflows)')
+    .argument('<project-path>', 'Absolute path to the project')
+    .action(async (projectPathArg: string) => {
+      const projectPath = resolveProjectPath(projectPathArg);
+      try {
+        const { ensureGitHubActions } = await import('../retrofit/index.js');
+        const created = await withSpinner('Deep Analysis — GitHub Actions CI', () => ensureGitHubActions(projectPath));
+        if (created.length === 0) {
+          console.log(chalk.yellow('\n  no workflow files were written.'));
+          return;
+        }
+        console.log(chalk.bold(`\n  ${created.length} workflow file(s) written:`));
+        for (const f of created) console.log(chalk.dim(`    ${f}`));
+      } catch (err: unknown) {
+        fail(`forge analyze ci failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 

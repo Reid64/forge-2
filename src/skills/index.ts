@@ -1,0 +1,243 @@
+/**
+ * FORGE 2.0 — Skills Library (stack-detected engineering standards injection).
+ *
+ * Distinct from the queue.yaml-declared `skills: [name]` mechanism already wired into
+ * `phase3-executor.ts` (which reads `<skillsDir>/<name>/SKILL.md` only for the skills a queue
+ * entry explicitly opts into, via `loadSkillContent`). This library instead auto-DETECTS the
+ * target project's tech stack from its `package.json` and injects every matching skill's
+ * template into EVERY prompt automatically — a project-wide standards layer that needs no
+ * per-entry opt-in, complementary to (not a replacement for) the existing mechanism.
+ *
+ * Skill files: flat `*.skill.md` files directly under a skills directory (non-recursive), each
+ * with a YAML frontmatter header (`id`, `name`, `domain`, `tags`, `applicablePromptTypes`)
+ * followed by the template body. House style: every export here is guarded — a missing
+ * directory, an unreadable file, or a malformed frontmatter degrades to "skip it" rather than
+ * throwing (skill injection is a quality-of-life layer, never a build blocker).
+ */
+
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { load as parseYaml } from 'js-yaml';
+
+/** One reusable engineering-standards skill, parsed from a `*.skill.md` file. */
+export interface Skill {
+  id: string;
+  name: string;
+  domain: string;
+  template: string;
+  tags: string[];
+  applicablePromptTypes: string[];
+}
+
+/** A queryable collection of loaded {@link Skill}s. */
+export interface SkillsLibrary {
+  skills: Skill[];
+  getByDomain(domain: string): Skill[];
+  getByTags(tags: string[]): Skill[];
+  getForPrompt(promptType: string): Skill[];
+  /** Prepend the skills matching `projectStack` (by tag) to `promptText`, formatted as one block. Returns `promptText` unchanged when nothing matches. */
+  injectIntoContext(promptText: string, projectStack: string[]): string;
+}
+
+/** Heading every injected skills block is prefixed with. */
+export const SKILLS_CONTEXT_HEADER = 'ENGINEERING STANDARDS AND PATTERNS FOR THIS BUILD';
+
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter((v) => v !== '');
+  if (typeof value === 'string') return value.split(',').map((v) => v.trim()).filter((v) => v !== '');
+  return [];
+}
+
+/**
+ * Parse one `*.skill.md` file's frontmatter + body (already-read `raw` text) into a {@link Skill}.
+ * Returns `null` on a malformed frontmatter (no leading `---` block, or a non-object YAML
+ * document). Shared by {@link parseSkillFile} (reads from disk) and {@link validateSkillFile}
+ * (validates in-memory content — e.g. before `forge skills add` copies a candidate file in).
+ */
+function parseSkillContent(raw: string, fallbackId: string): Skill | null {
+  const match = FRONTMATTER_RE.exec(raw);
+  if (!match) return null;
+  const frontmatterText = match[1] ?? '';
+  const body = match[2] ?? '';
+  const parsed = parseYaml(frontmatterText) as Record<string, unknown> | null;
+  if (!parsed || typeof parsed !== 'object') return null;
+  const id = typeof parsed.id === 'string' && parsed.id.trim() !== '' ? parsed.id.trim() : fallbackId;
+  const name = typeof parsed.name === 'string' && parsed.name.trim() !== '' ? parsed.name.trim() : id;
+  const domain = typeof parsed.domain === 'string' && parsed.domain.trim() !== '' ? parsed.domain.trim() : 'general';
+  return {
+    id,
+    name,
+    domain,
+    template: body.trim(),
+    tags: asStringArray(parsed.tags),
+    applicablePromptTypes: asStringArray(parsed.applicablePromptTypes),
+  };
+}
+
+/** Parse one `*.skill.md` file's frontmatter + body into a {@link Skill}. Returns `null` on a malformed/unreadable file (skipped, never thrown). */
+function parseSkillFile(filePath: string, fallbackId: string): Skill | null {
+  try {
+    return parseSkillContent(readFileSync(filePath, 'utf8'), fallbackId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate a raw `*.skill.md` file's content without touching disk — every problem found is
+ * reported (not just pass/fail), so `forge skills add` can tell the operator exactly why a
+ * candidate file was rejected instead of a bare "invalid skill file". `fallbackId` is used only
+ * when the frontmatter omits `id` (mirrors {@link loadSkillsLibrary}'s filename-derived fallback).
+ */
+export function validateSkillFile(
+  raw: string,
+  fallbackId: string
+): { valid: boolean; errors: string[]; skill: Skill | null } {
+  const errors: string[] = [];
+  if (!FRONTMATTER_RE.test(raw)) {
+    errors.push('missing YAML frontmatter (expected a leading "---" ... "---" block before the template body)');
+    return { valid: false, errors, skill: null };
+  }
+  let skill: Skill | null;
+  try {
+    skill = parseSkillContent(raw, fallbackId);
+  } catch (error) {
+    errors.push(`frontmatter is not valid YAML: ${error instanceof Error ? error.message : String(error)}`);
+    return { valid: false, errors, skill: null };
+  }
+  if (!skill) {
+    errors.push('frontmatter did not parse to an object');
+    return { valid: false, errors, skill: null };
+  }
+  if (skill.template.trim() === '') errors.push('the skill body (after the frontmatter) is empty');
+  if (errors.length > 0) return { valid: false, errors, skill: null };
+  return { valid: true, errors: [], skill };
+}
+
+/** Render matching skills as one Markdown block, prefixed with {@link SKILLS_CONTEXT_HEADER}. */
+function renderSkillsBlock(skills: readonly Skill[]): string {
+  const sections = skills.map((s) => `### ${s.name} (${s.domain})\n\n${s.template}`);
+  return `## ${SKILLS_CONTEXT_HEADER}\n\n${sections.join('\n\n')}`;
+}
+
+/**
+ * Load every `*.skill.md` file directly under `skillsDir` into a queryable {@link SkillsLibrary}.
+ * A missing directory or a read error degrades to an empty library (`skills: []`) rather than
+ * throwing.
+ */
+export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
+  const skills: Skill[] = [];
+  try {
+    if (existsSync(skillsDir)) {
+      const files = readdirSync(skillsDir)
+        .filter((f) => f.toLowerCase().endsWith('.skill.md'))
+        .sort();
+      for (const file of files) {
+        const fallbackId = file.replace(/\.skill\.md$/i, '');
+        const skill = parseSkillFile(join(skillsDir, file), fallbackId);
+        if (skill) skills.push(skill);
+      }
+    }
+  } catch {
+    /* best-effort — keep whatever was parsed before the failure */
+  }
+
+  return {
+    skills,
+    getByDomain(domain: string): Skill[] {
+      return skills.filter((s) => s.domain.toLowerCase() === domain.toLowerCase());
+    },
+    getByTags(tags: string[]): Skill[] {
+      const wanted = new Set(tags.map((t) => t.toLowerCase()));
+      return skills.filter((s) => s.tags.some((t) => wanted.has(t.toLowerCase())));
+    },
+    getForPrompt(promptType: string): Skill[] {
+      return skills.filter(
+        (s) =>
+          s.applicablePromptTypes.length === 0 ||
+          s.applicablePromptTypes.some((t) => t.toLowerCase() === promptType.toLowerCase())
+      );
+    },
+    injectIntoContext(promptText: string, projectStack: string[]): string {
+      const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
+      const matching = skills.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
+      if (matching.length === 0) return promptText;
+      return `${renderSkillsBlock(matching)}\n\n---\n\n${promptText}`;
+    },
+  };
+}
+
+/** Technology → the `package.json` dependency names that indicate its presence. */
+const STACK_DETECTORS: ReadonlyArray<{ tech: string; packages: readonly string[] }> = [
+  { tech: 'nextjs', packages: ['next'] },
+  { tech: 'supabase', packages: ['@supabase/supabase-js', '@supabase/ssr', '@supabase/auth-helpers-nextjs'] },
+  { tech: 'tailwind', packages: ['tailwindcss'] },
+  { tech: 'twilio', packages: ['twilio'] },
+  { tech: 'stripe', packages: ['stripe', '@stripe/stripe-js'] },
+  { tech: 'prisma', packages: ['prisma', '@prisma/client'] },
+  { tech: 'drizzle', packages: ['drizzle-orm'] },
+  { tech: 'vitest', packages: ['vitest'] },
+  { tech: 'playwright', packages: ['playwright', '@playwright/test'] },
+];
+
+/**
+ * Detect the target project's tech stack by reading its `package.json` `dependencies` +
+ * `devDependencies`. Returns the subset of `STACK_DETECTORS` technologies present. A missing/
+ * unparseable `package.json` degrades to `[]` (never throws).
+ */
+export function detectProjectStack(projectPath: string): string[] {
+  try {
+    const pkgPath = join(projectPath, 'package.json');
+    if (!existsSync(pkgPath)) return [];
+    const raw = readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(raw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const allDeps = new Set<string>([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.devDependencies ?? {}),
+    ]);
+    const detected: string[] = [];
+    for (const { tech, packages } of STACK_DETECTORS) {
+      if (packages.some((p) => allDeps.has(p))) detected.push(tech);
+    }
+    return detected;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Default skills directory: `<forge-root>/src/skills/templates/` — the on-disk home of every
+ * `*.skill.md` file, resolved relative to this compiled module (`dist/skills/index.js` → up two
+ * levels to the repo root → back down into `src/skills/templates`) — the same repo-root-relative
+ * pattern `phase2-governance.ts`'s `defaultTemplatesDir()` uses for `templates/governance/`.
+ * Exported so `forge skills list/show/inject/add` resolve the IDENTICAL directory
+ * {@link buildSkillsContext} reads from at build time, rather than a second, driftable guess.
+ */
+export function defaultSkillsLibraryDir(): string {
+  try {
+    return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'skills', 'templates');
+  } catch {
+    return join(process.cwd(), 'src', 'skills', 'templates');
+  }
+}
+
+/**
+ * Detect `projectPath`'s stack, load every matching skill from the default skills-library
+ * directory, and return `promptText` with a `## ENGINEERING STANDARDS AND PATTERNS FOR THIS
+ * BUILD` block prepended. Returns `promptText` unchanged when no stack is detected, the library
+ * is empty, or nothing matches — never throws.
+ */
+export function buildSkillsContext(projectPath: string, promptText: string): string {
+  try {
+    const stack = detectProjectStack(projectPath);
+    if (stack.length === 0) return promptText;
+    const library = loadSkillsLibrary(defaultSkillsLibraryDir());
+    if (library.skills.length === 0) return promptText;
+    return library.injectIntoContext(promptText, stack);
+  } catch {
+    return promptText;
+  }
+}

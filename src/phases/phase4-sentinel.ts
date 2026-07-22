@@ -132,6 +132,8 @@ export type SentinelCheckName =
   | 'migration_safety'
   | 'typescript'
   | 'eslint'
+  | 'lint'
+  | 'format'
   | 'build'
   | 'file_integrity'
   | 'file_delta'
@@ -148,6 +150,7 @@ export type SentinelCheckName =
   | 'live_schema_drift'
   | 'dead_code'
   | 'six_laws'
+  | 'bundle_size'
   | 'playwright'
   | 'vitest'
   | 'semgrep'
@@ -480,6 +483,48 @@ export interface SentinelOptions {
   sixLaws?: { projectPath?: string };
   /** Override the Six Laws runner (tests). Default: {@link runSixLawsCheck}. */
   runSixLawsVerification?: (projectPath: string) => Promise<SixLawsResult>;
+  /**
+   * Bundle Size gate (OPTIONAL, Next.js only). When supplied, Sentinel rebuilds the app (`pnpm
+   * run build`) whenever `.next/` is absent or older than `staleMs` (default 10 minutes), parses
+   * `.next/build-manifest.json` for a per-page bundle size (the sum of every chunk a page
+   * declares), and compares it against the previous baseline stored in Build Memory
+   * (`build_runs.bundle_sizes`, keyed by `project_path`, updated on every PASS). No baseline yet
+   * PASSES and establishes one; a per-page increase over `perPageThresholdPercent` (default 15%)
+   * or a total-bundle increase over `totalThresholdPercent` (default 10%) FAILS. Only evaluated
+   * for `promptType` `'feature'`/`'ui'` — FORGE's `PromptType` union has no component/page/
+   * database/migration/documentation members, so these are the closest real analogs to the task
+   * spec's "feature, component, page" run-list / "agent, database, migration, documentation"
+   * skip-list (Session 2: the `ui` shell entry and every page-building `feature` entry are the
+   * UI-producing prompt types) — every other prompt type SKIPS. Auto-skips when no
+   * `next.config.*` is found (not a Next.js project). `projectPath` defaults from this run's
+   * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
+   * alone). An un-parseable manifest or a `pnpm run build` failure SKIPS/FAILS respectively —
+   * never a false pass.
+   */
+  bundleSize?: {
+    projectPath?: string;
+    /** `.next/` staleness threshold (ms) before a rebuild is forced. Default 10 minutes. */
+    staleMs?: number;
+    /** `pnpm run build` timeout (ms) when a rebuild is needed. Default: `buildTimeoutMs`. */
+    buildTimeoutMs?: number;
+    /** Per-page regression threshold (percent). Default 15. */
+    perPageThresholdPercent?: number;
+    /** Total-bundle regression threshold (percent). Default 10. */
+    totalThresholdPercent?: number;
+  };
+  /** Override the bundle-size gate (tests). Default: the built-in Next.js build-manifest reader. */
+  runBundleSizeCheck?: (
+    projectPath: string,
+    promptType: PromptType | undefined,
+    run: CommandRunner,
+    log: (m: string) => void,
+    thresholds: {
+      staleMs: number;
+      buildTimeoutMs: number;
+      perPageThresholdPercent: number;
+      totalThresholdPercent: number;
+    }
+  ) => Promise<CheckResult>;
   /**
    * Full Playwright test suite (OPTIONAL). When supplied, Sentinel runs the COMPLETE Playwright
    * test suite (`pnpm playwright test`) after every prompt — not incremental. Any test failure
@@ -2571,6 +2616,434 @@ async function runRing1EslintCheck(
   return fail('eslint', detail, output, durationMs);
 }
 
+// ---------------------------------------------------------------------------
+// Lint Gate + Format Gate — style-debt prevention
+// ---------------------------------------------------------------------------
+
+/** Config file basenames indicating an ESLint config is present (`.eslintrc.*` / `eslint.config.*`). */
+const ESLINT_CONFIG_FILES: readonly string[] = [
+  '.eslintrc',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.eslintrc.mjs',
+  '.eslintrc.json',
+  '.eslintrc.yml',
+  '.eslintrc.yaml',
+  'eslint.config.js',
+  'eslint.config.cjs',
+  'eslint.config.mjs',
+  'eslint.config.ts',
+];
+
+/** Config file basenames indicating a Prettier config is present (`.prettierrc.*` / `prettier.config.*`). */
+const PRETTIER_CONFIG_FILES: readonly string[] = [
+  '.prettierrc',
+  '.prettierrc.json',
+  '.prettierrc.js',
+  '.prettierrc.cjs',
+  '.prettierrc.mjs',
+  '.prettierrc.yml',
+  '.prettierrc.yaml',
+  '.prettierrc.toml',
+  'prettier.config.js',
+  'prettier.config.cjs',
+  'prettier.config.mjs',
+];
+
+/** Whether any of `names` exists directly under `projectPath` (guarded — never throws). */
+function anyConfigFileExists(projectPath: string, names: readonly string[]): boolean {
+  return names.some((n) => {
+    try {
+      return existsSync(join(projectPath, n));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Whether `prettier` is declared in package.json's devDependencies (guarded — never throws). */
+function hasPrettierDevDependency(projectPath: string): boolean {
+  try {
+    const raw = fs.readFileSync(join(projectPath, 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { devDependencies?: Record<string, unknown> };
+    return !!(parsed.devDependencies && Object.prototype.hasOwnProperty.call(parsed.devDependencies, 'prettier'));
+  } catch {
+    return false;
+  }
+}
+
+/** A single violation parsed from `eslint --format compact` output. */
+export interface EslintCompactViolation {
+  file: string;
+  line: number;
+  col: number;
+  severity: 'Error' | 'Warning';
+  message: string;
+}
+
+const ESLINT_COMPACT_RE = /^(.+?):\s*line\s+(\d+),\s*col\s+(\d+),\s*(Error|Warning)\s*-\s*(.+)$/gm;
+
+/** Parse `eslint --format compact` output into structured violations. Tolerant — never throws. */
+export function parseEslintCompactOutput(output: string): EslintCompactViolation[] {
+  const violations: EslintCompactViolation[] = [];
+  const re = new RegExp(ESLINT_COMPACT_RE.source, ESLINT_COMPACT_RE.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(output)) !== null) {
+    violations.push({
+      file: (m[1] ?? '').trim(),
+      line: parseInt(m[2] ?? '0', 10),
+      col: parseInt(m[3] ?? '0', 10),
+      severity: m[4] === 'Warning' ? 'Warning' : 'Error',
+      message: (m[5] ?? '').trim(),
+    });
+  }
+  return violations;
+}
+
+/** Parse `prettier --check` output into the list of files that would be reformatted. Tolerant. */
+export function parsePrettierCheckOutput(output: string): string[] {
+  const files: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = /^\[warn\]\s+(\S.*)$/.exec(line);
+    if (!m || !m[1]) continue;
+    const candidate = m[1].trim();
+    if (/^(Code style issues|Checking formatting)/i.test(candidate)) continue;
+    files.push(candidate);
+  }
+  return files;
+}
+
+/**
+ * Lint Gate — style-debt prevention. Runs `pnpm eslint src/ --max-warnings 0 --format compact`.
+ * Only runs when an ESLint config (`.eslintrc.*` / `eslint.config.*`) exists under `projectPath` —
+ * a project with no ESLint config has nothing to lint and SKIPS rather than failing (never a false
+ * failure). PASS iff exit code 0; FAIL reports the warning/violation count and the first 10
+ * violations. Prints in the exact FORGE 1.0 gate format via `log`.
+ */
+async function runLintGate(
+  projectPath: string,
+  timeoutMs: number,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  if (!anyConfigFileExists(projectPath, ESLINT_CONFIG_FILES)) {
+    return skip('lint', 'no .eslintrc.* or eslint.config.* found — lint gate skipped');
+  }
+
+  const command = 'pnpm eslint src/ --max-warnings 0 --format compact';
+  log('[GATE] Running gate: lint');
+  log(`[GATE:lint] ${command} (in ${projectPath})`);
+
+  const startedAt = nowMs();
+  const res = await run(command, projectPath, timeoutMs);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    log(`[GATE:lint] FAIL — TIMED OUT after ${Math.round(timeoutMs / 1000)}s`);
+    log('[FAIL] Gate LINT: FAIL');
+    return fail('lint', `lint gate TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, combined, durationMs);
+  }
+  if (res.ok) {
+    log('[GATE:lint] PASS — 0 violations');
+    log('[PASS] Gate LINT: PASS');
+    return pass('lint', '`pnpm eslint src/ --max-warnings 0` passed (exit 0)', combined, durationMs);
+  }
+
+  const violations = parseEslintCompactOutput(combined);
+  const warnings = violations.filter((v) => v.severity === 'Warning').length;
+  const errors = violations.length - warnings;
+  const first10 = violations.slice(0, 10);
+  const detail =
+    violations.length > 0
+      ? `${warnings} warning(s), ${errors} error(s) — ${violations.length} total violation(s)`
+      : `exited ${res.exitCode ?? 'null'}: ${firstLine(combined)}`;
+  log(`[GATE:lint] FAIL — ${detail}`);
+  log('[FAIL] Gate LINT: FAIL');
+  const output = [
+    `${violations.length} violation(s) (first ${Math.min(10, violations.length)} shown):`,
+    ...first10.map((v) => `${v.file}:${v.line}:${v.col} ${v.severity} - ${v.message}`),
+    '',
+    combined,
+  ].join('\n');
+  return fail('lint', detail, output, durationMs);
+}
+
+/**
+ * Format Gate — style-debt prevention. Runs `pnpm prettier --check src/`. Only runs when a
+ * Prettier config (`.prettierrc.*` / `prettier.config.*`) exists under `projectPath` AND `prettier`
+ * is declared in package.json's devDependencies — either absent means SKIP, never a false failure.
+ * PASS iff exit code 0; FAIL lists the files with formatting violations. Prints in the exact FORGE
+ * 1.0 gate format via `log`.
+ */
+async function runFormatGate(
+  projectPath: string,
+  timeoutMs: number,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  if (!anyConfigFileExists(projectPath, PRETTIER_CONFIG_FILES)) {
+    return skip('format', 'no .prettierrc.* or prettier.config.* found — format gate skipped');
+  }
+  if (!hasPrettierDevDependency(projectPath)) {
+    return skip('format', 'prettier not declared in package.json devDependencies — format gate skipped');
+  }
+
+  const command = 'pnpm prettier --check src/';
+  log('[GATE] Running gate: format');
+  log(`[GATE:format] ${command} (in ${projectPath})`);
+
+  const startedAt = nowMs();
+  const res = await run(command, projectPath, timeoutMs);
+  const durationMs = nowMs() - startedAt;
+  const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
+
+  if (res.timedOut) {
+    log(`[GATE:format] FAIL — TIMED OUT after ${Math.round(timeoutMs / 1000)}s`);
+    log('[FAIL] Gate FORMAT: FAIL');
+    return fail('format', `format gate TIMED OUT after ${Math.round(timeoutMs / 1000)}s`, combined, durationMs);
+  }
+  if (res.ok) {
+    log('[GATE:format] PASS — all files formatted');
+    log('[PASS] Gate FORMAT: PASS');
+    return pass('format', '`pnpm prettier --check src/` passed (exit 0)', combined, durationMs);
+  }
+
+  const files = parsePrettierCheckOutput(combined);
+  const detail =
+    files.length > 0
+      ? `${files.length} file(s) with formatting violations`
+      : `exited ${res.exitCode ?? 'null'}: ${firstLine(combined)}`;
+  log(`[GATE:format] FAIL — ${detail}`);
+  log('[FAIL] Gate FORMAT: FAIL');
+  const output = [`${files.length} file(s) need formatting:`, ...files.map((f) => `- ${f}`), '', combined].join('\n');
+  return fail('format', detail, output, durationMs);
+}
+
+// ---------------------------------------------------------------------------
+// Bundle Size Gate — Next.js per-page bundle budget vs Build Memory baseline
+// ---------------------------------------------------------------------------
+
+/**
+ * Prompt types the bundle-size gate evaluates. Task spec: "feature, component, page." FORGE's
+ * `PromptType` union (`src/engine/queue-generator.ts`) has no `component`/`page` member — `'ui'`
+ * (the shell entry) and `'feature'` (every page-building entry, per REBUILD Session 2) are the
+ * real UI-producing types and the closest analogs. Every other prompt type — including the task
+ * spec's explicit skip-list `agent`/`database`/`migration`/`documentation` (only `agent` exists
+ * as a real `PromptType`; `schema` is the closest analog to `database`/`migration`) — is
+ * auto-skipped by simply not being in this allow-list.
+ */
+const BUNDLE_SIZE_GATE_PROMPT_TYPES: ReadonlySet<PromptType> = new Set<PromptType>(['feature', 'ui']);
+
+/** Default per-page bundle-size regression threshold (percent). */
+const DEFAULT_BUNDLE_SIZE_PER_PAGE_THRESHOLD_PERCENT = 15;
+/** Default total-bundle regression threshold (percent). */
+const DEFAULT_BUNDLE_SIZE_TOTAL_THRESHOLD_PERCENT = 10;
+/** `.next/` is considered stale (needs a fresh `pnpm run build`) after this many ms. */
+const DEFAULT_BUNDLE_SIZE_STALE_MS = 10 * 60 * 1000;
+/** `next.config.*` filenames used to auto-detect a Next.js project. */
+const NEXT_CONFIG_FILENAMES = ['next.config.js', 'next.config.mjs', 'next.config.ts', 'next.config.cjs'];
+
+/** Shape of `.next/build-manifest.json` — the fields the bundle-size gate reads. */
+interface NextBuildManifest {
+  pages?: Record<string, string[]>;
+}
+
+/** Per-page bundle size in bytes, keyed by page route (e.g. `/`, `/about`). */
+export type BundleSizeMap = Record<string, number>;
+
+/**
+ * Sum the on-disk size of every chunk `.next/build-manifest.json` declares for each page. A
+ * chunk that cannot be stat'd (already pruned, race with a concurrent build) is skipped rather
+ * than failing the whole parse.
+ */
+function computeBundleSizesFromManifest(manifest: NextBuildManifest, nextDir: string): BundleSizeMap {
+  const sizes: BundleSizeMap = {};
+  for (const [page, chunks] of Object.entries(manifest.pages ?? {})) {
+    let total = 0;
+    for (const chunk of chunks) {
+      try {
+        total += fs.statSync(join(nextDir, chunk)).size;
+      } catch {
+        // Chunk file missing — skip it, don't fail the whole page.
+      }
+    }
+    sizes[page] = total;
+  }
+  return sizes;
+}
+
+/** Whether `.next/build-manifest.json` is absent or older than `staleMs`. */
+function isNextBuildStale(projectPath: string, staleMs: number): boolean {
+  try {
+    const stat = fs.statSync(join(projectPath, '.next', 'build-manifest.json'));
+    return Date.now() - stat.mtimeMs > staleMs;
+  } catch {
+    return true; // absent — definitely stale.
+  }
+}
+
+/** A single page's bundle-size regression against the baseline. */
+export interface BundleSizeRegression {
+  page: string;
+  baselineBytes: number;
+  currentBytes: number;
+  percentIncrease: number;
+}
+
+/**
+ * Compare `current` bundle sizes against `baseline`, returning every page whose size grew more
+ * than `perPageThresholdPercent`. A page absent from the baseline (new since the last recorded
+ * build) has nothing to regress against and is skipped — only present-in-both pages are compared.
+ */
+export function diffBundleSizes(
+  baseline: BundleSizeMap,
+  current: BundleSizeMap,
+  perPageThresholdPercent: number
+): BundleSizeRegression[] {
+  const regressions: BundleSizeRegression[] = [];
+  for (const [page, currentBytes] of Object.entries(current)) {
+    const baselineBytes = baseline[page];
+    if (baselineBytes === undefined || baselineBytes <= 0) continue;
+    const percentIncrease = ((currentBytes - baselineBytes) / baselineBytes) * 100;
+    if (percentIncrease > perPageThresholdPercent) {
+      regressions.push({ page, baselineBytes, currentBytes, percentIncrease });
+    }
+  }
+  return regressions.sort((a, b) => b.percentIncrease - a.percentIncrease);
+}
+
+/**
+ * Bundle Size gate. Prints in the FORGE 1.0 gate format (matching {@link runLintGate} /
+ * {@link runFormatGate}). Rebuilds when `.next/` is stale, parses the build manifest, and
+ * compares against (then updates) the Build Memory baseline. See `SentinelOptions.bundleSize`
+ * for the full contract. Never throws (Iron Law 3) — every step degrades to SKIP or FAIL, never
+ * a fabricated PASS.
+ */
+async function runBundleSizeGate(
+  projectPath: string,
+  promptType: PromptType | undefined,
+  run: CommandRunner,
+  log: (m: string) => void,
+  thresholds: {
+    staleMs: number;
+    buildTimeoutMs: number;
+    perPageThresholdPercent: number;
+    totalThresholdPercent: number;
+  }
+): Promise<CheckResult> {
+  if (!promptType || !BUNDLE_SIZE_GATE_PROMPT_TYPES.has(promptType)) {
+    return skip(
+      'bundle_size',
+      `prompt type '${promptType ?? 'unknown'}' is not feature/ui — bundle size gate skipped`
+    );
+  }
+  if (!anyConfigFileExists(projectPath, NEXT_CONFIG_FILENAMES)) {
+    return skip('bundle_size', 'no next.config.* found — not a Next.js project, bundle size gate skipped');
+  }
+
+  const { staleMs, buildTimeoutMs, perPageThresholdPercent, totalThresholdPercent } = thresholds;
+  log('[GATE] Running gate: bundle-size');
+  const startedAt = nowMs();
+
+  if (isNextBuildStale(projectPath, staleMs)) {
+    log(`[GATE:bundle-size] .next/ absent or older than ${Math.round(staleMs / 60000)}m — running pnpm run build`);
+    const buildRes = await run('pnpm run build', projectPath, buildTimeoutMs);
+    if (!buildRes.ok) {
+      const why = firstLine(buildRes.stderr) || firstLine(buildRes.stdout) || `exit ${buildRes.exitCode ?? 'null'}`;
+      log(`[GATE:bundle-size] FAIL — pnpm run build failed: ${why}`);
+      log('[FAIL] Gate BUNDLE-SIZE: FAIL');
+      return fail(
+        'bundle_size',
+        `pnpm run build failed while refreshing .next/ for the bundle size gate: ${why}`,
+        [buildRes.stdout, buildRes.stderr].filter((s) => s.trim() !== '').join('\n'),
+        nowMs() - startedAt
+      );
+    }
+  }
+
+  const manifestPath = join(projectPath, '.next', 'build-manifest.json');
+  const manifestRaw = await readTextSafe(manifestPath);
+  if (manifestRaw === null) {
+    log('[GATE:bundle-size] SKIP — .next/build-manifest.json not found after build');
+    return skip('bundle_size', `.next/build-manifest.json not found at ${manifestPath} — bundle size not evaluated`);
+  }
+  let manifest: NextBuildManifest;
+  try {
+    manifest = JSON.parse(manifestRaw) as NextBuildManifest;
+  } catch (error) {
+    log(`[GATE:bundle-size] SKIP — build-manifest.json could not be parsed (${describe(error)})`);
+    return skip('bundle_size', 'build-manifest.json could not be parsed — bundle size not evaluated');
+  }
+
+  const currentSizes = computeBundleSizesFromManifest(manifest, join(projectPath, '.next'));
+  if (Object.keys(currentSizes).length === 0) {
+    log('[GATE:bundle-size] SKIP — build-manifest.json declares no pages');
+    return skip('bundle_size', 'build-manifest.json declares no pages — bundle size not evaluated');
+  }
+
+  const baseline = await BuildMemory.builds.getLatestBundleSizeBaseline(projectPath);
+  const durationMs = nowMs() - startedAt;
+
+  if (baseline === null) {
+    await BuildMemory.builds.updateBundleSizeBaseline(projectPath, currentSizes);
+    log(`[GATE:bundle-size] BUNDLE SIZE BASELINE ESTABLISHED (${Object.keys(currentSizes).length} page(s))`);
+    log('[PASS] Gate BUNDLE-SIZE: PASS');
+    return pass(
+      'bundle_size',
+      'BUNDLE SIZE BASELINE ESTABLISHED',
+      Object.entries(currentSizes).map(([p, b]) => `${p}: ${b} bytes`).join('\n'),
+      durationMs
+    );
+  }
+
+  const regressions = diffBundleSizes(baseline.bundleSizes, currentSizes, perPageThresholdPercent);
+  const baselineTotal = Object.values(baseline.bundleSizes).reduce((a, b) => a + b, 0);
+  const currentTotal = Object.values(currentSizes).reduce((a, b) => a + b, 0);
+  const totalPercentIncrease = baselineTotal > 0 ? ((currentTotal - baselineTotal) / baselineTotal) * 100 : 0;
+  const totalRegressed = baselineTotal > 0 && totalPercentIncrease > totalThresholdPercent;
+
+  const perPageLines = Object.entries(currentSizes).map(([p, b]) => {
+    const base = baseline.bundleSizes[p];
+    const pct = base !== undefined && base > 0 ? `${(((b - base) / base) * 100).toFixed(2)}%` : 'new';
+    return `${p}: ${base ?? 'new'} -> ${b} bytes (${pct})`;
+  });
+
+  if (regressions.length === 0 && !totalRegressed) {
+    await BuildMemory.builds.updateBundleSizeBaseline(projectPath, currentSizes);
+    log(
+      `[GATE:bundle-size] PASS — ${Object.keys(currentSizes).length} page(s) within ${perPageThresholdPercent}% per-page / ${totalThresholdPercent}% total`
+    );
+    log('[PASS] Gate BUNDLE-SIZE: PASS');
+    return pass(
+      'bundle_size',
+      `${Object.keys(currentSizes).length} page(s) within threshold (${perPageThresholdPercent}% per-page, ${totalThresholdPercent}% total)`,
+      [`Total: ${baselineTotal} -> ${currentTotal} bytes (${totalPercentIncrease.toFixed(2)}%).`, ...perPageLines].join('\n'),
+      durationMs
+    );
+  }
+
+  const reasons: string[] = [];
+  if (regressions.length > 0) {
+    reasons.push(
+      `${regressions.length} page(s) increased > ${perPageThresholdPercent}%: ` +
+        regressions
+          .map((r) => `${r.page} (+${r.percentIncrease.toFixed(1)}%, ${r.baselineBytes}->${r.currentBytes}b)`)
+          .join(', ')
+    );
+  }
+  if (totalRegressed) {
+    reasons.push(
+      `total bundle increased ${totalPercentIncrease.toFixed(1)}% > ${totalThresholdPercent}% (${baselineTotal}->${currentTotal}b)`
+    );
+  }
+  const detail = reasons.join('; ');
+  log(`[GATE:bundle-size] FAIL — ${detail}`);
+  log('[FAIL] Gate BUNDLE-SIZE: FAIL');
+  return fail('bundle_size', detail, [`Total: ${baselineTotal} -> ${currentTotal} bytes (${totalPercentIncrease.toFixed(2)}%).`, ...perPageLines].join('\n'), durationMs);
+}
+
 /**
  * Parse Supabase-generated `database.types.ts` to extract declared table names.
  * Looks for the `Tables: {` block inside the `Database` type and returns first-level property
@@ -2962,6 +3435,22 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     }
   }
 
+  // --- Lint Gate (style-debt prevention) — auto-detects .eslintrc.*/eslint.config.*, else SKIPs ---
+  if (shouldSkipRest()) {
+    record(skipRest('lint'));
+  } else {
+    log('check: Lint Gate (pnpm eslint src/ --max-warnings 0 --format compact)');
+    record(await runLintGate(projectPath, tscTimeoutMs, run, log));
+  }
+
+  // --- Format Gate (style-debt prevention) — auto-detects .prettierrc.*/prettier.config.*, else SKIPs
+  if (shouldSkipRest()) {
+    record(skipRest('format'));
+  } else {
+    log('check: Format Gate (pnpm prettier --check src/)');
+    record(await runFormatGate(projectPath, tscTimeoutMs, run, log));
+  }
+
   // --- Ring 1c. Schema Drift vs database.types.ts (OPTIONAL when ring1SchemaDrift is configured) -
   // Reads database.types.ts, parses declared table names, compares against live Supabase via the
   // REST API. Skips gracefully when the file is absent or credentials are unavailable (never a
@@ -3341,6 +3830,38 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     }
   }
 
+  // --- 16b. Bundle Size Gate (OPTIONAL, Next.js only — feature/ui prompts; runs after Six Laws) --
+  // Not part of the mandatory Contract-13 five: appended only when `bundleSize` is supplied. Auto-
+  // skips for any prompt type other than feature/ui and for a non-Next.js project (no
+  // next.config.*). Rebuilds `.next/` when stale, compares per-page + total bundle size against
+  // the Build Memory baseline (`build_runs.bundle_sizes`), and ratchets the baseline forward on
+  // every PASS. See `SentinelOptions.bundleSize` for the full contract.
+  if (options.bundleSize) {
+    if (shouldSkipRest()) {
+      record(skipRest('bundle_size'));
+    } else {
+      log('check 16b: Bundle Size Gate (.next/build-manifest.json vs Build Memory baseline)');
+      const bundlePath = options.bundleSize.projectPath ?? projectPath;
+      const thresholds = {
+        staleMs: options.bundleSize.staleMs ?? DEFAULT_BUNDLE_SIZE_STALE_MS,
+        buildTimeoutMs: options.bundleSize.buildTimeoutMs ?? buildTimeoutMs,
+        perPageThresholdPercent:
+          options.bundleSize.perPageThresholdPercent ?? DEFAULT_BUNDLE_SIZE_PER_PAGE_THRESHOLD_PERCENT,
+        totalThresholdPercent:
+          options.bundleSize.totalThresholdPercent ?? DEFAULT_BUNDLE_SIZE_TOTAL_THRESHOLD_PERCENT,
+      };
+      const runBundle = options.runBundleSizeCheck ?? runBundleSizeGate;
+      let bundleResult: CheckResult;
+      try {
+        bundleResult = await runBundle(bundlePath, options.promptType, run, log, thresholds);
+      } catch (error) {
+        log(`WARNING: bundle size gate failed (${describe(error)})`);
+        bundleResult = skip('bundle_size', 'bundle size gate threw — not evaluated');
+      }
+      record(bundleResult);
+    }
+  }
+
   // --- 17. Full Playwright Test Suite (OPTIONAL — not incremental; runs after every prompt) -----
   // Not part of the mandatory Contract-13 five: appended only when `playwright` is supplied. Unlike
   // the incremental-tester, this runs the COMPLETE Playwright suite (`pnpm playwright test`) every
@@ -3644,6 +4165,10 @@ export function categorizeError(checkName: SentinelCheckName | null, errorText: 
     case 'dependencies':
       return 'dependency';
     case 'file_integrity':
+      return 'config';
+    case 'eslint':
+    case 'lint':
+    case 'format':
       return 'config';
     default:
       break;

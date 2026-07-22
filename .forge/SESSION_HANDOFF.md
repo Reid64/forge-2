@@ -1,79 +1,44 @@
-# FORGE 2.0 -- Session Handoff
-**Project:** forge-2
-**Build ID:** 324652b0-b93f-4090-b72c-05ef1eebbba6
-**Run:** 1
-**Generated:** 2026-07-17T00:41:39.645Z
-**End Reason:** FAILED
+# FORGE Session Handoff
 
----
+## Build Summary
+- **Build ID:** unknown
+- **End Reason:** UNKNOWN
+- **End Time:** unknown
+- **Last Prompt Executed:** 0
+- **Git Branch:** unknown
+- **Git Commit:** unknown
+- **Dirty Working Tree:** false
 
-## 1. Build Summary
+## Completed This Run
+- Prompts executed: 0
+- Prompts passed: 0
+- First pass rate: N/A
+- Tokens consumed: 0
+- Duration: 0 minutes
 
-| Metric | Value |
-|--------|-------|
-| Prompts Executed | 2 |
-| Passed | 1 |
-| Failed | 1 |
-| First-Pass Rate | 50.0% |
-| Duration | 18 minutes |
-| Start Time | 2026-07-17T00:23:41.968Z |
+## Failed This Run
+- Prompts failed: 0
 
----
+## Active Blockers
+- None recorded. Check state/halt-reason.md if a halt occurred.
 
-## 2. Queue Status
+## Queue Status
+- Total prompts: 0
+- Completed: 0
+- Remaining: 0
 
-| Metric | Value |
-|--------|-------|
-| Total Prompts | 2 |
-| Completed | 2 |
-| Remaining | 0 |
-| Next Prompt Index | 3 |
+## Next Run Plan
+- Resume from prompt 1
+- Run quality gates (tsc, lint, build) before beginning
+- Verify no stale lock at .forge/forge_running.lock
+- Pull latest from forge_memory master before starting
 
----
+## Environment Notes
+- Project path: C:\Users\manag\Documents\forge-2
+- Ensure node_modules is installed (pnpm install)
+- Verify .env.local is present and correct
 
-## 3. Active Blockers
-
-None.
-
----
-
-## 4. Git State
-
-- Commit: unknown
-- Dirty: Clean
-- Fingerprint: ...
-
----
-
-## 5. Files Modified This Run
-
-None recorded.
-
----
-
-## 6. Next Run Launch Command
-
-```powershell
-cd C:\Users\manag\Documents\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"; $env:ANTHROPIC_API_KEY=$null; $env:DANGEROUSLY_SKIP_PERMISSIONS=1; powershell -ExecutionPolicy Bypass -File .\forge.ps1 -project forge-2 -startFrom 3
-```
-
----
-## 7. What Was Built
-
-A partial implementation was completed for **forge-2**, with 1 of 2 tests passing by the end of the run. One feature or component reached a working state, while a second failed and could not be resolved within the allotted prompts.
-
----
-
-## 8. Recommendations
-
-- **Investigate the failing test** before beginning a follow-up run — review the test expectations and any error output to understand the root cause.
-- Since no files were explicitly flagged and no blockers were reported, the failure is likely a logic or implementation gap rather than an environment issue.
-- Consider breaking the failing requirement into smaller, verifiable steps in the next run to isolate where the implementation diverges from expectations.
-
----
-
-## 9. Notes
-
-- Run ended in a **FAILED** state despite no blockers being present, suggesting the issue is internal to the implementation.
-- All prompts were consumed (`0 remaining`), so the run reached its limit without resolving the second test.
-- No files were listed as output artifacts — confirm whether any partial work was saved and should be carried forward.
+## Learning Highlights
+- Consult forge_memory.db fix_patterns for error patterns logged this run
+- Review pending_evolutions table for proposed FORGE self-improvements
+- Update decision_weights manually if architectural choices were made

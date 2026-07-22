@@ -43,6 +43,7 @@ interface BuildRunRow {
   toolchain_manifest: string;
   governance_hash: string | null;
   queue_hash: string | null;
+  bundle_sizes: string | null;
   sentinel_interventions: number;
   autonomous_recovery_mode: number;
   parallel_prompts_used: number;
@@ -69,6 +70,7 @@ function rowToBuildRun(row: BuildRunRow): BuildRun {
     toolchain_manifest: fromJsonText(row.toolchain_manifest, {}),
     governance_hash: row.governance_hash,
     queue_hash: row.queue_hash,
+    bundle_sizes: row.bundle_sizes === null ? null : fromJsonText(row.bundle_sizes, {}),
     sentinel_interventions: row.sentinel_interventions,
     autonomous_recovery_mode: fromSqliteBool(row.autonomous_recovery_mode),
     parallel_prompts_used: fromSqliteBool(row.parallel_prompts_used),
@@ -85,12 +87,12 @@ export function createBuild(input: NewBuildRun): Promise<BuildRun | null> {
       `INSERT INTO build_runs (
         id, project_name, project_path, stack_fingerprint, status, started_at, completed_at,
         total_prompts, completed_prompts, failed_prompts, total_errors, total_tokens, total_cost_usd,
-        machine_id, toolchain_manifest, governance_hash, queue_hash, sentinel_interventions,
+        machine_id, toolchain_manifest, governance_hash, queue_hash, bundle_sizes, sentinel_interventions,
         autonomous_recovery_mode, parallel_prompts_used, dry_run
       ) VALUES (
         @id, @project_name, @project_path, @stack_fingerprint, @status, @started_at, @completed_at,
         @total_prompts, @completed_prompts, @failed_prompts, @total_errors, @total_tokens, @total_cost_usd,
-        @machine_id, @toolchain_manifest, @governance_hash, @queue_hash, @sentinel_interventions,
+        @machine_id, @toolchain_manifest, @governance_hash, @queue_hash, @bundle_sizes, @sentinel_interventions,
         @autonomous_recovery_mode, @parallel_prompts_used, @dry_run
       )`
     ).run({
@@ -111,6 +113,7 @@ export function createBuild(input: NewBuildRun): Promise<BuildRun | null> {
       toolchain_manifest: toJsonText(input.toolchain_manifest ?? {}),
       governance_hash: input.governance_hash ?? null,
       queue_hash: input.queue_hash ?? null,
+      bundle_sizes: input.bundle_sizes === undefined || input.bundle_sizes === null ? null : toJsonText(input.bundle_sizes),
       sentinel_interventions: input.sentinel_interventions ?? 0,
       autonomous_recovery_mode: toSqliteBool(input.autonomous_recovery_mode ?? false),
       parallel_prompts_used: toSqliteBool(input.parallel_prompts_used ?? false),
@@ -125,6 +128,7 @@ export function createBuild(input: NewBuildRun): Promise<BuildRun | null> {
 const UPDATE_TRANSFORMS: Partial<Record<keyof BuildRunUpdate, (v: unknown) => unknown>> = {
   stack_fingerprint: (v) => toJsonText(v),
   toolchain_manifest: (v) => toJsonText(v),
+  bundle_sizes: (v) => (v === null || v === undefined ? null : toJsonText(v)),
   autonomous_recovery_mode: (v) => toSqliteBool(v as boolean),
   parallel_prompts_used: (v) => toSqliteBool(v as boolean),
   dry_run: (v) => toSqliteBool(v as boolean),
@@ -182,5 +186,51 @@ export function getBuildsByProject(
       .prepare('SELECT * FROM build_runs WHERE project_name = ? ORDER BY created_at DESC')
       .all(projectName) as BuildRunRow[];
     return rows.map(rowToBuildRun);
+  });
+}
+
+/** Per-page Next.js bundle size baseline, plus the build_run row it lives on (for the update path). */
+export interface BundleSizeBaseline {
+  buildRunId: string;
+  bundleSizes: Record<string, number>;
+}
+
+/**
+ * Read the most recent build_run's bundle-size baseline for `projectPath` (Sentinel's
+ * bundle-size gate). Returns `null` when Build Memory is unreachable, no build_run exists for
+ * this project path yet, or the latest one has never recorded a baseline — all three are "no
+ * baseline exists" from the gate's point of view (never a false failure).
+ */
+export function getLatestBundleSizeBaseline(projectPath: string): Promise<BundleSizeBaseline | null> {
+  return runQuery<BundleSizeBaseline>(TABLE + '.getLatestBundleSizeBaseline', (db) => {
+    const row = db
+      .prepare('SELECT id, bundle_sizes FROM build_runs WHERE project_path = ? ORDER BY created_at DESC LIMIT 1')
+      .get(projectPath) as { id: string; bundle_sizes: string | null } | undefined;
+    if (!row || row.bundle_sizes === null) return null;
+    const bundleSizes = fromJsonText<Record<string, number>>(row.bundle_sizes, {});
+    if (Object.keys(bundleSizes).length === 0) return null;
+    return { buildRunId: row.id, bundleSizes };
+  });
+}
+
+/**
+ * Store `sizes` as the new bundle-size baseline on the most recent build_run row for
+ * `projectPath` (Sentinel's bundle-size gate, on every PASS). Resolves `false` when no build_run
+ * exists yet for this project path to attach the baseline to, and `null` when Build Memory is
+ * unreachable or the write itself throws — the gate treats both the same as any other
+ * degraded-Build-Memory condition (Contract 4): the PASS itself still stands, only the baseline
+ * write is skipped.
+ */
+export function updateBundleSizeBaseline(
+  projectPath: string,
+  sizes: Record<string, number>
+): Promise<boolean | null> {
+  return runQuery<boolean>(TABLE + '.updateBundleSizeBaseline', (db) => {
+    const row = db
+      .prepare('SELECT id FROM build_runs WHERE project_path = ? ORDER BY created_at DESC LIMIT 1')
+      .get(projectPath) as { id: string } | undefined;
+    if (!row) return false;
+    db.prepare('UPDATE build_runs SET bundle_sizes = ? WHERE id = ?').run(toJsonText(sizes), row.id);
+    return true;
   });
 }

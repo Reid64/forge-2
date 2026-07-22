@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '2.5.0';
+export const CURRENT_SCHEMA_VERSION = '2.8.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -558,6 +558,63 @@ const SYSTEM_5_ORCHESTRATOR_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_orchestrator_queue_runs_status ON orchestrator_queue_runs(status);
 `;
 
+/**
+ * Deep analysis tables (schema bump 2.5.0 -> 2.7.0): dead code findings, orphaned routes,
+ * schema drift findings, and dependency audit findings.
+ */
+const DEEP_ANALYSIS_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS dead_code_findings (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      project_path   TEXT NOT NULL,
+      file_path      TEXT NOT NULL,
+      symbol_name    TEXT NOT NULL,
+      symbol_type    TEXT NOT NULL,
+      reason         TEXT NOT NULL,
+      line_number    INTEGER,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dead_code_findings_build ON dead_code_findings(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_dead_code_findings_path ON dead_code_findings(project_path);
+
+    CREATE TABLE IF NOT EXISTS orphaned_routes (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      project_path   TEXT NOT NULL,
+      route_path     TEXT NOT NULL,
+      http_methods   TEXT NOT NULL,
+      reason         TEXT NOT NULL,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_orphaned_routes_build ON orphaned_routes(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_orphaned_routes_path ON orphaned_routes(project_path);
+
+    CREATE TABLE IF NOT EXISTS schema_drift_findings (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      project_path   TEXT NOT NULL,
+      finding_type   TEXT NOT NULL,
+      table_name     TEXT NOT NULL,
+      detail         TEXT NOT NULL,
+      severity       TEXT NOT NULL,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_schema_drift_findings_build ON schema_drift_findings(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_schema_drift_findings_severity ON schema_drift_findings(severity);
+
+    CREATE TABLE IF NOT EXISTS dependency_audit_findings (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      project_path   TEXT NOT NULL,
+      package_name   TEXT NOT NULL,
+      finding_type   TEXT NOT NULL,
+      detail         TEXT NOT NULL,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dependency_audit_findings_build ON dependency_audit_findings(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_dependency_audit_findings_package ON dependency_audit_findings(package_name);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -587,6 +644,11 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'validation_events',
   'orchestrator_manifests',
   'orchestrator_queue_runs',
+  // Deep analysis tables (schema 2.7.0)
+  'dead_code_findings',
+  'orphaned_routes',
+  'schema_drift_findings',
+  'dependency_audit_findings',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -889,6 +951,18 @@ export function initializeForgeMemory(dbPath?: string): void {
   // 2.3.0 -> 2.5.0 (System 5 — Sentinel Prime — and the Orchestrator): sentinel_prime_runs,
   // validation_events, orchestrator_manifests, orchestrator_queue_runs.
   db.exec(SYSTEM_5_ORCHESTRATOR_SCHEMA_SQL);
+  // 2.5.0 -> 2.7.0 (Deep Analysis): dead_code_findings, orphaned_routes,
+  // schema_drift_findings, dependency_audit_findings.
+  db.exec(DEEP_ANALYSIS_SCHEMA_SQL);
+  // 2.7.0 -> 2.8.0 (Bundle Size Gate): per-page Next.js bundle-size baseline, stored as a JSON
+  // map (route -> bytes) on the latest build_runs row for a project_path. ALTER TABLE ADD COLUMN
+  // is safe against a live db with data; guarded because SQLite errors if the column already
+  // exists.
+  try {
+    db.exec('ALTER TABLE build_runs ADD COLUMN bundle_sizes TEXT');
+  } catch {
+    /* column already present — idempotent across repeated init calls */
+  }
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

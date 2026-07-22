@@ -52,6 +52,7 @@ import { scanProjectSecurity } from '../tools/agent-shield.js';
 import { detectSchemaDrift } from '../tools/schema-validator.js';
 import { HookManager } from '../engine/hook-manager.js';
 import { onSessionStart } from '../memory/session-hooks.js';
+import { ensureGitHubActions } from '../retrofit/github-actions-generator.js';
 import type { SecurityReport, SessionContext } from '../types/index.js';
 
 const execAsync = promisify(exec);
@@ -876,6 +877,25 @@ export async function runPhase0Scout(
     const detail = error instanceof Error ? error.message : String(error);
     log(`WARNING: session context load error — ${detail}`);
     toolchainManifest.warnings.push(`Session context load error: ${detail}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 13: GitHub Actions CI/CD workflow generation
+  // -------------------------------------------------------------------------
+  log('step 13: GitHub Actions workflow generation');
+  try {
+    const hasGit = await pathExists(join(projectPath, '.git'));
+    const hasWorkflows = await pathExists(join(projectPath, '.github', 'workflows'));
+    if (hasGit && !hasWorkflows) {
+      const created = await ensureGitHubActions(projectPath);
+      log(`GitHub Actions: wrote ${created.length} workflow file(s)`);
+    } else {
+      log(`GitHub Actions: skipped (git=${hasGit}, workflows already present=${hasWorkflows})`);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`WARNING: GitHub Actions workflow generation error — ${detail}`);
+    toolchainManifest.warnings.push(`GitHub Actions workflow generation error: ${detail}`);
   }
 
   // Recompute passed — AgentShield (step 9) may have added blockers after the

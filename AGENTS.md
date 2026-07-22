@@ -333,3 +333,103 @@ Generated `queue.yaml` is ordered by dependency tier:
 | `src/orchestrator/governance-sync.ts` | `syncGovernanceDocs`/`syncBeforeQueueRun` — DIRECTIVE-016, native `*.md` sync |
 | `src/orchestrator/types.ts` | `QueueStatus`, `ManifestStatus`, `QueueEntry`, `LibraryManifest`, `OrchestratorOptions`, `OrchestratorResult`, `QueueTransitionEvent` |
 | `src/orchestrator/index.ts` | Barrel export — re-exports every module's factory function |
+
+---
+
+## Agent: DeadCodeDetector (src/retrofit/dead-code-detector.ts)
+
+- **Purpose:** Enhanced Retrofit deep-analysis detector — a regex-based (not AST-based) scan of a target project's `src/**/*.ts(x)` tree for exported symbols with zero cross-file imports, plus three same-file signals: local functions defined but never called, local variables assigned but never read, and imports never used in the importing file. Excludes test/story files and Next.js framework entry points (`page.tsx`, `route.ts`, `index.ts`, etc. — a symbol only "used" by the framework's own routing convention is not dead). One instance of the RETROFIT pipeline's second, deeper analysis layer (`runDeepAnalysis`), purpose-built for existing/legacy codebases rather than greenfield builds. Read-only against the target project; the only write is a best-effort `dead_code_findings` persistence step that never throws (Contract 4).
+- **Status:** COMPLETE
+- **CLI:** `forge analyze dead-code <project-path>` (standalone); also runs as part of `forge analyze <project-path>` and every `forge retrofit` invocation (via `runRetrofitPipeline` → `runDeepAnalysis`, RET-1)
+- **Entry Point:** `src/retrofit/dead-code-detector.ts` → `DeadCodeDetector` class, `createDeadCodeDetector()` factory, `.detect(projectPath: string): Promise<DeadCodeFinding[]>`
+- **Exports:** `DeadCodeDetector`, `createDeadCodeDetector`, `DeadCodeFinding`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso`)
+- **Database tables:** `dead_code_findings` (write, best-effort)
+
+---
+
+## Agent: OrphanedRouteDetector (src/retrofit/orphaned-route-detector.ts)
+
+- **Purpose:** Enhanced Retrofit deep-analysis detector — enumerates every Next.js API route under `src/app/api/**/route.ts` and its exported HTTP methods, then cross-references every non-route `.ts(x)` file in `src/**` for `fetch()`/`axios()`/Supabase-client string literals that reference an API path. A route with zero frontend callers anywhere in the codebase is flagged orphaned, except for a small allowlist of routes legitimately called from outside the frontend (health checks, webhook receivers, auth-library internals). Regex-based, not AST-based. Read-only; the only write is a best-effort `orphaned_routes` persistence step that never throws (Contract 4).
+- **Status:** COMPLETE
+- **CLI:** `forge analyze routes <project-path>` (standalone); also runs as part of `forge analyze <project-path>` and every `forge retrofit` invocation (RET-1)
+- **Entry Point:** `src/retrofit/orphaned-route-detector.ts` → `OrphanedRouteDetector` class, `createOrphanedRouteDetector()` factory, `.detect(projectPath: string): Promise<OrphanedRouteFinding[]>`
+- **Exports:** `OrphanedRouteDetector`, `createOrphanedRouteDetector`, `OrphanedRouteFinding`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso`)
+- **Database tables:** `orphaned_routes` (write, best-effort)
+
+---
+
+## Agent: SchemaDriftDetector (src/retrofit/schema-drift-detector.ts)
+
+- **Purpose:** Enhanced Retrofit deep-analysis detector — regex-based comparison of a target project's `supabase/migrations/*.sql` files (parsed chronologically into a resolved schema map via `buildResolvedSchema`) against its TypeScript interfaces/types that map to DB tables by naming convention (`buildTsTypeMap`). Flags tables with no corresponding TS type (`table_missing_type`), TS types with no corresponding migration table (`type_missing_table`), column-level mismatches, and obvious SQL/TS type mismatches, each rated `critical`/`major`/`minor`. The findings this module produces are what RET-5 requires be folded into every retrofit queue prompt's context. Read-only; the only write is a best-effort `schema_drift_findings` persistence step that never throws (Contract 4).
+- **Status:** COMPLETE
+- **CLI:** `forge analyze schema <project-path>` (standalone); also runs as part of `forge analyze <project-path>` and every `forge retrofit` invocation (RET-1, RET-5)
+- **Entry Point:** `src/retrofit/schema-drift-detector.ts` → `SchemaDriftDetector` class, `createSchemaDriftDetector()` factory, `.detect(projectPath: string): Promise<SchemaDriftFinding[]>`
+- **Exports:** `SchemaDriftDetector`, `createSchemaDriftDetector`, `buildResolvedSchema`, `buildTsTypeMap`, `SchemaDriftFinding`, `ResolvedSchema`, `TsTypeMap`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso`)
+- **Database tables:** `schema_drift_findings` (write, best-effort)
+
+---
+
+## Agent: DependencyAuditor (src/retrofit/dependency-auditor.ts)
+
+- **Purpose:** Enhanced Retrofit deep-analysis detector — regex-based audit of a target project's `package.json` dependencies against what is actually imported under `src/**/*.ts(x)`, plus root config files (`next.config.*`, `tailwind.config.*`, `vitest.config.*`) and `scripts/**`. Flags packages declared but never imported (`unused` — error-weight for `dependencies`, warning-weight for `devDependencies`), packages imported in `src/` but never declared (`missing` — likely a transitive dependency imported directly), packages declared in BOTH `dependencies` and `devDependencies` (`duplicate`), and packages with a major-version update available per `pnpm outdated --json` (`outdated_major` — best-effort, silently skipped when pnpm is unavailable). Read-only; the only write is a best-effort `dependency_audit_findings` persistence step that never throws (Contract 4).
+- **Status:** COMPLETE
+- **CLI:** `forge analyze deps <project-path>` (standalone); also runs as part of `forge analyze <project-path>` and every `forge retrofit` invocation (RET-1)
+- **Entry Point:** `src/retrofit/dependency-auditor.ts` → `DependencyAuditor` class, `createDependencyAuditor()` factory, `.audit(projectPath: string): Promise<DependencyFinding[]>`
+- **Exports:** `DependencyAuditor`, `createDependencyAuditor`, `DependencyFinding`
+- **Dependencies:** `node:child_process` (`execSync`, for `pnpm outdated --json`), `src/memory/client.ts` (`getClient`, `logMemoryWarning`, `newId`, `nowIso`)
+- **Database tables:** `dependency_audit_findings` (write, best-effort)
+
+---
+
+## Agent: CoverageBaseline (src/retrofit/coverage-baseline.ts)
+
+- **Purpose:** Enhanced Retrofit deep-analysis detector — regex-based scan of a target project's `src/lib/**/*.ts` and `src/components/**/*.tsx` (the testable units, deliberately excluding Next.js framework entry points — `page.tsx`, `route.ts`, `layout.tsx` — which are exercised through routing/integration tests rather than unit tests). For every testable file, checks whether a co-located test file exists (`{file}.test.ts(x)`, `{file}.spec.ts`, or `__tests__/{filename}.test.ts`), counts the file's exported functions/classes/constants, and — when a test file exists — counts its `it()`/`test()` calls as a rough proxy for how many of those exported symbols are actually exercised, prioritizing gaps `critical`/`high`/`medium`/`low`. The only one of the five deep-analysis detectors with **zero** Build Memory writes of any kind — stated explicitly in the module's own doc comment, not an oversight; no `coverage_baseline`-shaped table exists in the schema.
+- **Status:** COMPLETE
+- **CLI:** `forge analyze coverage <project-path>` (standalone); also runs as part of `forge analyze <project-path>` and every `forge retrofit` invocation (RET-1)
+- **Entry Point:** `src/retrofit/coverage-baseline.ts` → `CoverageBaseline` class, `createCoverageBaseline()` factory, `.analyze(projectPath: string): Promise<CoverageBaselineFinding[]>`
+- **Exports:** `CoverageBaseline`, `createCoverageBaseline`, `CoverageBaselineFinding`
+- **Dependencies:** none beyond `node:fs`/`node:path` — no Build Memory client import, by design
+- **Database tables:** none
+
+---
+
+## Agent: GitHubActionsGenerator (src/retrofit/github-actions-generator.ts)
+
+- **Purpose:** Enhanced Retrofit CI/CD generator — detects a target project's build/test/deploy shape (package manager, Node version, whether a real test script exists, whether E2E tooling is present, whether the project deploys to Vercel) purely from files already on disk (`package.json`, `.nvmrc`, lockfiles, `vercel.json`/`.vercel`), and from that generates a minimal, correct GitHub Actions CI/CD pipeline: a `ci.yml` that always runs (typecheck, lint-if-configured, test-if-configured, build) plus, only when a Vercel deploy target is detected, a `deploy.yml` (push-to-main Vercel deploy + `forge verify`) and a `forge-verify.yml` (deployment_status-triggered HTTP health check). Wired into Phase 0 (`src/phases/phase0-scout.ts` step 13, RET-4): `ensureGitHubActions` runs when the project already has a `.git` directory (branch/checkpoint/rollback — Contracts 10/11/12 — need one) and does not yet have a `.github/workflows` directory, so an operator's existing CI setup is never overwritten. Read-only detection; the only writes are the workflow YAML files themselves, under `<projectPath>/.github/workflows/`, and only when called.
+- **Status:** COMPLETE
+- **CLI:** `forge analyze ci <project-path>` (standalone, generate/refresh on demand); also runs automatically at Phase 0 of every `forge build` when `.git` exists and `.github/workflows` does not (RET-4)
+- **Entry Point:** `src/retrofit/github-actions-generator.ts` → `ensureGitHubActions(projectPath: string): Promise<string[]>` (returns the workflow file paths written)
+- **Exports:** `ensureGitHubActions`, `detectWorkflowConfig`, `generateCIWorkflow`, `generateVercelDeployWorkflow`, `generateForgeVerifyWorkflow`, `WorkflowConfig`
+- **Dependencies:** `src/tools/forge-logger.ts` (`getLogger`)
+- **Database tables:** none
+
+---
+
+## Agent: SkillsLibraryLoader (src/skills/index.ts)
+
+- **Purpose:** project-wide, stack-detected engineering-standards injection layer — distinct from the queue.yaml-declared `skills: [name]` mechanism already wired into `phase3-executor.ts` (which reads `<skillsDir>/<name>/SKILL.md` only for the skills a queue entry explicitly opts into, via `loadSkillContent`). `SkillsLibraryLoader` instead auto-DETECTS the target project's tech stack by reading its `package.json` dependencies/devDependencies against 9 `STACK_DETECTORS` (nextjs, supabase, tailwind, twilio, stripe, prisma, drizzle, vitest, playwright — `detectProjectStack`), loads every `*.skill.md` file directly under a skills directory (non-recursive, flat, each a YAML-frontmatter header over a Markdown template body — `loadSkillsLibrary`), and prepends every skill whose `tags` intersect the detected stack to the prompt text as one Markdown block headed `## ENGINEERING STANDARDS AND PATTERNS FOR THIS BUILD` (`injectIntoContext`/`buildSkillsContext`). Runs automatically for every Phase 3 prompt with no per-entry opt-in — complementary to, not a replacement for, the existing queue-level mechanism. House style: every operation is guarded — a missing directory, an unreadable file, a malformed frontmatter, or a missing/unparseable `package.json` degrades to "skip it"/`[]` rather than throwing (skill injection is a quality-of-life layer, never a build blocker, matching Contract 4's non-blocking posture). Known gap: `STACK_DETECTORS` has no `typescript`/`agents` entry, so the `typescript-strict` and `agent-architecture` templates (tagged `typescript`/`agents`) can never match via the auto-detected path — flagged in `STATE_OF_THE_BUILD.md` § Skills Library, not silently accepted.
+- **Status:** COMPLETE
+- **CLI:** `forge skills list <project-path>` (detect stack, list what would be injected), `forge skills show <skill-id>` (print one skill's full template), `forge skills inject <project-path> <prompt-text>` (show the full assembled prompt, for debugging), `forge skills add <skill-file>` (validate then copy a candidate `*.skill.md` into the library)
+- **Entry Point:** `src/skills/index.ts` → `buildSkillsContext(projectPath: string, promptText: string): string` (the single call Phase 3 makes — detect stack, load library, inject, guarded end-to-end)
+- **Exports:** `loadSkillsLibrary`, `detectProjectStack`, `buildSkillsContext`, `defaultSkillsLibraryDir`, `validateSkillFile`, `SKILLS_CONTEXT_HEADER`, `Skill`, `SkillsLibrary`
+- **Dependencies:** `js-yaml` (`load`, frontmatter parsing), `node:fs`/`node:path`/`node:url` only — no Build Memory client import
+- **Database tables:** none — reads `*.skill.md` files directly off disk; zero Build Memory writes
+
+### Files (Skills Library, src/skills/)
+
+| File | Purpose |
+|------|---------|
+| `src/skills/index.ts` | `SkillsLibraryLoader` — types, frontmatter parser, loader, query API, stack detector, context injector, validator |
+| `src/skills/templates/nextjs-app-router.skill.md` | tags: nextjs, react, typescript — route handlers, server components, error shape, loading states, metadata |
+| `src/skills/templates/supabase.skill.md` | tags: supabase, postgres, rls |
+| `src/skills/templates/stripe.skill.md` | tags: stripe, billing, payments |
+| `src/skills/templates/twilio.skill.md` | tags: twilio, telephony, sms, voice |
+| `src/skills/templates/typescript-strict.skill.md` | tags: typescript (currently unreachable via auto-detection — see gap above) |
+| `src/skills/templates/testing.skill.md` | tags: vitest, playwright, testing |
+| `src/skills/templates/api-patterns.skill.md` | tags: nextjs, api, rest |
+| `src/skills/templates/observability.skill.md` | tags: sentry, logging, monitoring |
+| `src/skills/templates/agent-architecture.skill.md` | tags: agents, typescript, async (currently unreachable via auto-detection — see gap above) |
+| `src/skills/templates/ui-components.skill.md` | tags: react, tailwind, shadcn, typescript |

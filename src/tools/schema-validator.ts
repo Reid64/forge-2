@@ -145,6 +145,7 @@ export const BuildRunSchema = z.object({
   toolchain_manifest: z.record(z.unknown()),
   governance_hash: z.string().nullable(),
   queue_hash: z.string().nullable(),
+  bundle_sizes: z.record(z.unknown()).nullable(),
   sentinel_interventions: z.number(),
   autonomous_recovery_mode: z.boolean(),
   parallel_prompts_used: z.boolean(),

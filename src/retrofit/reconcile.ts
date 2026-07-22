@@ -8,6 +8,7 @@ import type { ReconcileDecision, DiagnoseFinding, ScanScope } from './types.js';
 import type { GovernanceReconciliationReport, EnterprisePatternsGapReport } from './diagnose.js';
 import { runScan } from './scan.js';
 import { generateArchitectureHealthReport, buildGovernanceReconciliationReport, buildEnterprisePatternsGapReport } from './diagnose.js';
+import { runDeepAnalysis, renderDeepAnalysisContextBlock, writeDeepAnalysisReport } from './deep-analysis.js';
 
 // ── RECONCILE ──────────────────────────────────────────────────────────────────
 export interface ReconcileInput { criticalFindings: DiagnoseFinding[]; warnFindings: DiagnoseFinding[]; governanceReport: GovernanceReconciliationReport; enterpriseReport: EnterprisePatternsGapReport; dbPath?: string; }
@@ -70,16 +71,20 @@ export interface GeneratedQueue { buildId: string; projectName: string; totalPro
 
 const sid = (prefix: string, i: number) => `${prefix}-${String(i+1).padStart(3,'0')}`;
 
-export function generateRetrofitQueue(projectName: string, projectPath: string, reconcile: ReconcileOutput, outputPath: string): GeneratedQueue {
+export function generateRetrofitQueue(projectName: string, projectPath: string, reconcile: ReconcileOutput, outputPath: string, deepAnalysisContext?: string): GeneratedQueue {
   const prompts: QueuePrompt[] = [];
   const criticals = reconcile.decisions.filter(d => d.itemType==='CRITICAL_FIX' && d.decision==='APPROVE').map(d => reconcile.approved.find(f => f.message===d.itemId)).filter((f): f is DiagnoseFinding => !!f);
   const warns = reconcile.decisions.filter(d => d.itemType==='WARN_FIX' && d.decision==='APPROVE').map(d => reconcile.approved.find(f => f.message===d.itemId)).filter((f): f is DiagnoseFinding => !!f);
   const patterns = reconcile.decisions.filter(d => d.itemType==='ENTERPRISE_PATTERN' && d.decision==='BUILD').map(d => d.itemId);
+  // Deep analysis findings (dead code, orphaned routes, schema drift, dependency issues,
+  // coverage gaps) — a concise digest, never the full report — appended as context to every
+  // generated prompt so agents see it alongside their specific fix instructions.
+  const contextSuffix = deepAnalysisContext ? `\n\n${deepAnalysisContext}` : '';
 
-  criticals.forEach((f,i) => prompts.push({ id: sid('RC',i), tier: 'CRITICAL', name: `Fix CRITICAL: ${f.category} — ${f.message.substring(0,60)}`, dependsOn: i>0?[sid('RC',i-1)]:[], prompt: `Fix CRITICAL issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}${f.file?'\nFILE: '+f.file:''}\n\nFix completely. Run: pnpm tsc --noEmit — must pass 0 errors.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.` }));
-  warns.forEach((f,i) => { const prior = i>0?[sid('RW',i-1)]:criticals.length>0?[sid('RC',criticals.length-1)]:[];prompts.push({ id: sid('RW',i), tier: 'WARN', name: `Fix WARN: ${f.category}`, dependsOn: prior, prompt: `Fix WARN issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}\n\nFix cleanly. Run: pnpm tsc --noEmit.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.` }); });
+  criticals.forEach((f,i) => prompts.push({ id: sid('RC',i), tier: 'CRITICAL', name: `Fix CRITICAL: ${f.category} — ${f.message.substring(0,60)}`, dependsOn: i>0?[sid('RC',i-1)]:[], prompt: `Fix CRITICAL issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}${f.file?'\nFILE: '+f.file:''}\n\nFix completely. Run: pnpm tsc --noEmit — must pass 0 errors.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
+  warns.forEach((f,i) => { const prior = i>0?[sid('RW',i-1)]:criticals.length>0?[sid('RC',criticals.length-1)]:[];prompts.push({ id: sid('RW',i), tier: 'WARN', name: `Fix WARN: ${f.category}`, dependsOn: prior, prompt: `Fix WARN issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}\n\nFix cleanly. Run: pnpm tsc --noEmit.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }); });
   const lastId = warns.length>0?sid('RW',warns.length-1):criticals.length>0?sid('RC',criticals.length-1):undefined;
-  patterns.forEach((p,i) => prompts.push({ id: sid('RE',i), tier: 'ENTERPRISE', name: `Inject: ${p}`, dependsOn: i>0?[sid('RE',i-1)]:lastId?[lastId]:[], prompt: `Inject '${p}' pattern into ${projectPath}.\n\nImplement for Next.js/TypeScript/Supabase.\nRun: pnpm tsc --noEmit && pnpm build.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.` }));
+  patterns.forEach((p,i) => prompts.push({ id: sid('RE',i), tier: 'ENTERPRISE', name: `Inject: ${p}`, dependsOn: i>0?[sid('RE',i-1)]:lastId?[lastId]:[], prompt: `Inject '${p}' pattern into ${projectPath}.\n\nImplement for Next.js/TypeScript/Supabase.\nRun: pnpm tsc --noEmit && pnpm build.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
 
   const queue: GeneratedQueue = { buildId: `forge-retrofit-${projectName}-${Date.now()}`, projectName, totalPrompts: prompts.length, tiers: { critical_fixes: criticals.length, warn_fixes_and_features: warns.length, enterprise_patterns: patterns.length }, prompts, generatedAt: new Date().toISOString() };
   mkdirSync(outputPath, { recursive: true });
@@ -103,6 +108,17 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
 
   console.log(`\n  ${C.green}SCAN complete.${C.reset} Files: ${report.fileTree.totalFiles} | Broken imports: ${C.red}${report.brokenImports.length}${C.reset} | TS errors: ${C.red}${report.compilationErrors.length}${C.reset}`);
 
+  console.log(`\n  ${C.cyan}Running deep analysis (dead code, orphaned routes, schema drift, dependencies, coverage)...${C.reset}`);
+  const deepAnalysis = await runDeepAnalysis(projectPath);
+  const deepAnalysisReportPath = await writeDeepAnalysisReport(deepAnalysis);
+  const deepAnalysisContext = renderDeepAnalysisContextBlock(deepAnalysis, deepAnalysisReportPath);
+  console.log(
+    `  Deep analysis: health score ${C.bold}${deepAnalysis.healthScore}/100${C.reset} — ` +
+      `${deepAnalysis.deadCode.length} dead code, ${deepAnalysis.orphanedRoutes.length} orphaned routes, ` +
+      `${deepAnalysis.schemaDrift.length} schema drift, ${deepAnalysis.dependencies.length} dependency issue(s), ` +
+      `${deepAnalysis.coverage.filter(f => f.priority !== 'low').length} coverage gap(s) — ${deepAnalysisReportPath}`
+  );
+
   const health = await generateArchitectureHealthReport(report, apiKey);
   console.log(`\n  CRITICAL: ${C.red}${health.critical.length}${C.reset} | WARN: ${C.yellow}${health.warn.length}${C.reset} | INFO: ${health.info.length}`);
   if (health.critical.length) for (const f of health.critical) console.log(`    ${C.red}[CRITICAL]${C.reset} [${f.category}] ${f.message}${f.file?' ('+f.file+')':''}`);
@@ -113,7 +129,7 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
   const reconciled = await runReconcile(projectName, { criticalFindings: health.critical, warnFindings: health.warn, governanceReport: governance, enterpriseReport: enterprise }, nonInteractive, acceptBlockers);
 
   const outPath = queueOutputPath ?? join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? homedir(), 'Documents', 'FORGE', 'projects', projectName);
-  const queue = generateRetrofitQueue(projectName, projectPath, reconciled, outPath);
+  const queue = generateRetrofitQueue(projectName, projectPath, reconciled, outPath, deepAnalysisContext);
 
   console.log(`\n${C.bold}${C.green}  QUEUE GENERATED: ${queue.totalPrompts} prompts → ${outPath}/queue.yaml${C.reset}`);
   console.log(`  Tier 1 CRITICAL: ${queue.tiers.critical_fixes} | Tier 2 WARN/FEAT: ${queue.tiers.warn_fixes_and_features} | Tier 3 ENTERPRISE: ${queue.tiers.enterprise_patterns}`);

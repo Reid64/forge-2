@@ -1,0 +1,59 @@
+- id: repair-000
+  name: Fix type mismatch in src/retrofit
+  prompt_type: feature
+  dependencies: []
+  governance_refs: []
+  estimated_tokens: 2100
+  context_injection:
+    schemaSections: []
+    behavioralSections: []
+    interactionMaps: []
+  description: >-
+    FORGE REPAIR MODE — TypeScript Strict Rules (enforced — follow exactly):
+
+    1. TypeScript strict mode: ALL variables that could be undefined MUST use optional chaining (?.) or nullish
+    coalescing (?? defaultValue). NEVER pass a possibly-undefined value where a concrete type is expected.
+
+    2. Unused variables: prefix with underscore (_req, _input) or remove entirely. ESLint will fail on unused variables.
+
+    3. Empty interfaces: use 'object' or 'unknown' instead of empty interface declarations.
+
+    4. If you create a new agent type, add it to the AgentType union in src/types/database.ts BEFORE using it in any
+    agent file.
+
+    5. Always add alt="" to img elements.
+
+    6. After writing code, mentally check: does every .property access handle the case where the parent could be
+    null/undefined?
+
+    7. Do NOT leave any console.log statements in production code.
+
+    8. When using Badge component, check BadgeProps interface for valid props — do not pass unsupported variant or size
+    props.
+
+
+    REPAIR TASK: Fix all TypeScript "type mismatch" errors
+
+    in file(s): src/retrofit/dead-code-detector.ts, src/retrofit/dependency-auditor.ts,
+    src/retrofit/orphaned-route-detector.ts, src/retrofit/schema-drift-detector.ts
+
+
+    ERRORS TO FIX:
+      src/retrofit/dead-code-detector.ts(380,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
+      src/retrofit/dependency-auditor.ts(355,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
+      src/retrofit/orphaned-route-detector.ts(289,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
+      src/retrofit/schema-drift-detector.ts(460,26): TS2339 — Property 'transaction' does not exist on type 'Database'.
+
+    INSTRUCTIONS:
+
+    1. Fix ALL errors listed above. Do not skip any.
+
+    2. Do not introduce new TypeScript errors while fixing these.
+
+    3. Do not change business logic — fix type errors only.
+
+    4. If a fix requires a new import, add it at the top of the file.
+
+    5. If a type is genuinely unknown, use `unknown` not `any`.
+
+    6. Verify your fix by mentally running `pnpm tsc --noEmit` before writing.

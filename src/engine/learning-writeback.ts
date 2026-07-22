@@ -45,6 +45,8 @@ export function mapCheckToLearningCategory(
     case 'build':
       return 'COMPILE';
     case 'eslint':
+    case 'lint':
+    case 'format':
       return 'LINT';
     case 'schema_drift':
       return 'SCHEMA';

@@ -152,6 +152,7 @@ import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
 import { onSentinelFailure, onSentinelPrimeHalt } from '../integration/bus.js';
 import { SentinelPrime } from '../sentinel-prime/index.js';
 import { createExecutionMonitor, executionMonitorSingleton } from '../sentinel-prime/execution-monitor.js';
+import { buildSkillsContext } from '../skills/index.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -1809,6 +1810,20 @@ async function executePrompt(
         log(`prompt ${index} '${entry.id}': instincts applied (+${augmented.length - promptText.length} chars)`);
         promptText = augmented;
       }
+    }
+
+    // b2.5. SKILLS LIBRARY â€” auto-detect the target project's stack (package.json deps) and
+    // prepend any matching skill templates as engineering standards, independent of whichever
+    // skills (if any) the queue entry itself declared via `skills:` (see loadSkillContent above,
+    // which is entry-opt-in; this is stack-detected and applies to every prompt automatically).
+    try {
+      const withSkillsContext = buildSkillsContext(ctx.projectPath, promptText);
+      if (withSkillsContext !== promptText) {
+        log(`prompt ${index} '${entry.id}': skills library context prepended (+${withSkillsContext.length - promptText.length} chars)`);
+        promptText = withSkillsContext;
+      }
+    } catch {
+      /* best-effort â€” Contract 4 posture: skill injection never blocks execution */
     }
 
     // b3. MODEL ROUTING â€” classify prompt complexity, select the optimal Claude model,

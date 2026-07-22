@@ -278,3 +278,95 @@ Every manifest run MUST mirror its state into the `orchestrator_manifests` (and 
 Per Contract 4, this mirror is best-effort and non-blocking — a Build Memory write failure is logged
 and swallowed, never a halting error — but `OrchestratorEngine`/`ManifestResolver` MUST attempt the
 write on every status transition rather than treating the YAML file as the only record of what ran.
+
+## Enhanced Retrofit Contracts
+
+Source: `src/retrofit/` deep-analysis modules (Enhanced-Retrofit-specific, prose style of
+BEHAVIORAL_CONTRACTS.md, matching the R-series/SP-series/ORC-series precedent above). Enhanced
+Retrofit extends the pre-existing RETROFIT pipeline (SCAN → DIAGNOSE → RECONCILE → QUEUE, Contract-
+governed since Run 2) with a second, deeper analysis layer purpose-built for existing/legacy
+codebases: five read-only detectors, a GitHub Actions generator, and two new Sentinel gates.
+
+### Contract RET-1: `forge analyze` Runs Before Every Retrofit Build
+`runRetrofitPipeline` (the implementation behind `forge retrofit`) MUST run the full deep-analysis
+sweep (`runDeepAnalysis` — dead code, orphaned routes, schema drift, dependency audit, coverage
+baseline) before `runReconcile`/`generateRetrofitQueue`, establishing a health-score baseline for
+every retrofit build, not a sample of builds. This is unconditional — there is no flag that skips
+the sweep on a retrofit build, mirroring Contract 1's "no phase may begin until the preceding phase
+has completed successfully" posture for RETROFIT's own internal ordering.
+
+### Contract RET-2: Lint and Format Gates Run When the Project Is Configured For Them
+Sentinel's `lint` and `format` checks (`runLintGate`/`runFormatGate` in `phase4-sentinel.ts`) MUST
+run on every prompt whenever the target project has an ESLint config file (`.eslintrc.*` /
+`eslint.config.*`) or a Prettier config file (`.prettierrc.*` / `prettier.config.*` / a `prettier`
+devDependency) present on disk, respectively. A project with neither is not penalized — the gate
+SKIPS, never fails, when its corresponding config is absent — but a project that HAS the config MUST
+NOT have its style debt silently ignored just because the check is newer than Contract 13's original
+five. This mirrors Contract 13's "ALL must pass, any single failure halts" posture for whichever
+subset of gates actually applies to the project's real configuration.
+
+### Contract RET-3: Bundle Size Gate Runs on Every Feature/Component/Page Prompt
+Sentinel's `bundle_size` check (`runBundleSizeGate`) MUST run on every prompt whose type builds
+user-facing UI, for a Next.js project. FORGE's `PromptType` union has no dedicated `component`/
+`page` member (queue entries are typed `schema`/`auth`/`api`/`ui`/`feature`/`agent`/`test`/`deploy`
+— Session 2's design-intelligence work already established `ui`/`feature` as the UI-producing
+types), so `BUNDLE_SIZE_GATE_PROMPT_TYPES = {'feature', 'ui'}` is the real, code-level
+implementation of this contract's "feature, component, page" run-list; every other prompt type
+(`schema`/`auth`/`api`/`agent`/`test`/`deploy`) SKIPS, the real analog of the task's "agent,
+database, migration, documentation" skip-list. The gate itself auto-skips entirely on a non-Next.js
+project (no `next.config.*` found) — it is never a false failure on a project it cannot evaluate.
+
+### Contract RET-4: GitHub Actions MUST Be Generated at Project Init If `.git` Exists
+Phase 0 (`ensureGitRepo` already runs as step 0 per Session 5's Finding #3) MUST be followed, later
+in the same Phase 0 pass, by `ensureGitHubActions` (step 13) whenever the target project has a
+`.git` directory and does not yet have a `.github/workflows` directory. This is unconditional for
+every project init that reaches step 13 with a git repo present — never opt-in, never deferred to a
+later phase — and MUST NOT overwrite an operator's pre-existing `.github/workflows` directory if one
+is already there.
+
+### Contract RET-5: Schema Drift Findings MUST Be Included in Retrofit Queue Prompt Context
+Every prompt `generateRetrofitQueue` writes into a retrofit build's `queue.yaml` MUST carry the
+deep-analysis context digest (`renderDeepAnalysisContextBlock`) established under Contract RET-1 —
+which includes the `SchemaDriftDetector`'s findings alongside dead code, orphaned routes,
+dependency issues, and coverage gaps — appended to the prompt text, not merely available in a
+separate report file the agent may never read. A CRITICAL/WARN/ENTERPRISE-tier fix prompt that
+never sees the schema-drift context it should have been informed by is a defect under this
+contract, mirroring Contract 7's "every Phase 3 prompt is dynamically assembled ... never
+hardcoded" posture for RETROFIT's own prompt generation path.
+
+## Skills Library Contracts
+
+Source: `src/skills/` module (Skills-Library-specific, prose style of BEHAVIORAL_CONTRACTS.md,
+matching the R-series/SP-series/ORC-series/RET-series precedent above). The Skills Library is a
+project-wide, stack-detected engineering-standards injection layer, distinct from the
+queue.yaml-declared `skills: [name]` opt-in mechanism (Contract 7's context injection already
+covers that one) — it applies automatically to every Phase 3 prompt with no per-entry opt-in.
+
+### Contract SKL-1: Skills Library MUST Be Injected Before Every Phase 3 Prompt Execution
+`buildSkillsContext` MUST run on every Phase 3 prompt, not a sample of prompts and not only for
+prompt types a queue entry explicitly opts into. `phase3-executor.ts` invokes it unconditionally
+(step b2.5, after instinct application and before model routing) on every prompt's assembly path,
+guarded in a try/catch per Contract 4's "never blocks execution" posture — a failure inside skill
+loading/matching degrades to the prompt text unchanged, it never skips the call itself. A build
+that omits this call for any prompt is a defect, not an optimization, mirroring Contract SP-1's
+"runs after every prompt, not a sample" posture for Sentinel Prime.
+
+### Contract SKL-2: Skills Are Matched By Project Stack Detection, Not Hardcoded
+Which skills are injected into a given prompt MUST be determined by `detectProjectStack`'s reading
+of the target project's actual `package.json` dependencies against `STACK_DETECTORS`, intersected
+with each skill's frontmatter `tags` (`injectIntoContext`) — never by a hardcoded project name,
+prompt type, or skill-id allowlist. A skill template with tags that cannot be produced by any
+`STACK_DETECTORS` entry (e.g. `typescript`, `agents` — see the known gap flagged in
+`STATE_OF_THE_BUILD.md` § Skills Library) is a detection-coverage gap to be fixed in
+`STACK_DETECTORS`, not grounds for special-casing that skill's injection by name elsewhere in the
+codebase.
+
+### Contract SKL-3: New Skill Templates MUST Follow the `*.skill.md` Format With Valid Frontmatter
+Every file loaded by `loadSkillsLibrary` MUST be a flat (non-recursive) `*.skill.md` file
+containing a leading YAML frontmatter block (`---` … `---`) with at minimum an `id` (falls back to
+the filename when omitted) followed by the Markdown template body, matching
+`parseSkillContent`'s `FRONTMATTER_RE`. `forge skills add <skill-file>` MUST validate a candidate
+file against this shape via `validateSkillFile` before copying it into the library, reporting every
+problem found (missing frontmatter, unparseable YAML, non-object frontmatter, empty body) rather
+than a bare pass/fail — a malformed file is rejected at `add` time, never silently loaded (or
+silently skipped with no explanation) at Phase 3 execution time.
