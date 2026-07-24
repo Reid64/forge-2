@@ -1,14 +1,14 @@
-/**
- * FORGE 2.0 — `--auto-resume`: automatic session resumption across Claude Code session resets.
+﻿/**
+ * FORGE 2.0 â€” `--auto-resume`: automatic session resumption across Claude Code session resets.
  *
  * Phase 3 (`src/phases/phase3-executor.ts`) already appends a progress line to
  * `<governanceDir>/STATE_OF_THE_BUILD.md` after every prompt: `[FORGE Phase 3] prompt N 'id'
- * (type): COMPLETED — …`. This module reads that (and SESSION_STATE.md) back to determine the
+ * (type): COMPLETED â€” â€¦`. This module reads that (and SESSION_STATE.md) back to determine the
  * last COMPLETED prompt index, cross-checks Build Memory's `prompt_executions` when rows exist
  * (the higher-fidelity source), and computes where a resumed build should `--start-at`.
  *
  * The RESUME LOOP re-fires `runPhase3Executor` after a claude-runner timeout/exit (session/cap
- * exhaustion) — but a genuine Sentinel HALT (the build is actually broken) stops the loop
+ * exhaustion) â€” but a genuine Sentinel HALT (the build is actually broken) stops the loop
  * immediately (Iron Law: report real outcomes, never steamroll a halted build). See
  * `PromptOutcome.timedOut` (`src/phases/phase3-executor.ts`) for how the two are told apart.
  */
@@ -22,13 +22,13 @@ import { BuildMemory, nowIso } from '../memory/index.js';
 import type { BuildRun } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
-// State-file parsing (pure — no I/O; the exported wrapper below does the reading)
+// State-file parsing (pure â€” no I/O; the exported wrapper below does the reading)
 // ---------------------------------------------------------------------------
 
 /**
  * Matches Phase 3's appended progress line:
- *   `[FORGE Phase 3] prompt 7 'users-schema' (schema): COMPLETED — Sentinel PASS.`
- * Tolerant of the disposition casing/wording drifting — only the numeric index and the
+ *   `[FORGE Phase 3] prompt 7 'users-schema' (schema): COMPLETED â€” Sentinel PASS.`
+ * Tolerant of the disposition casing/wording drifting â€” only the numeric index and the
  * disposition keyword are read.
  */
 const PROGRESS_LINE_RE = /\[FORGE Phase 3]\s+prompt\s+(\d+)\s+'[^']*'\s*\([^)]*\)\s*:\s*(COMPLETED|FAILED|SKIPPED|HALTED)/gi;
@@ -37,7 +37,7 @@ const PROGRESS_LINE_RE = /\[FORGE Phase 3]\s+prompt\s+(\d+)\s+'[^']*'\s*\([^)]*\
  * Parse Phase 3's appended progress lines out of one or more state-document contents (typically
  * STATE_OF_THE_BUILD.md and SESSION_STATE.md) and return the HIGHEST 1-based prompt index marked
  * COMPLETED. Returns `null` when no COMPLETED line is found (empty content, unparseable content,
- * or a build that never completed a prompt) — never throws.
+ * or a build that never completed a prompt) â€” never throws.
  */
 export function parseLastCompletedFromStateContent(contents: readonly string[]): number | null {
   let maxCompleted: number | null = null;
@@ -77,7 +77,7 @@ async function getMostRecentBuild(projectName: string): Promise<BuildRun | null>
 
 /**
  * Query Build Memory for the last COMPLETED prompt index of a specific build. Returns `null` when
- * Build Memory is unreachable or the build has no completed prompts — the caller then falls back
+ * Build Memory is unreachable or the build has no completed prompts â€” the caller then falls back
  * to the state-file parse (Contract 4).
  */
 async function getDbLastCompleted(buildId: string): Promise<number | null> {
@@ -119,7 +119,7 @@ async function computeStartAtFromStateFiles(
     [stateOfBuild, sessionState].filter((c): c is string => c !== null)
   );
   if (lastCompleted === null) {
-    log('auto-resume: no completed-prompt markers found in Build Memory or state files — starting at prompt 1.');
+    log('auto-resume: no completed-prompt markers found in Build Memory or state files â€” starting at prompt 1.');
     return 1;
   }
   log(`auto-resume: state files report last completed prompt ${lastCompleted} for "${projectName}"`);
@@ -134,13 +134,13 @@ async function computeStartAtFromStateFiles(
  * produce a `--start-at` computed against the OLD (larger) queue, which then exceeded the length
  * of a freshly regenerated (shorter) queue and made Phase 3 exit having executed zero prompts. Now:
  *   - no queue.yaml on disk yet, or the last recorded build has no `queue_hash` on file (a
- *     pre-hardening build), or its `queue_hash` does not match the current queue.yaml — this is
+ *     pre-hardening build), or its `queue_hash` does not match the current queue.yaml â€” this is
  *     treated as a FRESH build (`--start-at` 1), never a resume, and it is logged loudly.
  *   - otherwise, trusts Build Memory's `prompt_executions` (the higher-fidelity source) when rows
  *     exist for the matching build, else falls back to parsing
  *     `<projectPath>/<governanceDirName>/{STATE_OF_THE_BUILD.md,SESSION_STATE.md}`.
  *   - finally, clamps: if the computed index exceeds the current queue's prompt count, that is
- *     itself a sign the resume source is stale — clamp to 1 and log loudly rather than handing
+ *     itself a sign the resume source is stale â€” clamp to 1 and log loudly rather than handing
  *     Phase 3 an out-of-range `--start-at` that would fail the build with zero prompts executed.
  */
 export async function computeResumeStartAt(
@@ -158,16 +158,24 @@ export async function computeResumeStartAt(
     if (!mostRecentBuild.queue_hash) {
       log(
         `auto-resume: the last recorded build for "${projectName}" has no queue hash on record ` +
-          '(pre-hardening build) — cannot confirm it matches the current queue.yaml. Treating this as a FRESH build, starting at prompt 1.'
+          '(pre-hardening build) â€” cannot confirm it matches the current queue.yaml. Treating this as a FRESH build, starting at prompt 1.'
       );
       return 1;
     }
     if (mostRecentBuild.queue_hash !== queueState.hash) {
       log(
         `auto-resume: queue.yaml has changed since the last recorded build for "${projectName}" ` +
-          `(recorded hash ${mostRecentBuild.queue_hash}, current hash ${queueState.hash}) — ` +
-          'treating this as a FRESH build, starting at prompt 1.'
+          `(recorded hash ${mostRecentBuild.queue_hash}, current hash ${queueState.hash}) â€” ` +
+          'checking Build Memory before resetting.'
       );
+      const dbLast = await getDbLastCompleted(mostRecentBuild.id);
+      if (dbLast !== null && dbLast > 0) {
+        const resumeAt = dbLast + 1;
+        log("auto-resume: queue hash changed but " + dbLast + " prompt(s) completed — resuming at " + resumeAt);
+        if (queueState && resumeAt > queueState.entryCount) return 1;
+        return resumeAt;
+      }
+      log("auto-resume: queue hash changed, no DB completions — fresh build");
       return 1;
     }
   }
@@ -184,7 +192,7 @@ export async function computeResumeStartAt(
   if (queueState && startAt > queueState.entryCount) {
     log(
       `auto-resume: computed start index ${startAt} exceeds the current queue's ${queueState.entryCount} prompt(s) ` +
-        '— this resume source is stale. Clamping to prompt 1 (fresh build) rather than failing the build.'
+        'â€” this resume source is stale. Clamping to prompt 1 (fresh build) rather than failing the build.'
     );
     return 1;
   }
@@ -198,8 +206,8 @@ export async function computeResumeStartAt(
 
 /**
  * True when `result` ended because the claude-runner subprocess itself timed out or exited
- * abnormally (session/cap exhaustion) on the prompt that halted the build — a RESUMABLE
- * condition — as opposed to Sentinel finding a genuine defect in code that finished running,
+ * abnormally (session/cap exhaustion) on the prompt that halted the build â€” a RESUMABLE
+ * condition â€” as opposed to Sentinel finding a genuine defect in code that finished running,
  * which is a real HALT the loop must never steamroll.
  */
 export function isResumableTimeout(result: Phase3Result): boolean {
@@ -220,11 +228,11 @@ async function appendResumeNote(
   try {
     await appendFile(
       target,
-      `\n> ${nowIso()} [FORGE auto-resume] cycle ${cycle}: resumed at prompt ${resumedAtIndex} — reason: ${reason}\n`,
+      `\n> ${nowIso()} [FORGE auto-resume] cycle ${cycle}: resumed at prompt ${resumedAtIndex} â€” reason: ${reason}\n`,
       'utf8'
     );
   } catch {
-    // non-fatal — the state document update must never block the build
+    // non-fatal â€” the state document update must never block the build
   }
 }
 
@@ -262,8 +270,8 @@ export interface AutoResumeResult {
 
 /**
  * Drive `runPhase3` with automatic resumption: compute the initial `--start-at` from state,
- * run it, and — ONLY when the run ended in a resumable claude-runner timeout/exit rather than a
- * genuine Sentinel halt — wait `resumeWaitMinutes`, recompute `--start-at` from FRESH state, and
+ * run it, and â€” ONLY when the run ended in a resumable claude-runner timeout/exit rather than a
+ * genuine Sentinel halt â€” wait `resumeWaitMinutes`, recompute `--start-at` from FRESH state, and
  * re-fire, up to `maxResumes` cycles. A genuine Sentinel HALT (or a clean completion) returns
  * immediately without looping.
  */
@@ -284,7 +292,7 @@ export async function runWithAutoResume(options: AutoResumeOptions): Promise<Aut
   while (isResumableTimeout(result) && cycles < maxResumes) {
     cycles += 1;
     const reason = 'claude-runner timeout/exit (session/cap exhaustion)';
-    log(`auto-resume cycle ${cycles}/${maxResumes}: ${reason} — waiting ${resumeWaitMinutes}m before resuming`);
+    log(`auto-resume cycle ${cycles}/${maxResumes}: ${reason} â€” waiting ${resumeWaitMinutes}m before resuming`);
     await appendResumeNote(options.projectPath, governanceDirName, cycles, startAt, reason);
     await sleep(resumeWaitMinutes * 60_000);
 
@@ -296,3 +304,4 @@ export async function runWithAutoResume(options: AutoResumeOptions): Promise<Aut
 
   return { finalResult: result, cycles, startAtHistory };
 }
+
