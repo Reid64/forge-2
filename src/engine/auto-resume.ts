@@ -149,7 +149,7 @@ export async function computeResumeStartAt(
   options: { governanceDirName?: string; log?: (message: string) => void } = {}
 ): Promise<number> {
   const log = options.log ?? (() => {});
-  const governanceDir = join(projectPath, options.governanceDirName ?? 'governance');
+  const governanceDir = join(projectPath, options.governanceDirName ?? '.');
 
   const queueState = await readCurrentQueueState(projectPath);
   const mostRecentBuild = await getMostRecentBuild(projectName);
