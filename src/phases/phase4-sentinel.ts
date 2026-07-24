@@ -1207,6 +1207,13 @@ function expectedOutputExistsOnDisk(promptType: PromptType | undefined, projectP
       }
     });
   }
+  if (promptType === 'feature') {
+    // For feature prompts, check if any .md file exists at project root with content
+    try {
+      const rootFiles = fs.readdirSync(projectPath);
+      return rootFiles.some(f => f.endsWith('.md') && (() => { try { return fs.statSync(require('path').join(projectPath, f)).size > 100; } catch { return false; } })());
+    } catch { return false; }
+  }
   if (promptType === 'ui') {
     const uiDirs = ['src/app', 'src/components', 'src/pages'];
     return uiDirs.some((relDir) => {
