@@ -203,7 +203,6 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
 
       const byType = skills.filter(
         (s) =>
-          s.applicablePromptTypes.length === 0 ||
           s.applicablePromptTypes.some((t) => t.toLowerCase() === type)
       );
       const stackMatched = stackTags.size === 0 ? byType : byType.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
@@ -331,15 +330,29 @@ export function defaultSkillsLibraryDir(): string {
 /**
  * Detect `projectPath`'s stack, load every matching skill from the default skills-library
  * directory, and return `promptText` with a `## ENGINEERING STANDARDS AND PATTERNS FOR THIS
- * BUILD` block prepended. Returns `promptText` unchanged when no stack is detected, the library
- * is empty, or nothing matches — never throws.
+ * BUILD` block prepended. Returns `promptText` unchanged when no stack is detected (and no
+ * `promptType` was given), the library is empty, or nothing matches — never throws.
+ *
+ * When `promptType` is supplied (Phase 3 passes `entry.prompt_type` on every real build), skill
+ * selection routes through {@link SkillsLibrary.getForPrompt} — the minimal, type-scoped set
+ * (stack-tag-matched skills applicable to this prompt type, plus the curated "always relevant"
+ * layer) — rather than {@link SkillsLibrary.injectIntoContext}'s plain stack-tag match, which
+ * has no notion of prompt type and would otherwise inject every stack-matched skill into every
+ * prompt regardless of whether it's a schema, api, ui, or deploy prompt. `promptType` is
+ * deliberately optional: `forge skills inject` (a generic "paste any prompt text" debugging
+ * command with no queue entry, hence no prompt type) still gets the broader stack-only match.
  */
-export function buildSkillsContext(projectPath: string, promptText: string): string {
+export function buildSkillsContext(projectPath: string, promptText: string, promptType?: string): string {
   try {
     const stack = detectProjectStack(projectPath);
-    if (stack.length === 0) return promptText;
+    if (!promptType && stack.length === 0) return promptText;
     const library = loadSkillsLibrary(defaultSkillsLibraryDir());
     if (library.skills.length === 0) return promptText;
+    if (promptType) {
+      const matching = library.getForPrompt(promptType, stack);
+      if (matching.length === 0) return promptText;
+      return `${renderSkillsBlock(matching)}\n\n---\n\n${promptText}`;
+    }
     return library.injectIntoContext(promptText, stack);
   } catch {
     return promptText;
