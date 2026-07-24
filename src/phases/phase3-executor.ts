@@ -168,6 +168,7 @@ import {
   type PromptClassification,
   type OutputValidation,
 } from '../architecture-guardian/index.js';
+import { DesignPipeline, createDesignPipeline, type DesignReviewResult } from '../design-pipeline/index.js';
 import { getClient, logMemoryWarning, newId } from '../memory/client.js';
 
 // ---------------------------------------------------------------------------
@@ -509,6 +510,12 @@ export interface Phase3Options {
    * {@link createArchitectureGuardian}. Injectable so tests can substitute a fake/spy.
    */
   architectureGuardian?: ArchitectureGuardian;
+  /**
+   * Design Pipeline instance (screenshot capture + optional Penpot push + visual review gate,
+   * `src/design-pipeline/index.ts`). Default: a fresh {@link createDesignPipeline}. Injectable so
+   * tests can substitute a fake/spy.
+   */
+  designPipeline?: DesignPipeline;
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +796,48 @@ async function runGuardianPostCheck(
       `Architecture Guardian forced prompt ${index} '${entry.id}' to fail before the Sentinel gate ran.\n\n` +
       `${violationLines || outputValidation.recommendation}`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Design Pipeline wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs the Design Pipeline (`src/design-pipeline/index.ts`) for one COMPLETED prompt of a
+ * component/page prompt type (`SHADCN_INSTALL_PROMPT_TYPES` — the real `ui`/`feature`
+ * `PromptType` analogs already established for the shadcn installer/accessibility check above).
+ * Called only once the Contract-13 Sentinel gate has already passed (no point screenshotting
+ * code that doesn't build) and strictly BEFORE the merge decision below, so a design-rejected
+ * prompt is never merged to main on the strength of a green Sentinel alone. Non-fatal (Contract
+ * 4): a Design Pipeline failure degrades to `null` (proceed as if no review ran) rather than
+ * aborting the prompt.
+ */
+async function runDesignPipelineCheck(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  changed: { created: string[]; modified: string[]; deleted: string[] }
+): Promise<DesignReviewResult | null> {
+  try {
+    const modifiedFiles = [...changed.created, ...changed.modified];
+    const result = await ctx.designPipeline.run(
+      { id: entry.id, name: entry.name, prompt_type: entry.prompt_type },
+      ctx.projectPath,
+      buildIdOf(ctx),
+      modifiedFiles,
+      // Phase 3 is fully autonomous (BLUEPRINT "AUTONOMOUS OPERATION RULES" — never wait for
+      // human approval mid-build), so the review gate always runs non-interactively here.
+      true
+    );
+    ctx.log(
+      `[DESIGN PIPELINE] Screenshots: ${result.screenshotPaths.length} viewports and ` +
+        `Review: ${result.approved ? 'approved' : 'rejected'}`
+    );
+    return result;
+  } catch (error) {
+    ctx.log(`prompt ${index} '${entry.id}': [DESIGN PIPELINE] non-fatal — ${describe(error)}`);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,7 +1151,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const releaseQuietLogging = beginQuietLogging('.forge/build.log');
   const baseLog = options.log ?? logLine('phase3');
   const projectPath = options.projectPath;
-  const governanceDirName = options.governanceDirName ?? 'governance';
+  const governanceDirName = options.governanceDirName ?? '.';
   const governanceDir = join(projectPath, governanceDirName);
   const projectName = options.projectName ?? basenameOf(projectPath);
   const machineId = options.machineId ?? process.env.FORGE_MACHINE_ID ?? randomUUID();
@@ -1415,6 +1464,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const instincts: Instinct[] = options.instincts ?? [];
   const costTracker = new ModelCostTracker((m) => log(`cost: ${m}`));
   const architectureGuardian = options.architectureGuardian ?? createArchitectureGuardian();
+  const designPipeline = options.designPipeline ?? createDesignPipeline();
   const timeoutBudgetConfig = await loadTimeoutBudgetConfig(projectPath);
   const timeoutBudgetMsFor = makeTimeoutBudgetResolver(timeoutBudgetConfig);
   log(
@@ -1479,6 +1529,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     instincts,
     costTracker,
     guardian: architectureGuardian,
+    designPipeline,
   };
 
   const outcomes: PromptOutcome[] = [];
@@ -1948,6 +1999,8 @@ interface LoopContext {
   costTracker: ModelCostTracker;
   /** Architecture Guardian (pre-prompt enforcement + post-prompt output validation). */
   guardian: ArchitectureGuardian;
+  /** Design Pipeline (screenshot capture + optional Penpot push + visual review gate). */
+  designPipeline: DesignPipeline;
 }
 
 /** Build the Sentinel options for this build (shared by the main run + recovery re-runs). */
@@ -2072,7 +2125,7 @@ async function executePrompt(
     // skills (if any) the queue entry itself declared via `skills:` (see loadSkillContent above,
     // which is entry-opt-in; this is stack-detected and applies to every prompt automatically).
     try {
-      const withSkillsContext = buildSkillsContext(ctx.projectPath, promptText);
+      const withSkillsContext = buildSkillsContext(ctx.projectPath, promptText, entry.prompt_type);
       if (withSkillsContext !== promptText) {
         log(`prompt ${index} '${entry.id}': skills library context prepended (+${withSkillsContext.length - promptText.length} chars)`);
         promptText = withSkillsContext;
@@ -2534,17 +2587,72 @@ async function executePrompt(
     let disposition: PromptDisposition;
     let note: string;
 
+    // DESIGN PIPELINE (component/page prompt types only): runs after Architecture Guardian and
+    // the Contract-13 Sentinel gate, but strictly BEFORE the merge decision below â€” a passing
+    // Sentinel result proves the code compiles/builds, it says nothing about whether a UI
+    // prompt's output actually looks right, so a design-rejected prompt must never merge to main
+    // on the strength of a green Sentinel alone. Runs only once Sentinel has already passed (no
+    // point screenshotting code that doesn't build).
+    const designReview: DesignReviewResult | null =
+      sentinel.passed === true && SHADCN_INSTALL_PROMPT_TYPES.has(entry.prompt_type)
+        ? await runDesignPipelineCheck(ctx, entry, index, changed)
+        : null;
+    const designRejected = designReview !== null && !designReview.approved;
+
     // BULLETPROOF GUARD (unconditional): if the most recently produced Sentinel result already
-    // passed, this prompt is done â€” full stop. Recovery (Contract 14) exists ONLY to rescue a
-    // FAILING Sentinel; it must be structurally unreachable whenever `sentinel.passed === true`.
-    // This check is repeated at every point below where `sentinel` could feed a recovery call, so
-    // no future refactor of the branches beneath it can accidentally route a green Sentinel into
-    // `runRecoveryImpl`.
-    if (sentinel.passed === true) {
+    // passed AND the design review (when it ran) did not reject this prompt, this prompt is done
+    // â€” full stop. Recovery (Contract 14) exists ONLY to rescue a FAILING Sentinel; it must be
+    // structurally unreachable whenever `sentinel.passed === true`. This check is repeated at
+    // every point below where `sentinel` could feed a recovery call, so no future refactor of the
+    // branches beneath it can accidentally route a green Sentinel into `runRecoveryImpl`.
+    if (sentinel.passed === true && !designRejected) {
       // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
       mergeAndTag(ctx, index);
       disposition = 'completed';
       note = 'Sentinel passed â€” merged to main and checkpointed.';
+    } else if (designRejected) {
+      // Sentinel is green here (that is the only way `designRejected` can be true) â€” the sole
+      // reason this prompt is not merging is the design review, so this does NOT go through
+      // Contract 14's pattern-matched Sentinel recovery (`runRecoveryImpl`), which would
+      // immediately escalate a never-before-seen "design review rejected" signature per its own
+      // "novel error â†’ always escalate" rule. Instead: one direct re-run with the reviewer's
+      // feedback appended (`DesignReviewResult.feedback`, already formatted as `DESIGN FEEDBACK:
+      // ...` by `DesignPipeline.run`), mirroring Build Brain's targeted-fix pattern above, gated
+      // on Autonomous Recovery being enabled â€” never merged before this resolves either way.
+      const feedback = designReview?.feedback ?? 'DESIGN FEEDBACK: visual review did not approve this component.';
+      if (ctx.autonomousRecoveryMode) {
+        log(`prompt ${index} '${entry.id}': [DESIGN PIPELINE] rejected â€” retrying once with design feedback`);
+        await ctx.liveStatus.promptPhase(
+          { index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' },
+          'Design review rejected â€” re-running with reviewer feedback'
+        );
+        const designFixRun = await ctx.runClaudeImpl(`${promptText}\n\n${feedback}`, ctx.projectPath, timeoutMs);
+        let designRecovered = false;
+        if (designFixRun.success) {
+          ctx.git.commitAll(
+            `[FORGE] design-feedback-fix: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run with design review feedback.`
+          );
+          const designFixSentinel = await ctx.runSentinelImpl(sentinelOptions);
+          designRecovered = designFixSentinel.passed;
+          if (designRecovered) {
+            sentinel = designFixSentinel;
+            run = designFixRun;
+          }
+        } else {
+          log(`prompt ${index} '${entry.id}': [DESIGN PIPELINE] feedback re-run claude call failed`);
+        }
+        if (designRecovered) {
+          mergeAndTag(ctx, index);
+          disposition = 'completed';
+          note = 'Design review rejected, then recovered after a feedback re-run â€” merged to main and checkpointed.';
+        } else {
+          disposition = 'failed';
+          note = `Design review rejected; feedback re-run did not restore approval: ${feedback}`;
+        }
+      } else {
+        disposition = 'failed';
+        note = `Design review rejected (Autonomous Recovery disabled): ${feedback}`;
+      }
     } else if (ctx.autonomousRecoveryMode) {
       // j. Autonomous Recovery (Contract 14): re-run the prompt + Sentinel, up to 2 attempts. Uses
       // Build Brain's targeted recoveryPrompt instead of the identical original prompt when one is
