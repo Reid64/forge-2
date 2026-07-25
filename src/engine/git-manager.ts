@@ -398,6 +398,18 @@ export class GitManager {
     return { ...result, files: parseNameStatus(result.stdout) };
   }
 
+  /**
+   * Return the file changes introduced by the most recent commit on the current branch
+   * (`HEAD~1..HEAD`). Used as a fallback signal when {@link getBranchDiff} shows nothing against
+   * main (e.g. the feature branch has already converged with main) but the branch's latest
+   * commit still contains real work. `files` is empty on failure (including no parent commit).
+   */
+  getHeadDiff(): BranchDiffResult {
+    const result = this.run(['diff', '--name-status', 'HEAD~1..HEAD']);
+    if (!result.success) return { ...result, files: [] };
+    return { ...result, files: parseNameStatus(result.stdout) };
+  }
+
   /** Return the current branch name (`'HEAD'` when detached), or `null` on failure. */
   getCurrentBranch(): CurrentBranchResult {
     const result = this.run(['rev-parse', '--abbrev-ref', 'HEAD']);

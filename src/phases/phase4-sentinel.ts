@@ -1304,6 +1304,20 @@ function evaluateFileDelta(
     );
   }
 
+  // main...HEAD showed nothing productive (e.g. the feature branch has already converged with
+  // main). Before falling further back to on-disk detection, check the branch's own latest
+  // commit — real work can still be present there even when the three-dot diff against main is empty.
+  const headDiff = new GitManager({ cwd: projectPath }).getHeadDiff();
+  const headProductive = headDiff.files.filter((c) => FILE_DELTA_PRODUCTIVE_STATUS.test((c.status ?? '').toUpperCase()));
+  if (headProductive.length > 0) {
+    return pass(
+      'file_delta',
+      `git diff (HEAD~1..HEAD) shows ${headProductive.length} file(s) added/modified in the latest commit`,
+      headProductive.map((c) => `${c.status} ${c.path}`).join('\n'),
+      durationMs
+    );
+  }
+
   if (expectedOutputExistsOnDisk(promptType, projectPath)) {
     return pass(
       'file_delta',
@@ -1318,9 +1332,11 @@ function evaluateFileDelta(
     'file_delta',
     'no work product — git diff (main...HEAD) shows no added/modified files',
     `changes on branch: ${gitDiffChanges.length === 0 ? '(none)' : gitDiffChanges.map((c) => `${c.status} ${c.path}`).join(', ')}\n` +
+      `latest commit (HEAD~1..HEAD): ${headDiff.files.length === 0 ? '(none)' : headDiff.files.map((c) => `${c.status} ${c.path}`).join(', ')}\n` +
       `Prompt type '${promptType ?? 'unknown'}' is expected to create or modify files; no productive ` +
-      'diff against main and no expected output on disk means claude did not (or could not) do the ' +
-      'work, regardless of what any other check reports (Session 5.2 file-delta law).',
+      'diff against main, no productive diff in the latest commit, and no expected output on disk ' +
+      'means claude did not (or could not) do the work, regardless of what any other check reports ' +
+      '(Session 5.2 file-delta law).',
     durationMs
   );
 }
