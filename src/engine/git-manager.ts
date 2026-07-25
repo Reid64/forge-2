@@ -406,6 +406,15 @@ export class GitManager {
   }
 
   /**
+   * Run `git status --porcelain`. Used by the executor to detect a working tree that is still
+   * being written to by a backgrounded claude task after `claude -p` itself has exited (see
+   * phase3-executor's post-run quiescence poll).
+   */
+  statusPorcelain(): GitResult {
+    return this.run(['status', '--porcelain']);
+  }
+
+  /**
    * Stage all changes and commit with the structured FORGE message
    * `FORGE-{project}-P{phase}-{promptId}-{status}`. The project is derived from the
    * working-directory basename so the caller does not need to repeat it. Returns the

@@ -2333,6 +2333,12 @@ async function executePrompt(
             `before commit â€” refusing to commit claude's work directly to ${ctx.mainBranch}`
         );
       }
+      // Guard against a backgrounded claude task (run_in_background Bash / background Agent) still
+      // writing to the working tree after `claude -p` itself has exited â€” see waitForGitQuiescence's
+      // doc comment. Runs before commitAll so the snapshot it stages reflects the finished work,
+      // not a partial write caught mid-flight.
+      await waitForGitQuiescence(ctx, index);
+
       // FORGE owns git add + commit after claude exits â€” claude never needs to commit anything
       // itself. `commitAll` runs `git add -A` then `git commit`; a clean tree (nothing staged) is
       // reported as `nothingToCommit: true` with `success: true`, so that case is skipped silently
@@ -3147,6 +3153,50 @@ function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]
     }
   }
   return { created, modified, deleted };
+}
+
+/** Poll interval for the post-run git quiescence check. */
+const QUIESCENCE_POLL_INTERVAL_MS = 2000;
+/** Max time to wait for the working tree to settle before giving up and committing anyway. */
+const QUIESCENCE_MAX_WAIT_MS = 30000;
+/** Consecutive identical `git status --porcelain` reads required to call the tree quiescent. */
+const QUIESCENCE_STABLE_READS = 3;
+
+/**
+ * Guard against claude backgrounding work (a `run_in_background` Bash call, or a background
+ * Agent/subagent) that outlives the `claude -p` process's own exit. `runClaudeImpl` only awaits
+ * the top-level process's `close` event â€” it has no visibility into a detached grandchild still
+ * writing to the working tree. Poll `git status --porcelain` until it reads identical for
+ * QUIESCENCE_STABLE_READS consecutive samples (or the max wait elapses) so commitAll never
+ * snapshots a tree that's still being written to. Best-effort (Iron Law 3 posture, matching the
+ * rest of this file's degrade-gracefully checks): on timeout this logs a warning and proceeds
+ * rather than hanging the build forever.
+ */
+async function waitForGitQuiescence(ctx: LoopContext, index: number): Promise<void> {
+  const startedAt = Date.now();
+  let lastStatus: string | null = null;
+  let stableCount = 0;
+
+  while (Date.now() - startedAt < QUIESCENCE_MAX_WAIT_MS) {
+    const status = ctx.git.statusPorcelain();
+    const current: string = status.success ? status.stdout : (lastStatus ?? '');
+    stableCount = current === lastStatus ? stableCount + 1 : 1;
+    lastStatus = current;
+
+    if (stableCount >= QUIESCENCE_STABLE_READS) {
+      ctx.log(
+        `prompt ${index}: working tree quiescent after ${Math.round((Date.now() - startedAt) / 1000)}s`
+      );
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, QUIESCENCE_POLL_INTERVAL_MS));
+  }
+
+  ctx.log(
+    `prompt ${index}: WARNING â€” working tree did not settle within ` +
+      `${Math.round(QUIESCENCE_MAX_WAIT_MS / 1000)}s (possible backgrounded claude task still ` +
+      `writing) â€” proceeding with commit anyway`
+  );
 }
 
 /**
