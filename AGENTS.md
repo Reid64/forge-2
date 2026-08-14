@@ -642,3 +642,151 @@ Generated `queue.yaml` is ordered by dependency tier:
 | `src/skills/ux-intelligence.ts` | UXIntelligenceAgent — PRD-vertical-driven design-system baseline selector |
 | `src/skills/compliance-detector.ts` | ComplianceDetectorAgent — HIPAA/GDPR/PCI-DSS/SOX detector |
 | `src/skills/templates/*.skill.md` (29 new files) | New elite skill templates spanning architecture, security, data, AI/agent, performance, product/business/UX, reliability, and deploy domains — see `STATE_OF_THE_BUILD.md` § Elite Skills Library for the full per-template breakdown |
+
+---
+
+## Agent: PlaywrightScreenshotter (src/design-pipeline/screenshotter.ts)
+
+- **Purpose:** renders a generated component/page in a real headless Chromium instance and captures it at every viewport FORGE cares about (desktop/laptop/tablet/mobile — 4 by default), so a `ui`/`feature` prompt's output can be visually inspected instead of judged purely by whether `tsc`/`build` succeeded. `isAvailable` guards on the `playwright` package being installed; `startDevServer` spawns the target project's `pnpm dev` and polls up to 30s for HTTP readiness; `captureComponent` launches headless Chromium, navigates, waits for network-idle, and writes one PNG per viewport; `captureAllRoutes` walks `src/app` for every `page.tsx`, maps route groups/parallel slots/dynamic segments to a navigable URL, and captures every discovered route; `stopDevServer` kills the whole process tree (`taskkill /T /F` on Windows). Folds in each capture's `checkComponentAccessibility` score (`src/ui-engine/accessibility-checker.ts`, reused not reimplemented) when a matching component source file is found — `null`, never fabricated, when none is.
+- **Status:** COMPLETE
+- **CLI:** `forge design screenshot <project-path>` (whole-project route discovery + capture, outside any real build)
+- **Entry Point:** `src/design-pipeline/screenshotter.ts` → `class PlaywrightScreenshotter` / `createPlaywrightScreenshotter()` → `captureAllRoutes(projectPath, options): Promise<ScreenshotResult[]>`
+- **Exports:** `PlaywrightScreenshotter`, `createPlaywrightScreenshotter`, `ScreenshotResult`, `ScreenshotOptions`, `StartDevServerOptions`, `DEFAULT_VIEWPORTS`
+- **Dependencies:** `playwright` (dynamically imported, guarded), `src/ui-engine/accessibility-checker.ts` (`checkComponentAccessibility`), `node:child_process`/`node:fs`/`node:path`
+- **Database tables:** none — writes PNGs directly to disk under the resolved design-storage path
+
+---
+
+## Agent: PenpotIntegration (src/design-pipeline/penpot-integration.ts)
+
+- **Purpose:** optional, entirely best-effort bridge from `PlaywrightScreenshotter`'s captured evidence into Penpot — an open-source, self-hostable design tool (default `http://localhost:9001`, matching BLUEPRINT's "self-hosted, Docker" posture for FORGE's own Supabase instance) — so a generated component can be pushed into a real design file for human review alongside its screenshot. `isAvailable` probes Penpot's own `get-profile` RPC command; `isConfigured` checks `PENPOT_EMAIL`/`PENPOT_PASSWORD` env vars then `CredentialVault` (the same resolution order `vercel-deployer.ts`/`supabase-migrator.ts` use); `authenticate`/`createFile`/`uploadScreenshot` follow Penpot's RPC-over-HTTP API shape (`POST /api/rpc/command/<name>`, not a REST resource tree); `getDesignFileUrl` is pure string construction. Every method degrades to a safe `null`/`false`/error-carrying result on any failure — an unreachable or unconfigured instance logs `PENPOT_UNAVAILABLE_MESSAGE` and the caller (`DesignPipeline`) continues in screenshot-only mode.
+- **Status:** COMPLETE
+- **CLI:** none directly — reachable via `forge design review`/`forge design penpot-setup` (the latter prints a ready-to-run `docker run` command for a local instance, volume-mounted to the auto-detected design-storage path)
+- **Entry Point:** `src/design-pipeline/penpot-integration.ts` → `class PenpotIntegration` / `createPenpotIntegration()` → `createFile(name, projectId, options): Promise<PenpotFileResult>`, `uploadScreenshot(filePath, fileId, options): Promise<PenpotUploadResult>`
+- **Exports:** `PenpotIntegration`, `createPenpotIntegration`, `PenpotConfig`, `PenpotFileResult`, `PenpotUploadResult`, `PENPOT_UNAVAILABLE_MESSAGE`
+- **Dependencies:** `src/autonomy/credential-vault.ts` (`CredentialVault`, `createCredentialVault`), `src/tools/forge-logger.ts`, `node:fs`/`node:path`, the global `fetch`/`FormData`/`Blob`
+- **Database tables:** none — Penpot itself is the persistence layer for anything this module creates; FORGE records only a `penpot_file_id` reference inside `design_reviews`
+
+---
+
+## Agent: DesignReviewGate (src/design-pipeline/review-gate.ts)
+
+- **Purpose:** the visual counterpart to `src/resurrection/human-gate.ts`'s "fifth, structural human gate" — where that gate presents an architectural governance gap for approve/decline, this gate presents a generated component/page's captured evidence (screenshots + an optional Penpot URL) for the same approve/decline treatment, so a `ui`/`feature` prompt's output is never merged purely because `tsc`/`build`/Sentinel passed. `review()` prints a boxed `[DESIGN REVIEW]` header + every screenshot path + the Penpot URL; INTERACTIVE mode blocks on readline for Approve/Reject(+required feedback)/Skip (Approve/Reject persist to `design_reviews`, Skip persists nothing); NON-INTERACTIVE mode (every real Phase 3 build, per BLUEPRINT's "never wait for human approval mid-build") auto-approves at/above `autoApproveThreshold` (default 70) against the component's accessibility score, else defers with an explanatory `feedback` string — never a fabricated approval of unscored/failing work.
+- **Status:** COMPLETE
+- **CLI:** reachable via `forge design review <project-path> [--non-interactive]`; `forge design history <project-path> [--limit <n>]` lists past `design_reviews` rows
+- **Entry Point:** `src/design-pipeline/review-gate.ts` → `class DesignReviewGate` / `createDesignReviewGate()` → `review(componentName, screenshotResults, penpotUrl, options): Promise<DesignReviewResult>`
+- **Exports:** `DesignReviewGate`, `createDesignReviewGate`, `DesignReviewResult`, `DesignReviewOptions`, `isDesignReviewMemoryAvailable`
+- **Dependencies:** `src/memory/client.ts` (`getClient`, `newId`, `nowIso`, `runQuery`, `toSqliteBool`), `node:readline`
+- **Database tables:** `design_reviews` (schema 3.1.0 — write, via `persistDesignReview`)
+
+---
+
+## Agent: DesignPipeline (src/design-pipeline/index.ts)
+
+- **Purpose:** the composition root wiring `PlaywrightScreenshotter` + `PenpotIntegration` + `DesignReviewGate` together into the single entry point Phase 3 calls for a `ui`/`feature` prompt — mirroring `ArchitectureGuardian`'s own composition-root house style one layer up the pipeline: where Guardian judges the CODE a prompt produced, DesignPipeline judges what that code actually RENDERS AS. `run()` returns an approved, non-blocking result immediately (no dev server, no Playwright, no Penpot) when none of `modifiedFiles` is a `.tsx` file; otherwise resolves/prepares design storage, captures every route at every viewport, best-effort pushes the evidence to Penpot when reachable+configured, stops the dev server, then runs the review gate. A REJECTED review has its `feedback` re-formatted as `DESIGN FEEDBACK: <feedback>` so a caller (Phase 3) can inject it directly into a recovery re-run prompt with no further formatting of its own. Every collaborator failure degrades to a smaller/emptier result — `run()` never throws.
+- **Status:** COMPLETE
+- **CLI:** `forge design review <project-path> [--non-interactive]` runs the full pipeline standalone; wired automatically into every Phase 3 `ui`/`feature` prompt via `runDesignPipelineCheck` (`src/phases/phase3-executor.ts`)
+- **Entry Point:** `src/design-pipeline/index.ts` → `class DesignPipeline` / `createDesignPipeline()` → `run(promptEntry, projectPath, buildRunId, modifiedFiles, nonInteractive): Promise<DesignReviewResult>`
+- **Exports:** `DesignPipeline`, `createDesignPipeline`, `DesignPipelinePromptEntry`, `DESIGN_PIPELINE_SKIPPED_MESSAGE`, plus re-exported `ScreenshotResult`/`PenpotConfig`/`PenpotFileResult`/`PenpotUploadResult`/`DesignReviewResult`/`DesignReviewOptions`
+- **Dependencies:** `src/design-pipeline/screenshotter.ts`, `src/design-pipeline/penpot-integration.ts`, `src/design-pipeline/review-gate.ts`, `src/design-pipeline/storage-config.ts`, `src/tools/forge-logger.ts`
+- **Database tables:** none directly — delegates to `DesignReviewGate`'s `design_reviews` write
+
+### Files (Design Pipeline, src/design-pipeline/)
+
+| File | Purpose |
+|------|---------|
+| `src/design-pipeline/storage-config.ts` | `getDesignStoragePath`/`ensureStorageDirectories`/`getScreenshotPath` — env → external-drive-with->100GB-free → local-fallback storage resolution |
+| `src/design-pipeline/screenshotter.ts` | `PlaywrightScreenshotter` — dev-server lifecycle, App Router route discovery, 4-viewport capture, accessibility-score lookup |
+| `src/design-pipeline/penpot-integration.ts` | `PenpotIntegration` — optional RPC-over-HTTP bridge to a self-hosted Penpot instance |
+| `src/design-pipeline/review-gate.ts` | `DesignReviewGate` — interactive Approve/Reject/Skip or non-interactive accessibility-score-gated auto-approve |
+| `src/design-pipeline/index.ts` | `DesignPipeline` — composition root Phase 3 calls once per `ui`/`feature` prompt |
+
+---
+
+## Agent: BuildBrainEvolver (src/learning/build-brain-evolver.ts)
+
+- **Purpose:** System 2 (Learning Engine extensions) — watches whether Contract-9 prompt rewrites (`src/engine/prompt-rewriter.ts`) actually help. `observeRewriteOutcome` is called once per Phase 3 prompt, right after Sentinel runs, appending to an in-process trailing window (`WINDOW_SIZE = 10`) and writing ONE `pending_evolutions` TEMPLATE proposal the moment the window shows a rewritten-vs-not Sentinel pass-rate split of at least `PATTERN_THRESHOLD` (0.3) with at least `MIN_BUCKET_SAMPLES` (3) samples on each side. `emitProposals`, called once at Phase 5 end, re-derives the same signal from the durable `prompt_executions` table across the whole build. Per Learning Iron Law L5, NEVER edits the rewriter and NEVER writes to any table but `pending_evolutions` — it only proposes; `EvolutionPromoter` is the sole component allowed to act on a proposal.
+- **Status:** COMPLETE
+- **CLI:** none directly — `observeRewriteOutcome` runs automatically after every Phase 3 prompt's Sentinel pass (`onSentinelFailure` in `src/integration/bus.ts` also calls it with `sentinelPassed: false` on a Sentinel failure); `emitProposals` runs automatically at Phase 5 end
+- **Entry Point:** `src/learning/build-brain-evolver.ts` → `observeRewriteOutcome(promptId, wasRewritten, sentinelPassed, db): void`, `emitProposals(buildRunId, db): PendingEvolution[]`
+- **Exports:** `observeRewriteOutcome`, `emitProposals`
+- **Dependencies:** `src/memory/client.ts` (`newId`, `nowIso`, `logMemoryWarning`), `src/learning/database.ts` (`getMachineId`)
+- **Database tables:** `pending_evolutions` (write — TEMPLATE proposals only), `prompt_executions` (read, via `emitProposals`)
+
+---
+
+## Agent: CrossProjectKnowledgeTransfer (src/learning/cross-project-transfer.ts)
+
+- **Purpose:** System 2 (Learning Engine extensions) — turns `cross_project_insights` from passive storage into an active PUSH: at the start of a new build's Phase 1B and Phase 2, every stack-compatible, non-retired insight is transferred into that build's prompt assembly context. `matchFingerprint` (Learning Iron Law L7) is a HARD disqualifier — language and framework must match exactly (database only when both sides specify one); an incompatible insight is excluded, never injected "with lower confidence." An insight whose evidence traces to a pattern `PatternRetirer` has since retired is excluded via the shared `filterRetiredPatterns` anti-join. The only write is `cross_project_insights.applied_count += 1` per transferred insight (skipped when `dryRun`).
+- **Status:** COMPLETE
+- **CLI:** none directly — runs automatically inside Phase 1B and Phase 2 of every `forge build`; also reachable via `forge learn transfer --build-id <id>` for one explicit source build (hard-throws `"Incompatible stack — transfer refused"` on a stack mismatch rather than returning empty)
+- **Entry Point:** `src/learning/cross-project-transfer.ts` → `transferKnowledge(targetProjectPath, targetStack, db, opts?): TransferResult`
+- **Exports:** `transferKnowledge`, `matchFingerprint`, `StackTriple`, `TransferOptions`, `TransferResult`
+- **Dependencies:** `src/learning/retirement-filter.ts` (`filterRetiredPatterns`), `src/tools/stack-detector.ts` (`StackFingerprint`), `src/memory/client.ts` (`logMemoryWarning`)
+- **Database tables:** `cross_project_insights` (read/write — `applied_count` increment), `build_runs` (read — `stack_fingerprint`, for the explicit `opts.buildId` hard-check)
+- **Wired into:** `src/phases/phase1b-architect.ts` (`transferKnowledge` imported line 78, called line 2198), `src/phases/phase2-governance.ts` (imported line 63, called line 1078)
+
+---
+
+## Agent: PatternRetirer (src/learning/pattern-retirer.ts)
+
+- **Purpose:** System 2 (Learning Engine extensions) — a weekly sweep, driven by `src/engine/scheduler.ts`, that soft-retires dead-weight `error_patterns` rows: stale (`last_seen_at` older than `RETENTION_DAYS` = 30), zero recorded success (`success_rate = 0`), and with no `resolutions` row that ever recorded `times_succeeded > 0`. `error_patterns` carries no `active` column, so retirement is SOFT_RETIRE only — writing the append-only `pattern_retirement_log` row IS the retirement; every consuming query site (prompt-rewriter, prompt-assembler, failure-predictor, `CrossProjectKnowledgeTransfer`) anti-joins against that log via the shared `filterRetiredPatterns` helper so a retired pattern never resurfaces. Idempotent — an already-retired candidate is dropped before any log write, so a re-run never double-logs.
+- **Status:** COMPLETE
+- **CLI:** none directly — `retirePatterns` runs automatically via the `pattern-retirer-sweep` scheduled task in `src/engine/scheduler.ts`
+- **Entry Point:** `src/learning/pattern-retirer.ts` → `retirePatterns(db): RetirementResult[]`
+- **Exports:** `retirePatterns`, `RetirementResult`
+- **Dependencies:** `src/learning/retirement-filter.ts` (`filterRetiredPatterns`), `src/memory/client.ts` (`newId`, `nowIso`, `logMemoryWarning`), `src/learning/database.ts` (`getMachineId`)
+- **Database tables:** `error_patterns` (read), `resolutions` (read), `pattern_retirement_log` (write)
+- **Wired into:** `src/engine/scheduler.ts` (imported line 20 as `retirePatterns`, `PATTERN_RETIRER_TASK_NAME = 'pattern-retirer-sweep'` line 27, invoked line 59)
+
+---
+
+## Agent: EvolutionPromoter (src/learning/evolution-promoter.ts)
+
+- **Purpose:** System 2 (Learning Engine extensions) — the only FORGE component permitted to cross the propose→activate line (Learning Iron Law L5). For each `pending_evolutions` row whose `confidence >= PROMOTION_THRESHOLD` (0.9), writes the decision to `evolution_promotions` BEFORE anything else changes (L3), then applies the activation appropriate to its `evolution_type` (RULE → an `AUTO_ELEVATED` `governance_rules` row; THRESHOLD/CONFIG → `forge_meta` with history; TEMPLATE → clears the `PROPOSED:` prefix on the matching `governance_versions` row; HOOK → recorded as promoted only, no persistent enabled-flag store exists yet), and flips the `pending_evolutions` row to APPROVED. `evolution_type = 'GATE'` is never auto-promotable (L2) — Contract 2 gates only weaken via human approval. Also runs monitoring-window bookkeeping for already-promoted rows: once `MONITORING_WINDOW_BUILDS` (15) builds have completed since a promotion, a post-promotion success-rate drop of more than `ROLLBACK_REGRESSION_POINTS` (0.15 points) triggers an automatic rollback that reverses the activation (L8).
+- **Status:** COMPLETE — note: `src/integration/bus.ts`'s `RollbackCapablePromoter` interface and its doc comments (lines 42-47, 297-300) still describe EvolutionPromoter as "not yet built"/"not yet implemented"; that comment is stale relative to this file's actual presence and Phase 5 wiring, and `onEvolutionPromoted` (bus.ts) is not currently called from any phase file — flagged here rather than silently left contradicting the code.
+- **CLI:** `forge learn evolve` (`src/cli/commands/learning.ts` — `registerPromoterPhase5Hook`, auto-promotes every eligible pending evolution and runs rollback monitoring); also runs automatically as Phase 5 step 11 of every `forge build`
+- **Entry Point:** `src/learning/evolution-promoter.ts` → `promoteEligible(db): PromotionResult[]`, `registerPromoterPhase5Hook(db): PromotionResult[]`
+- **Exports:** `PROMOTION_THRESHOLD`, `PromotionResult`, `promoteEligible`, `registerPromoterPhase5Hook`
+- **Dependencies:** `src/memory/client.ts` (`newId`, `nowIso`, `logMemoryWarning`), `src/learning/database.ts` (`getMachineId`), `src/learning/types.ts` (`PendingEvolution`)
+- **Database tables:** `pending_evolutions` (read/write — status flip to APPROVED), `evolution_promotions` (write), `governance_rules` (write, RULE activation), `forge_meta` (write, THRESHOLD/CONFIG activation), `governance_versions` (read/write, TEMPLATE activation), `build_outcomes` (read — monitoring-window success rate)
+- **Wired into:** `src/phases/phase5-learner.ts` (`registerPromoterPhase5Hook` imported line 61, Step 11 "EvolutionPromoter — Auto-Promotions", invoked/logged lines 811-829)
+
+---
+
+## Agent: TestOrchestrator (src/testing/orchestrator.ts)
+
+- **Purpose:** System 3 (Enterprise Test Suite) dispatcher, in the house style of `phase4-sentinel.ts` — NEVER throws and NEVER fabricates a pass. `runTests` invokes every requested (trigger × runner) pair against the 7 runners under `src/testing/runners/` (`unit-runner.ts`, `integration-runner.ts`, `api-runner.ts`, `e2e-runner.ts`, `security-runner.ts`, `performance-runner.ts`, `dependency-runner.ts` — the batch dispatch path, distinct from each runner's standalone `unit.ts`/`api.ts`/etc. single-suite wrapper), normalizes each raw runner outcome into the common `TestRunResult` shape, and persists one `test_run_results` row per suite (plus `test_coverage_snapshots` rows for UNIT/INTEGRATION) via `src/memory/test-results.ts`. A runner that throws becomes an `error`-status result, never a crash; Build Memory being unreachable degrades to a `TestRunResult` with no persisted `id` (Contract 4).
+- **Status:** COMPLETE
+- **CLI:** `forge test <project-path> [--triggers <list>] [--runners <list>]` (`src/cli/index.ts` line ~3830, "Run the FORGE Enterprise Test Suite (TestOrchestrator) against a project"); also invoked automatically by `src/integration/bus.ts`'s `onSentinelFailure` (POST_PROMPT UNIT+INTEGRATION baseline run) and `onEvolutionPromoted` (MANUAL UNIT+INTEGRATION post-promotion verification)
+- **Entry Point:** `src/testing/orchestrator.ts` → `runTests(options: TestOrchestratorOptions): Promise<TestRunResult[]>`
+- **Exports:** `runTests` (default export)
+- **Dependencies:** `src/testing/runners/*-runner.ts` (the 7 batch runners), `src/testing/runners/persist.ts` (`persistRunnerOutcome`), `src/learning/database.ts` (`getMachineId`)
+- **Database tables:** `test_run_results` (write, via `persist.ts`), `test_coverage_snapshots` (write, UNIT/INTEGRATION only)
+
+### Files (Enterprise Test Suite, src/testing/)
+
+| File | Purpose |
+|------|---------|
+| `src/testing/orchestrator.ts` | `TestOrchestrator` — dispatches every requested (trigger × runner) pair, normalizes + persists results |
+| `src/testing/types.ts` | `TriggerType`, `RunnerType`, `TestRunResult`, `TestCoverageSnapshot`, `TestOrchestratorOptions` |
+| `src/testing/runners/types.ts` | `RunnerInput`/`RunnerOutcome` shared runner contract |
+| `src/testing/runners/vitest-shared.ts` | Shared Vitest spawn/JSON-report-parse path (UNIT + INTEGRATION runners) |
+| `src/testing/runners/exec.ts` | Shared subprocess-exec helper |
+| `src/testing/runners/persist.ts` | `persistRunnerOutcome` — the one write path every runner's result flows through |
+| `src/testing/runners/unit-runner.ts`, `integration-runner.ts`, `api-runner.ts`, `e2e-runner.ts`, `security-runner.ts`, `performance-runner.ts`, `dependency-runner.ts` | The 7 batch runners `TestOrchestrator.runTests` dispatches to |
+| `src/testing/runners/unit.ts`, `integration.ts`, `api.ts`, `e2e.ts`, `security.ts`, `performance.ts`, `dependency.ts` | Single-suite direct-call wrappers (`runUnitTests` etc.) around the same runner + `persist.ts` path — confirmed zero importers anywhere in `src/` this session; removed as orphaned pre-`vitest-shared.ts` draft entry points (see `STATE_OF_THE_BUILD.md` § Systems 1-4) |
+| `src/memory/test-results.ts` | CRUD for `test_run_results`/`test_coverage_snapshots` |
+
+---
+
+## Agent: IntegrationBus (src/integration/bus.ts)
+
+- **Purpose:** System 4 — the wiring layer between System 1 (`GapAuditor`), System 2 (`BuildBrainEvolver`/`EvolutionPromoter`), and System 3 (`TestOrchestrator`), which were each built to operate standalone. `onSentinelFailure` fires on every Sentinel FAIL after Contract-14 auto-recovery is exhausted, fanning out to a TARGETED gap audit (System 1), a learning-writeback observation via `observeRewriteOutcome` (System 2), and a POST_PROMPT UNIT+INTEGRATION baseline test run (System 3), then cross-references the same prompt's independently-run Sentinel Prime (System 5) verdict — a non-auto-recoverable halt appends a BLOCKER to `STATE_OF_THE_BUILD.md`, an auto-recoverable one queues a fresh `pending` `prompt_executions` row. `onEvolutionPromoted` re-verifies UNIT+INTEGRATION after a promoted evolution and rolls back via an injected `RollbackCapablePromoter` on regression. `onContractConfirmed` auto-appends a new `### Contract N:` entry to root `BEHAVIORAL_CONTRACTS.md` once a behavioral pattern is confirmed across 3+ builds, idempotent on the pattern's signature. Every export is NON-FATAL (Contract 4) — a downstream collaborator failing is logged and swallowed, never thrown.
+- **Status:** COMPLETE for `onSentinelFailure`/Sentinel Prime readback (confirmed wired — `src/phases/phase3-executor.ts` imports `onSentinelFailure`/`onSentinelPrimeHalt` at line 153, calls `onSentinelFailure` at line 1721). `onEvolutionPromoted` and `onContractConfirmed` are implemented and exported but have **zero call sites anywhere in `src/`** this session (confirmed via project-wide grep) — flagged as a real wiring gap, not silently assumed complete.
+- **CLI:** none directly — `onSentinelFailure` runs automatically inside Phase 3's Sentinel-failure disposition path
+- **Entry Point:** `src/integration/bus.ts` → `onSentinelFailure(failedCheck, promptId, buildRunId, projectPath): Promise<void>`, `onEvolutionPromoted(evolutionId, projectPath, promoter?): Promise<void>`, `onContractConfirmed(signature, count): Promise<void>`
+- **Exports:** `onSentinelFailure`, `onEvolutionPromoted`, `onContractConfirmed`, `onSentinelPrimeHalt`, `RollbackCapablePromoter`
+- **Dependencies:** `src/resurrection/gap-auditor.ts` (`runGapAudit`), `src/learning/build-brain-evolver.ts` (`observeRewriteOutcome`), `src/testing/orchestrator.ts` (`runTests`), `src/sentinel-prime/index.ts` + `confidence-scorer.ts` (Sentinel Prime readback), `src/memory/index.ts` (`BuildMemory`), `src/tools/governance-text.ts` (`toAsciiGovernanceText`)
+- **Database tables:** `sentinel_prime_runs` (read, readback), `prompt_executions` (read/write, retry queueing) — delegates all other writes to the System 1/2/3 collaborators it calls
+- **Wired into:** `src/phases/phase3-executor.ts` (line 153 import, line 1721 `onSentinelFailure` call)
