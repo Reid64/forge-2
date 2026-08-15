@@ -488,3 +488,18 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T22:40:40.221Z â€” Allowlist known external read-only paths in project-boundary heuristic (prompt 1/22)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---

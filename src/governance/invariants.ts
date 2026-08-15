@@ -323,13 +323,57 @@ async function checkNoDirectCommitsToMainDuringBuild(ctx: InvariantContext): Pro
     .filter((line) => line.length > 0);
 
   if (directCommits.length > 0) {
+    const mechanism = await diagnoseDirectCommitMechanism(ctx.projectPath, build.id);
     return makeResult(
       id,
       def.contract,
       def.description,
       'fail',
-      `${directCommits.length} non-merge commit(s) landed directly on main since build ${build.id} started (${build.started_at}): ${directCommits.slice(0, 3).join(' | ')}${directCommits.length > 3 ? ', …' : ''}.`
+      `${directCommits.length} non-merge commit(s) landed directly on main since build ${build.id} started (${build.started_at}): ${directCommits.slice(0, 3).join(' | ')}${directCommits.length > 3 ? ', …' : ''}.${mechanism}`
     );
   }
   return makeResult(id, def.contract, def.description, 'pass', `No direct (non-merge) commit on main since build ${build.id} started (${build.started_at}).`);
+}
+
+/**
+ * Distinguish two different root causes behind the same symptom (a non-merge commit on main):
+ * GitManager's own `mergeToMain` (`git checkout -b` + `git merge --no-ff`) is genuinely buggy for
+ * THIS build, vs. these commit(s) never went through Contract 10's branch/merge machinery at all
+ * (an external or alternate commit path put them on main directly). Contract 10's own branch is
+ * NEVER deleted by any code path — Contract 12 explicitly preserves it on failure, and
+ * `GitManager.mergeToMain`/`mergeBranchToMain` check back out to it after a successful merge — so
+ * if `git checkout -b`/`git merge --no-ff` genuinely ran for this build, at least one
+ * `forge/{buildId}/prompt-N-...` branch this build's own `prompt_executions.branch_name` recorded
+ * should still exist as a real ref. Its absence means the commit(s) bypassed GitManager entirely;
+ * git-manager.ts is not the place to look for the bug. Best-effort/never throws (Contract 4) — an
+ * inconclusive check appends nothing rather than asserting either mechanism without evidence.
+ */
+async function diagnoseDirectCommitMechanism(projectPath: string, buildId: string): Promise<string> {
+  const executions = await getPromptsByBuild(buildId);
+  if (executions === null) return '';
+  const claimedBranches = executions
+    .map((e) => e.branch_name)
+    .filter((b): b is string => typeof b === 'string' && b.length > 0);
+  if (claimedBranches.length === 0) return '';
+
+  let branchList: string;
+  try {
+    branchList = execFileSync('git', ['branch', '--list', '--all'], {
+      cwd: projectPath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    });
+  } catch {
+    return '';
+  }
+
+  const corroborated = claimedBranches.some((branch) => branchList.includes(branch));
+  if (corroborated) return '';
+  return (
+    ` This build's own prompt_executions recorded ${claimedBranches.length} Contract-10 branch name(s) ` +
+    `(e.g. '${claimedBranches[0]}') but NONE exist in this repository's branch list — the direct commit(s) ` +
+    'above bypassed GitManager.createBranch/mergeToMain entirely rather than exposing a defect in that ' +
+    'merge flow; look at whatever process actually produced these commits, not src/engine/git-manager.ts.'
+  );
 }

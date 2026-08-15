@@ -2881,3 +2881,30 @@ routing tables, or the consensus engine.
 - Timestamp: 2026-08-15T22:05:49.565Z
 
 > 2026-08-15T22:05:49.580Z [FORGE Phase 3] prompt 1 'wire-real-design-tool-detection' (feature): FAILED â€" Sentinel FAIL(?).
+
+> 2026-08-15T22:41:08.664Z [FORGE Phase 3] prompt 1 'fix-boundary-check-false-positive' (feature): COMPLETED â€" Sentinel PASS.
+
+## Contract 10 Branch Isolation invariant — investigation findings (prompt 2, build 904cf222)
+
+`src/engine/git-manager.ts` and `src/phases/phase3-executor.ts` are NOT the source of the
+`no-direct-commits-to-main-during-build` failures seen on builds 41fbf52a and 3d6f7d16 (and
+recurring on this very build). Evidence gathered directly against this repo:
+
+- `git reflog --all` for this repo contains zero `checkout: moving from ... to ...` entries and
+  zero merge commits, ever, across its full history — `GitManager.createBranch`/`mergeToMain`
+  (which do run correctly in the unit-test fixtures under `.forge/build.log`, confirmed) have
+  never actually executed against `C:\Users\manag\Documents\forge-2` itself.
+- `.forge/build.log` (GitManager's own exec trace) has no entries for build 904cf222 at all.
+- `prompt_executions.branch_name` IS populated with well-formed `forge/{buildId}/prompt-N-...`
+  names for the flagged builds, but none of those branches exist anywhere in this repo's git
+  history — the telemetry claims Contract-10 execution that git has no record of.
+- The flagged commits' messages match the literal `Commit: git add -A; git commit -m '...'`
+  instruction text embedded in queue.yaml prompts verbatim, i.e. whatever is driving these builds
+  has an inner agent commit directly on `main` per the prompt text, not via GitManager.
+
+Fix applied (`src/governance/invariants.ts`): `checkNoDirectCommitsToMainDuringBuild` now
+corroborates a direct-commit failure against the build's own recorded branch name(s) and appends
+a diagnostic note when none exist as real refs, so the failure message stops implicating
+git-manager.ts's merge flow and instead points at the real gap — whatever process is actually
+producing these builds bypasses GitManager entirely. That external mechanism is not present
+anywhere under `src/`, so it is out of scope to fix directly from within this repo.
