@@ -11,6 +11,42 @@
 
 ---
 
+## `forge agent approve/reject/list` CLI (2026-08-15) — COMPLETE
+
+Human review surface for `pending_evolutions` (the Learning Engine's self-modification proposal
+queue), filling the gap the schema already anticipated: `evolution_promotions.promotion_method`
+has always accepted `'HUMAN_APPROVED'`/`'HUMAN_OVERRIDE_REJECTED'` alongside `'AUTO'`
+(`src/learning/database.ts`), and `GATE`-type evolutions were explicitly excluded from
+`EvolutionPromoter`'s auto-promotion path pending a human decision mechanism
+(`src/learning/evolution-promoter.ts`) — this was that missing mechanism.
+
+- `src/cli/commands/agent.ts` (new) — `forge agent list [--status <PENDING|APPROVED|REJECTED|SUPERSEDED>]`,
+  `forge agent approve <id> [--note <text>]`, `forge agent reject <id> --reason <text>` (reason
+  required). Registered via `registerAgentCommands(program)` in `src/cli/index.ts`, alongside the
+  pre-existing unrelated `forge agents` (plural — lists Contract 17 self-created agents, a
+  different table).
+- `src/learning/evolution-promoter.ts` — added `approveEvolution`/`rejectEvolution`, sharing the
+  module's existing `applyEffect` per-`evolution_type` activation dispatch with `promoteEligible`
+  (the AUTO path) so RULE/THRESHOLD/CONFIG/TEMPLATE activation logic isn't duplicated. Approval is
+  the only path that can promote a `GATE` row (per `upgrades/LEARNING_BLUEPRINT.md`
+  §EvolutionPromoter): `applyEffect` has no GATE case, so approving one records the decision without
+  weakening any Contract 2 gate. Both write an `evolution_promotions` audit row before any activation
+  (Learning Iron Law L3), matching `upgrades/LEARNING_PRD.md`'s "every promotion decision — AUTO,
+  HUMAN_APPROVED, or HUMAN_OVERRIDE_REJECTED — writes exactly one row" requirement. Re-deciding an
+  already-decided row, or targeting an unknown id, throws a descriptive error (caught at the CLI
+  layer, `process.exitCode = 1`) rather than silently no-opping.
+- `src/learning/queries.ts` — added `getEvolutionById`, `getEvolutionsByStatus` read helpers.
+- Verified against a `better-sqlite3` `.backup()` snapshot of the live `~/.forge/forge_memory.db`
+  (not the live file itself): approve activates a RULE proposal's `AUTO_ELEVATED` governance rule
+  and writes the `HUMAN_APPROVED` audit row; reject writes `HUMAN_OVERRIDE_REJECTED` with no
+  activation; both flip `pending_evolutions.status` and set `review_note`; double-deciding and
+  unknown-id both throw cleanly. Confirmed the live DB's target row was untouched afterward.
+- Pure local CLI (no HTTP surface, no network boundary) — the architecture guardian's
+  auth-middleware/zod/rate-limiting requirements target FORGE-generated *application* code, not
+  FORGE's own CLI; not applicable here, consistent with every other `forge learn ...` command.
+
+---
+
 ## Security/Quality Gate Expansion — Semgrep SAST + OWASP ZAP DAST + Schemathesis API Contract Testing (2026-08-15) — COMPLETE
 
 **Objective:** Extend Sentinel's existing Ring 2/Ring 3 tool gates (TOOLCHAIN-adjacent, opt-in,
@@ -2943,3 +2979,5 @@ green) inject their own `execImpl` and are unaffected; `npx tsc --noEmit` and `p
 both clean.
 
 > 2026-08-15T23:06:20.823Z [FORGE Phase 3] prompt 2 'fix-contract10-branch-isolation' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T23:29:06.151Z [FORGE Phase 3] prompt 3 'fix-queue-prompt-type-metadata' (feature): COMPLETED â€" Sentinel PASS.

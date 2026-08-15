@@ -113,6 +113,7 @@ import { getDesignStoragePath, ensureStorageDirectories, getScreenshotPath } fro
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
+import { registerAgentCommands } from './commands/agent.js';
 import { getLogger, beginQuietLogging } from '../tools/forge-logger.js';
 import { getForgeDbPath, getSchemaVersion, initializeForgeMemory } from '../learning/database.js';
 import { deriveBrandFromBaseline, type DesignTokenSet } from '../tools/brand-inheritance.js';
@@ -4724,6 +4725,7 @@ async function main(): Promise<void> {
     });
 
   registerLearningCommands(program);
+  registerAgentCommands(program);
 
   await program.parseAsync(process.argv);
 }

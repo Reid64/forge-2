@@ -388,3 +388,30 @@ export function updateEvolutionStatus(
     `UPDATE pending_evolutions SET status = ?, reviewed_at = datetime('now'), review_note = ? WHERE id = ?`,
   ).run(status, reviewNote ?? null, id);
 }
+
+export function getEvolutionById(id: string, dbPath?: string): PendingEvolution | undefined {
+  const db = getConnection(dbPath);
+  try {
+    return db.prepare(`SELECT * FROM pending_evolutions WHERE id = ?`).get(id) as
+      | PendingEvolution
+      | undefined;
+  } catch (err) {
+    console.error('getEvolutionById error:', err);
+    return undefined;
+  }
+}
+
+export function getEvolutionsByStatus(
+  status: PendingEvolution['status'],
+  dbPath?: string,
+): PendingEvolution[] {
+  const db = getConnection(dbPath);
+  try {
+    return db
+      .prepare(`SELECT * FROM pending_evolutions WHERE status = ? ORDER BY confidence DESC`)
+      .all(status) as PendingEvolution[];
+  } catch (err) {
+    console.error('getEvolutionsByStatus error:', err);
+    return [];
+  }
+}

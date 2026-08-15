@@ -492,3 +492,128 @@ export function registerPromoterPhase5Hook(db: MemoryDb): PromotionResult[] {
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Manual (human) decisions — `forge agent approve|reject`
+// ---------------------------------------------------------------------------
+
+/** Result of a human decision on one `pending_evolutions` row (approve or reject). */
+export interface ManualDecisionResult {
+  evolutionPromotionId: string;
+  pendingEvolutionId: string;
+  evolutionType: PendingEvolution['evolution_type'];
+  effectApplied: string;
+}
+
+/** Read one `PENDING` `pending_evolutions` row, or throw a descriptive error if it can't be acted on. */
+function loadPendingRow(db: MemoryDb, id: string): EligiblePendingRow {
+  const row = db
+    .prepare(
+      `SELECT id, evolution_type, change_detail, evidence, confidence, status FROM pending_evolutions WHERE id = ?`
+    )
+    .get(id) as (EligiblePendingRow & { status: string }) | undefined;
+  if (!row) throw new Error(`No pending_evolutions row found with id "${id}"`);
+  if (row.status !== 'PENDING') {
+    throw new Error(`pending_evolutions row "${id}" is already ${row.status} — nothing to decide`);
+  }
+  return row;
+}
+
+/**
+ * Human approval of a `pending_evolutions` row (Learning Iron Law L2/L3), including `GATE` rows —
+ * the only path by which a `GATE` evolution may ever be promoted (blueprint §EvolutionPromoter:
+ * "GATE — unreachable via AUTO; only HUMAN_APPROVED promotions may carry evolution_type = 'GATE',
+ * and even then EvolutionPromoter only records the human's decision, it does not weaken any
+ * Contract 2 gate" — {@link applyEffect} has no GATE case, so activation is a recorded no-op).
+ * Writes the `evolution_promotions` audit row BEFORE applying the activation (L3), mirroring
+ * {@link promoteEligible} but with `promotion_method = 'HUMAN_APPROVED'`.
+ */
+export function approveEvolution(db: MemoryDb, id: string, note?: string): ManualDecisionResult {
+  const pending = loadPendingRow(db, id);
+  const machineId = getMachineId();
+  const promotionId = newId();
+  const decidedAt = nowIso();
+  const prePromotionSuccessRate = recentSuccessRate(db);
+
+  db.prepare(
+    `INSERT INTO evolution_promotions (
+      id, pending_evolution_id, evolution_type, confidence_at_promotion,
+      confidence_threshold_applied, promotion_method, evidence_build_count,
+      pre_promotion_success_rate, post_promotion_success_rate, monitoring_window_builds,
+      rollback_triggered, rollback_reason, promoted_at, reviewed_at, machine_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'HUMAN_APPROVED', ?, ?, NULL, ?, 0, NULL, ?, ?, ?, ?)`
+  ).run(
+    promotionId,
+    pending.id,
+    pending.evolution_type,
+    pending.confidence,
+    PROMOTION_THRESHOLD,
+    evidenceBuildCount(pending.evidence),
+    prePromotionSuccessRate,
+    MONITORING_WINDOW_BUILDS,
+    decidedAt,
+    decidedAt,
+    machineId,
+    decidedAt
+  );
+
+  const effectApplied = applyEffect(db, promotionId, pending, machineId);
+
+  db.prepare(
+    `UPDATE pending_evolutions SET status = 'APPROVED', reviewed_at = ?, review_note = ? WHERE id = ?`
+  ).run(decidedAt, note ?? 'Manually approved via forge agent approve', pending.id);
+
+  return {
+    evolutionPromotionId: promotionId,
+    pendingEvolutionId: pending.id,
+    evolutionType: pending.evolution_type,
+    effectApplied,
+  };
+}
+
+/**
+ * Human rejection of a `pending_evolutions` row. Per `upgrades/LEARNING_PRD.md` ("Every promotion
+ * decision — AUTO, HUMAN_APPROVED, or HUMAN_OVERRIDE_REJECTED — writes exactly one
+ * `evolution_promotions` row"), a rejection is recorded in the same audit table as a promotion,
+ * with `promotion_method = 'HUMAN_OVERRIDE_REJECTED'` and no activation applied.
+ */
+export function rejectEvolution(db: MemoryDb, id: string, reason: string): ManualDecisionResult {
+  const pending = loadPendingRow(db, id);
+  const machineId = getMachineId();
+  const promotionId = newId();
+  const decidedAt = nowIso();
+  const prePromotionSuccessRate = recentSuccessRate(db);
+
+  db.prepare(
+    `INSERT INTO evolution_promotions (
+      id, pending_evolution_id, evolution_type, confidence_at_promotion,
+      confidence_threshold_applied, promotion_method, evidence_build_count,
+      pre_promotion_success_rate, post_promotion_success_rate, monitoring_window_builds,
+      rollback_triggered, rollback_reason, promoted_at, reviewed_at, machine_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'HUMAN_OVERRIDE_REJECTED', ?, ?, NULL, ?, 0, NULL, ?, ?, ?, ?)`
+  ).run(
+    promotionId,
+    pending.id,
+    pending.evolution_type,
+    pending.confidence,
+    PROMOTION_THRESHOLD,
+    evidenceBuildCount(pending.evidence),
+    prePromotionSuccessRate,
+    MONITORING_WINDOW_BUILDS,
+    decidedAt,
+    decidedAt,
+    machineId,
+    decidedAt
+  );
+
+  db.prepare(
+    `UPDATE pending_evolutions SET status = 'REJECTED', reviewed_at = ?, review_note = ? WHERE id = ?`
+  ).run(decidedAt, reason, pending.id);
+
+  return {
+    evolutionPromotionId: promotionId,
+    pendingEvolutionId: pending.id,
+    evolutionType: pending.evolution_type,
+    effectApplied: 'rejected — no activation applied',
+  };
+}
