@@ -1,0 +1,15 @@
+{"ts":"2026-08-15T22:38:31.477Z","level":"INFO","message":"=== FORGE-2 ==="}
+{"ts":"2026-08-15T22:38:31.478Z","level":"INFO","message":"========================================"}
+{"ts":"2026-08-15T22:38:31.478Z","level":"INFO","message":"  FORGE Pipeline Starting"}
+{"ts":"2026-08-15T22:38:31.478Z","level":"INFO","message":"  Project: forge-2"}
+{"ts":"2026-08-15T22:38:31.479Z","level":"INFO","message":"  Time: 2026-08-15T22:38:31.435Z"}
+{"ts":"2026-08-15T22:38:31.479Z","level":"INFO","message":"========================================"}
+{"ts":"2026-08-15T22:38:31.480Z","level":"GATE","message":"Build 904cf222-1434-4492-8813-0b15ab7d13ef â€” 22 prompt(s) â€” started 2026-08-15T22:38:31.435Z"}
+{"ts":"2026-08-15T22:38:43.557Z","level":"INFO","message":"=== FORGE-2 ==="}
+{"ts":"2026-08-15T22:38:43.558Z","level":"INFO","message":"PROMPT 1 OF 22"}
+{"ts":"2026-08-15T22:38:43.558Z","level":"INFO","message":"PROMPT ID: fix-boundary-check-false-positive"}
+{"ts":"2026-08-15T22:38:43.559Z","level":"INFO","message":"PROMPT NAME: Allowlist known external read-only paths in project-boundary heuristic"}
+{"ts":"2026-08-15T22:38:43.559Z","level":"INFO","message":"PHASE: feature"}
+{"ts":"2026-08-15T22:38:43.560Z","level":"INFO","message":"STARTED at 2026-08-15 17:38:43"}
+{"ts":"2026-08-15T22:39:11.309Z","level":"INFO","message":"Executing Build Agent..."}
+{"ts":"2026-08-15T22:39:11.310Z","level":"INFO","message":"[timeout 900s]"}

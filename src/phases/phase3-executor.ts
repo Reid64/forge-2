@@ -856,8 +856,29 @@ async function applyPromoteScratchGate(
  * (Windows `C:\...` or POSIX `/...`, with a file extension to cut noise) that fall outside
  * `projectPath`; excludes URLs. A hit marks the prompt failed (Task 3: "violations log loudly and
  * mark the prompt failed").
+ *
+ * ALLOWLIST (fix-boundary-check-false-positive): this scan cannot tell a path claude only READ
+ * and mentioned in prose apart from one it actually wrote to â€” it just flags every out-of-scope
+ * path token. That false-positived a real incident: claude legitimately referenced
+ * `~/.claude/skills/img2threejs/SKILL.md` and `~/.claude/plugins/known_marketplaces.json` as read
+ * targets, got flagged as a boundary violation, and burned 10 retries into dead-loop detection on
+ * an already-correct, already-merged change. `ALLOWLISTED_EXTERNAL_PATTERNS` covers locations
+ * forge-2 legitimately reads from or reports on but never writes to as build output: the user's
+ * `.claude/skills/**` and `.claude/plugins/**` directories, and the FORGE library/projects tree
+ * under `Documents/FORGE/**`. A match against any of these is excluded before violations are
+ * returned; anything else outside `projectPath` still fails as before.
  */
 const OUT_OF_BOUNDS_PATH_PATTERN = /(?<![A-Za-z:])[A-Za-z]:[\\/][^\s"'`)]+|(?<![:/])\/[^\s"'`)]{2,}/g;
+
+const ALLOWLISTED_EXTERNAL_PATTERNS: readonly RegExp[] = [
+  /[/\\]\.claude[/\\]skills[/\\]/i,
+  /[/\\]\.claude[/\\]plugins[/\\]/i,
+  /[/\\]documents[/\\]forge[/\\]/i,
+];
+
+function isAllowlistedExternalPath(normalized: string): boolean {
+  return ALLOWLISTED_EXTERNAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
 
 export function findOutOfBoundsPaths(stdout: string, projectPath: string): string[] {
   if (!stdout) return [];
@@ -872,6 +893,7 @@ export function findOutOfBoundsPaths(stdout: string, projectPath: string): strin
     if (!/\.[a-zA-Z0-9]{1,10}$/.test(raw)) continue; // only path-shaped tokens (has an extension)
     const normalized = raw.replace(/\\/g, '/').toLowerCase();
     if (normalized.startsWith(normalizedRoot)) continue;
+    if (isAllowlistedExternalPath(normalized)) continue;
     found.add(raw);
   }
   return [...found];
