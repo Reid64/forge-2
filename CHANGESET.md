@@ -443,3 +443,18 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T18:59:49.314Z â€” Path classification and scratch-write enforcement for shared_canonical paths (prompt 1/2)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---

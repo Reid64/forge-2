@@ -1,55 +1,40 @@
 {
-  "buildRunId": "3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889",
+  "buildRunId": "41fbf52a-d000-4c2f-8d74-a12ced71f608",
   "project": "forge-2",
-  "startedAt": "2026-08-15T15:06:18.901Z",
-  "updatedAt": "2026-08-15T15:26:06.877Z",
+  "startedAt": "2026-08-15T18:43:56.858Z",
+  "updatedAt": "2026-08-15T19:00:20.786Z",
   "currentPrompt": {
     "index": 1,
-    "id": "fix-output-format-parity",
-    "name": "Match FORGE 1.0 console output format exactly in Phase 3",
+    "id": "scratch-promote-classification",
+    "name": "Path classification and scratch-write enforcement for shared_canonical paths",
     "type": "feature",
-    "phase": "merged"
+    "phase": "recovering"
   },
   "totals": {
-    "completed": 1,
+    "completed": 0,
     "failed": 0,
-    "remaining": 0,
-    "tokensEstimated": 1774,
-    "costEstimatedUsd": 0.071328,
-    "totalElapsedMs": 1187287
+    "remaining": 2,
+    "tokensEstimated": 0,
+    "costEstimatedUsd": 0,
+    "totalElapsedMs": 0
   },
-  "lastSentinel": {
-    "passed": true,
-    "failedCheck": null
-  },
+  "lastSentinel": null,
   "recentEvents": [
     {
-      "timestamp": "2026-08-15T15:06:19.052Z",
-      "message": "prompt 1 'fix-output-format-parity' (feature): start"
+      "timestamp": "2026-08-15T18:43:57.081Z",
+      "message": "prompt 1 'scratch-promote-classification' (feature): start"
     },
     {
-      "timestamp": "2026-08-15T15:06:19.063Z",
-      "message": "prompt 1 'fix-output-format-parity' (feature): assembled"
+      "timestamp": "2026-08-15T18:43:57.094Z",
+      "message": "prompt 1 'scratch-promote-classification' (feature): assembled"
     },
     {
-      "timestamp": "2026-08-15T15:06:49.217Z",
-      "message": "prompt 1 'fix-output-format-parity' (feature): executing"
+      "timestamp": "2026-08-15T18:44:42.253Z",
+      "message": "prompt 1 'scratch-promote-classification' (feature): executing"
     },
     {
-      "timestamp": "2026-08-15T15:22:28.142Z",
+      "timestamp": "2026-08-15T19:00:20.786Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
-    },
-    {
-      "timestamp": "2026-08-15T15:25:57.182Z",
-      "message": "prompt 1 'fix-output-format-parity' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T15:25:57.186Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T15:25:59.576Z",
-      "message": "prompt 1 'fix-output-format-parity' (feature): merged"
     }
   ],
   "brainInterventions": 0

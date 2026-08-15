@@ -1,44 +1,60 @@
-# FORGE Session Handoff
+# FORGE 2.0 -- Session Handoff
+**Project:** forge-2
+**Build ID:** 3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889
+**Run:** 1
+**Generated:** 2026-08-15T15:26:07.497Z
+**End Reason:** COMPLETED
 
-## Build Summary
-- **Build ID:** unknown
-- **End Reason:** UNKNOWN
-- **End Time:** unknown
-- **Last Prompt Executed:** 0
-- **Git Branch:** unknown
-- **Git Commit:** unknown
-- **Dirty Working Tree:** false
+---
 
-## Completed This Run
-- Prompts executed: 0
-- Prompts passed: 0
-- First pass rate: N/A
-- Tokens consumed: 0
-- Duration: 0 minutes
+## 1. Build Summary
 
-## Failed This Run
-- Prompts failed: 0
+| Metric | Value |
+|--------|-------|
+| Prompts Executed | 1 |
+| Passed | 1 |
+| Failed | 0 |
+| First-Pass Rate | 100.0% |
+| Duration | 20.1 minutes |
+| Start Time | 2026-08-15T15:05:58.843Z |
 
-## Active Blockers
-- None recorded. Check state/halt-reason.md if a halt occurred.
+---
 
-## Queue Status
-- Total prompts: 0
-- Completed: 0
-- Remaining: 0
+## 2. Queue Status
 
-## Next Run Plan
-- Resume from prompt 1
-- Run quality gates (tsc, lint, build) before beginning
-- Verify no stale lock at .forge/forge_running.lock
-- Pull latest from forge_memory master before starting
+| Metric | Value |
+|--------|-------|
+| Total Prompts | 1 |
+| Completed | 1 |
+| Remaining | 0 |
+| Next Prompt Index | 2 |
 
-## Environment Notes
-- Project path: C:\Users\manag\Documents\forge-2
-- Ensure node_modules is installed (pnpm install)
-- Verify .env.local is present and correct
+---
 
-## Learning Highlights
-- Consult forge_memory.db fix_patterns for error patterns logged this run
-- Review pending_evolutions table for proposed FORGE self-improvements
-- Update decision_weights manually if architectural choices were made
+## 3. Active Blockers
+
+None.
+
+---
+
+## 4. Git State
+
+- Commit: unknown
+- Dirty: Clean
+- Fingerprint: ...
+
+---
+
+## 5. Files Modified This Run
+
+None recorded.
+
+---
+
+## 6. Next Run Launch Command
+
+```powershell
+cd C:\Users\manag\Documents\FORGE; $env:NODE_OPTIONS="--max-old-space-size=8192"; $env:ANTHROPIC_API_KEY=$null; $env:DANGEROUSLY_SKIP_PERMISSIONS=1; powershell -ExecutionPolicy Bypass -File .\forge.ps1 -project forge-2 -startFrom 2
+```
+
+---

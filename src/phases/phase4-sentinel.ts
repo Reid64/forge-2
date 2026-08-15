@@ -170,7 +170,8 @@ export type SentinelCheckName =
   | 'gitleaks'
   | 'lighthouse'
   | 'owasp_zap'
-  | 'schemathesis';
+  | 'schemathesis'
+  | 'file_exists';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [

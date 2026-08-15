@@ -70,14 +70,20 @@
  */
 
 import { readFile, mkdir, appendFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { load as parseYaml } from 'js-yaml';
 
-import type { ContextInjection, PromptType, QueueEntry } from '../engine/queue-generator.js';
+import type { ContextInjection, PromptType, QueueEntry, FileExistsGate, QueueGate } from '../engine/queue-generator.js';
+import {
+  computeScratchRedirects,
+  DEFAULT_SHARED_CANONICAL_GLOBS,
+  type ScratchRedirect,
+  type PathClass,
+} from '../engine/path-classifier.js';
 import { analyzeSchedule, executeSchedule, type ScheduleAnalysis } from '../engine/parallel-scheduler.js';
 import { queueShortHash } from '../tools/queue-versioning.js';
 import { predictFailure, REWRITE_THRESHOLD, type FailurePrediction } from '../engine/failure-predictor.js';
@@ -100,6 +106,7 @@ import {
 } from '../analysis/cost-estimator.js';
 import {
   assemblePrompt,
+  hashPrompt,
   type AssembledPrompt,
   type PreviousSentinelStatus,
 } from '../engine/prompt-assembler.js';
@@ -602,6 +609,23 @@ async function loadTimeoutBudgetConfig(projectPath: string): Promise<TimeoutBudg
   }
 }
 
+/**
+ * Read `<projectPath>/forge_config.json`'s `pathClassification.sharedCanonicalGlobs` (operator
+ * extras merged onto {@link DEFAULT_SHARED_CANONICAL_GLOBS} â€” never replacing them) for the
+ * scratch-write enforcement feature (`src/engine/path-classifier.ts`). Falls back to the
+ * built-in seed alone for a missing file/field â€” never throws.
+ */
+async function loadSharedCanonicalGlobsConfig(projectPath: string): Promise<string[]> {
+  try {
+    const raw = await readFile(join(projectPath, 'forge_config.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { pathClassification?: { sharedCanonicalGlobs?: unknown } };
+    const extra = asStringArray(parsed.pathClassification?.sharedCanonicalGlobs);
+    return extra.length > 0 ? [...DEFAULT_SHARED_CANONICAL_GLOBS, ...extra] : [...DEFAULT_SHARED_CANONICAL_GLOBS];
+  } catch {
+    return [...DEFAULT_SHARED_CANONICAL_GLOBS];
+  }
+}
+
 /** Build a `promptType -> timeout budget (ms)` resolver bound to one build's config. */
 function makeTimeoutBudgetResolver(config: TimeoutBudgetConfig): (promptType: PromptType) => number {
   return (promptType) =>
@@ -679,6 +703,56 @@ function forceFailOnClaudeFailure(
     ...sentinel,
     passed: false,
     diagnosticReport: `${note}\n\n--- Sentinel's checks (informational only â€” not authoritative given the failed run) ---\n${sentinel.diagnosticReport}`,
+  };
+}
+
+/**
+ * `file_exists` gate enforcement (scratch-write enforcement feature, `src/engine/path-classifier.ts`).
+ * A prompt that declared a `file_exists` gate must actually have produced every one of its files
+ * before it can merge â€” checked at the SCRATCH path for any file classified `shared_canonical`
+ * (per `redirects`) and at the CANONICAL path for everything else, so the gate's pass/fail is
+ * unaffected by the redirect: the prompt is judged on whether it wrote what it was told to write,
+ * never on whether the (deliberately untouched) canonical path exists. A no-op when Sentinel
+ * already failed for its own reason, or the prompt declared no `file_exists` gate.
+ */
+function forceFailOnMissingGateFiles(
+  sentinel: SentinelResult,
+  entry: QueueEntry,
+  redirects: readonly ScratchRedirect[],
+  declaredFiles: readonly string[],
+  projectPath: string,
+  log: (message: string) => void,
+  index: number
+): SentinelResult {
+  if (!sentinel.passed || declaredFiles.length === 0) return sentinel;
+  const redirectByCanonical = new Map(redirects.map((r) => [r.canonicalPath, r.scratchPath]));
+  const missing: string[] = [];
+  for (const file of declaredFiles) {
+    const scratchPath = redirectByCanonical.get(file);
+    const checkPath = scratchPath ?? file;
+    if (!existsSync(join(projectPath, checkPath))) {
+      missing.push(scratchPath ? `${file} (scratch: ${scratchPath})` : file);
+    }
+  }
+  if (missing.length === 0) return sentinel;
+  const note =
+    `file_exists gate failed for prompt type ${entry.prompt_type} â€” missing declared output(s): ` +
+    `${missing.join(', ')}.`;
+  log(`prompt ${index} '${entry.id}': ${note}`);
+  const check: CheckResult = {
+    name: 'file_exists',
+    passed: false,
+    skipped: false,
+    detail: note,
+    output: '',
+    durationMs: 0,
+  };
+  return {
+    ...sentinel,
+    passed: false,
+    checks: [...sentinel.checks, check],
+    failedCheck: 'file_exists',
+    diagnosticReport: `${note}\n\n${sentinel.diagnosticReport}`,
   };
 }
 
@@ -905,6 +979,45 @@ const PROMPT_TYPES: ReadonlySet<string> = new Set<PromptType>([
   'deploy',
 ]);
 
+/** The gate `type`s a raw `gates:` entry may declare. */
+const SIMPLE_GATE_TYPES: ReadonlySet<string> = new Set(['compile', 'build', 'governance']);
+
+/** Coerce a raw `path_class` mapping (`{ "path": "shared_canonical" }`) into a typed record. */
+function asPathClassMap(v: unknown): Record<string, PathClass> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Record<string, PathClass> = {};
+  for (const [key, value] of Object.entries(v as Record<string, unknown>)) {
+    if (value === 'unique_per_task' || value === 'shared_canonical') out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Coerce a raw `gates:` list into {@link QueueGate}[]. Unrecognized gate shapes are dropped
+ * silently (queue.yaml's `gates:` block is otherwise decorative today — Sentinel drives the real
+ * pass/fail checks — so a malformed entry here is a no-op, not a build-breaking parse error).
+ */
+function asQueueGates(v: unknown): QueueGate[] {
+  if (!Array.isArray(v)) return [];
+  const gates: QueueGate[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const o = raw as Record<string, unknown>;
+    const type = asString(o.type).trim();
+    if (type === 'file_exists') {
+      const files = asStringArray(o.files);
+      if (files.length === 0) continue;
+      const gate: FileExistsGate = { type: 'file_exists', files };
+      const pathClass = asPathClassMap(o.path_class);
+      if (pathClass) gate.path_class = pathClass;
+      gates.push(gate);
+    } else if (SIMPLE_GATE_TYPES.has(type)) {
+      gates.push({ type: type as 'compile' | 'build' | 'governance' });
+    }
+  }
+  return gates;
+}
+
 /** Coerce a raw `context_injection` block (snake_case in YAML) into the camelCase shape. */
 function asContextInjection(v: unknown): ContextInjection {
   const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -962,6 +1075,8 @@ export function coerceQueueEntry(
   if (skills.length > 0) entry.skills = skills;
   const infra = asString(o.infra).trim();
   if (infra === 'local' || infra === 'cloud') entry.infra = infra;
+  const gates = asQueueGates(o.gates);
+  if (gates.length > 0) entry.gates = gates;
   return entry;
 }
 
@@ -997,27 +1112,33 @@ function asPreRunChecks(v: unknown): PreRunChecks | null {
  */
 export function parseQueueYaml(
   yamlText: string
-): { entries: QueueEntry[]; warnings: string[]; preRunChecks: PreRunChecks | null } {
+): { entries: QueueEntry[]; warnings: string[]; preRunChecks: PreRunChecks | null; governance: string[] } {
   const warnings: string[] = [];
   let doc: unknown;
   try {
     doc = parseYaml(yamlText);
   } catch (error) {
     warnings.push(`queue.yaml is not valid YAML (${describe(error)}) â€” no prompts parsed.`);
-    return { entries: [], warnings, preRunChecks: null };
+    return { entries: [], warnings, preRunChecks: null, governance: [] };
   }
 
   let rawEntries: unknown[];
   let preRunChecks: PreRunChecks | null = null;
+  // The build's own top-level `governance:` list (docs the WHOLE build is governed by, distinct
+  // from a per-entry `governance_refs[]`) â€” src/engine/path-classifier.ts's scratch-write
+  // enforcement treats any path also declared here as `shared_canonical`, even if it doesn't
+  // match one of the built-in/operator-configured globs.
+  let governance: string[] = [];
   if (Array.isArray(doc)) {
     rawEntries = doc;
   } else if (doc && typeof doc === 'object' && Array.isArray((doc as Record<string, unknown>).prompts)) {
     const o = doc as Record<string, unknown>;
     rawEntries = o.prompts as unknown[];
     preRunChecks = asPreRunChecks(o.pre_run_checks);
+    governance = asStringArray(o.governance);
   } else {
     warnings.push('queue.yaml did not parse to a list of prompts â€” no prompts parsed.');
-    return { entries: [], warnings, preRunChecks: null };
+    return { entries: [], warnings, preRunChecks: null, governance: [] };
   }
 
   const entries: QueueEntry[] = [];
@@ -1026,7 +1147,7 @@ export function parseQueueYaml(
     if (entry) entries.push(entry);
   });
 
-  return { entries, warnings, preRunChecks };
+  return { entries, warnings, preRunChecks, governance };
 }
 
 /**
@@ -1396,6 +1517,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // VS Code integration layer (queue.yaml pre-run gate): the optional `pre_run_checks` block,
   // present only when queue.yaml uses the `{ prompts, pre_run_checks }` shape.
   let preRunChecks: PreRunChecks | null = null;
+  // Scratch-write enforcement (`src/engine/path-classifier.ts`): the queue's own top-level
+  // `governance:` list, when present. Populated only when queue.yaml is parsed from disk below
+  // (a caller supplying `options.entries` directly has no on-disk queue.yaml to read one from).
+  let queueGovernanceRefs: string[] = [];
   if (options.entries === undefined) {
     const queuePath = options.queuePath ?? join(projectPath, 'queue.yaml');
     let yamlText: string | null = null;
@@ -1411,8 +1536,10 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       warnings.push(...parsed.warnings);
       queueHashForBuild = queueShortHash(yamlText);
       preRunChecks = parsed.preRunChecks;
+      queueGovernanceRefs = parsed.governance;
     }
   }
+  const sharedCanonicalGlobs = await loadSharedCanonicalGlobsConfig(projectPath);
 
   // 1b. Dependency analysis (topological order + waves + parallel groups). Sequential = `order`.
   const schedule = analyzeSchedule(entries, { log: (m) => log(`scheduler: ${m}`) });
@@ -1645,6 +1772,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     autonomousRecoveryMode: options.autonomousRecoveryMode ?? false,
     dryRun,
     governanceDocs,
+    governanceRefs: queueGovernanceRefs,
+    sharedCanonicalGlobs,
+    runTimestamp: generatedAt,
     git,
     mainBranch,
     rag,
@@ -2113,6 +2243,16 @@ interface LoopContext {
   autonomousRecoveryMode: boolean;
   dryRun: boolean;
   governanceDocs: Record<string, string>;
+  /**
+   * The queue's own top-level `governance:` list (from queue.yaml), distinct from a per-entry
+   * `governance_refs[]`. Scratch-write enforcement (`src/engine/path-classifier.ts`) treats any
+   * declared output path that also appears here as `shared_canonical`.
+   */
+  governanceRefs: string[];
+  /** Built-in seed globs + `forge_config.json`'s `pathClassification.sharedCanonicalGlobs` extras. */
+  sharedCanonicalGlobs: string[];
+  /** Stable per-build timestamp token used in every scratch path this build redirects to. */
+  runTimestamp: string;
   git: GitManager;
   /** The configured main branch (Contract 10) â€” Claude must NEVER run while checked out on this. */
   mainBranch: string;
@@ -2297,14 +2437,40 @@ async function executePrompt(
       projectPath: ctx.projectPath,
     });
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'assembled' });
-    let promptText = assembled.prompt;
-    let promptHash = assembled.hash;
+
+    // b1.5. SCRATCH-WRITE ENFORCEMENT (shared_canonical paths, `src/engine/path-classifier.ts`).
+    // A declared `file_exists` gate output that collides with a governance/decision doc (the
+    // queue's own top-level `governance:` list, or a built-in/operator-configured glob) is
+    // redirected to a per-prompt scratch path BEFORE claude ever sees the prompt, so two
+    // concurrent FORGE sessions â€” or two prompts in the same build â€” never race-clobber the same
+    // canonical file. A later `promote_scratch` gate (a separate feature) reconciles the scratch
+    // write back onto the canonical path once it is safe to do so. `scratchRedirect` is read again
+    // after execution (`forceFailOnMissingGateFiles`) so the `file_exists` gate checks the SAME
+    // scratch path this instruction block told the Build Agent to write to.
+    const fileExistsGate = entry.gates?.find((g): g is FileExistsGate => g.type === 'file_exists');
+    const declaredGateFiles = fileExistsGate?.files ?? [];
+    const scratchRedirect = computeScratchRedirects(
+      declaredGateFiles,
+      buildIdOf(ctx),
+      entry.id,
+      ctx.runTimestamp,
+      ctx.governanceRefs,
+      ctx.sharedCanonicalGlobs
+    );
+    if (scratchRedirect.redirects.length > 0) {
+      log(
+        `prompt ${index} '${entry.id}': ${scratchRedirect.redirects.length} shared_canonical path(s) ` +
+          `redirected to scratch â€” ${scratchRedirect.redirects.map((r) => `${r.canonicalPath} -> ${r.scratchPath}`).join(', ')}`
+      );
+    }
+    let promptText = scratchRedirect.instructionBlock + assembled.prompt;
+    let promptHash = scratchRedirect.instructionBlock ? hashPrompt(promptText) : assembled.hash;
     let wasRewritten = false;
     let originalHash: string | null = null;
     let rewriteReason: string | null = null;
     if (prediction.shouldRewrite) {
       const rewrite = await ctx.rewriteImpl({
-        prompt: assembled.prompt,
+        prompt: promptText,
         promptType: entry.prompt_type,
         matchingPatterns: prediction.matchingPatterns,
         probability: prediction.probability,
@@ -2632,6 +2798,10 @@ async function executePrompt(
     // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure â€”
     // never let a prompt whose own execution didn't succeed merge on the back of a Sentinel PASS.
     sentinel = forceFailOnClaudeFailure(sentinel, run, entry, log, index);
+    // Scratch-write enforcement: this prompt's `file_exists` gate (if any) checks the SCRATCH path
+    // for every shared_canonical file `scratchRedirect` computed above, and the canonical path for
+    // everything else â€” never the (deliberately untouched) canonical path for a redirected file.
+    sentinel = forceFailOnMissingGateFiles(sentinel, entry, scratchRedirect.redirects, declaredGateFiles, ctx.projectPath, log, index);
 
     // forge.ps1's per-attempt gate-failure transition: `Write-Transition -state "FAILED" -reason
     // $shortReason` (the failed gate's own output, truncated to 200 chars). Fires once the FINAL
@@ -2712,6 +2882,7 @@ async function executePrompt(
       let retrySentinel = await ctx.runSentinelImpl(sentinelOptions);
       if (retryRun.timedOut) retrySentinel = forceFailOnTimeout(retrySentinel, retryTimeoutMs, entry, log, index);
       retrySentinel = forceFailOnClaudeFailure(retrySentinel, retryRun, entry, log, index);
+      retrySentinel = forceFailOnMissingGateFiles(retrySentinel, entry, scratchRedirect.redirects, declaredGateFiles, ctx.projectPath, log, index);
       run = retryRun;
       sentinel = retrySentinel;
       log(

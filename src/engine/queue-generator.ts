@@ -63,6 +63,7 @@ import type {
 import type { Gate3Status } from '../phases/phase2-governance.js';
 import { nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
+import type { PathClass } from './path-classifier.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -93,6 +94,28 @@ export interface ContextInjection {
   interactionMaps: string[];
 }
 
+/**
+ * A `file_exists` gate: the prompt's declared output file(s). Each file is auto-classified
+ * `unique_per_task` / `shared_canonical` by `src/engine/path-classifier.ts` unless `path_class`
+ * explicitly overrides it for that exact path. A `shared_canonical` file is never written
+ * directly by the Build Agent — `phase3-executor.ts` redirects the write to a per-prompt scratch
+ * path and the gate is checked THERE instead of at the canonical path.
+ */
+export interface FileExistsGate {
+  type: 'file_exists';
+  files: string[];
+  /** Explicit `path_class` override, keyed by the exact path as it appears in `files`. */
+  path_class?: Record<string, PathClass>;
+}
+
+/** A gate carrying no fields beyond its type (informational markers today — compile/build/governance). */
+export interface SimpleGate {
+  type: 'compile' | 'build' | 'governance';
+}
+
+/** One entry of a queue prompt's `gates:` list. */
+export type QueueGate = FileExistsGate | SimpleGate;
+
 /** A single dependency-ordered build prompt in the generated queue. */
 export interface QueueEntry {
   id: string;
@@ -110,6 +133,8 @@ export interface QueueEntry {
   context_injection: ContextInjection;
   /** Skill folder names whose SKILL.md content is prepended to the description before assembly. */
   skills?: string[];
+  /** Pass/fail gates declared in queue.yaml for this prompt (e.g. `compile`, `file_exists`). */
+  gates?: QueueGate[];
   /**
    * Infra-provisioning policy (Session 5 finding #16): `local` — the agent MAY run local infra
    * commands (e.g. `supabase start` on a non-colliding port) itself; `cloud` — use the creds
