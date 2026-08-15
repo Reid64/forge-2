@@ -82,6 +82,8 @@ import type { PatternExtractorOptions } from '../analysis/pattern-extractor.js';
 import type { QueueEntry } from '../engine/queue-generator.js';
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
+import { evaluateDoD, appendDoDFailureBlocker, type DoDResult } from '../governance/definition-of-done.js';
+import type { ReadinessTierId } from '../governance/readiness-levels.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
 import type {
   BuildRun,
@@ -156,6 +158,12 @@ export interface Phase5Result {
   evolutionPromotions: PromotionResult[];
   /** Step 12 — autonomous Vercel deployment + forge verify, when the project is configured for it. */
   deployment: Phase5DeploymentResult;
+  /**
+   * Step 13 — machine-verifiable Definition of Done (`src/governance/definition-of-done.ts`)
+   * evaluated against `options.targetTier`. `null` when no `targetTier` was supplied (the DoD
+   * check is opt-in per build until a `--readiness-target` flag threads a tier in from the CLI).
+   */
+  dodResult: DoDResult | null;
   /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
@@ -218,6 +226,14 @@ export interface Phase5Options {
   ) => Promise<void>;
   /** Extract skills from workarounds and write SKILL.md files. Default {@link extractSkills}. */
   runSkillExtractor?: (buildRunId: string, projectPath: string) => Promise<string[]>;
+  /**
+   * Readiness tier (`src/governance/readiness-levels.ts` › `ReadinessTierId`) to evaluate the
+   * Definition of Done against at Phase 5 end (ENGINEERING_COMPLETENESS.md § 60). When omitted,
+   * step 13 is skipped entirely — Phase 5 never fabricates a target tier the caller didn't ask for.
+   */
+  targetTier?: ReadinessTierId;
+  /** Run the Definition of Done evaluation. Default {@link evaluateDoD}. */
+  runEvaluateDoD?: typeof evaluateDoD;
   /** Progress reporter. Default logs to the console with a `[FORGE:phase5]` prefix. */
   log?: (message: string) => void;
 }
@@ -403,6 +419,7 @@ function buildSummaryReport(
   evolutionProposals: PendingEvolution[],
   evolutionPromotions: PromotionResult[],
   deployment: Phase5DeploymentResult,
+  dodResult: DoDResult | null,
   warnings: string[],
   generatedAt: string
 ): string {
@@ -527,6 +544,17 @@ function buildSummaryReport(
   }
   lines.push('');
 
+  lines.push('## 13. Definition of Done');
+  if (!dodResult) {
+    lines.push('- Skipped — no target readiness tier was supplied for this build.');
+  } else {
+    lines.push(`- Target tier: **${dodResult.targetTier}** — ${dodResult.passed ? 'PASSED' : 'FAILED'}`);
+    for (const check of dodResult.checks) {
+      lines.push(`  - [${check.passed ? 'PASS' : 'FAIL'}] ${check.name}: ${check.detail}`);
+    }
+  }
+  lines.push('');
+
   if (warnings.length > 0) {
     lines.push('## Warnings');
     for (const w of warnings) lines.push(`- ${w}`);
@@ -577,6 +605,7 @@ export async function runPhase5Learner(
   const runInstinctExtractor = options.runInstinctExtractor ?? extractInstincts;
   const runSessionEndHook = options.runSessionEndHook ?? onSessionEnd;
   const runSkillExtractor = options.runSkillExtractor ?? extractSkills;
+  const runEvaluateDoDImpl = options.runEvaluateDoD ?? evaluateDoD;
   const warnings: string[] = [];
 
   // 0. Resolve the build (guarded) for project name + stack fingerprint context.
@@ -902,6 +931,37 @@ export async function runPhase5Learner(
     }
   }
 
+  // 13. Definition of Done (ENGINEERING_COMPLETENESS.md § 60 — machine-verifiable completion,
+  //     never "no more queue files"). Opt-in per build via `options.targetTier`: Phase 5 never
+  //     fabricates a target tier the caller didn't request. A failing evaluation does NOT reopen
+  //     or fail the already-finalized build_run (Contract 4 — mirrors the SupabaseMigrator
+  //     precedent in phase3-executor.ts) — it appends a BLOCKER to STATE_OF_THE_BUILD.md instead,
+  //     so "do not mark build complete" is honored as "the build's own state document records the
+  //     build as NOT Definition-of-Done-complete for the requested tier," the only mutation Phase 5
+  //     is allowed to make (it never touches build_runs.status or a protected governance file).
+  let dodResult: DoDResult | null = null;
+  if (options.targetTier) {
+    try {
+      dodResult = await runEvaluateDoDImpl(projectPath, options.targetTier);
+      log(
+        `step 13 (Definition of Done): target tier ${dodResult.targetTier} — ` +
+          `${dodResult.passed ? 'PASSED' : 'FAILED'} (${dodResult.checks.filter((c) => !c.passed).length}/${dodResult.checks.length} check(s) failing)`
+      );
+      if (!dodResult.passed) {
+        warnings.push(
+          `Definition of Done FAILED for target tier ${dodResult.targetTier} — build is not being reopened ` +
+            '(Contract 4), see the BLOCKER appended to STATE_OF_THE_BUILD.md for detail.'
+        );
+        await appendDoDFailureBlocker(dodResult);
+      }
+    } catch (error) {
+      warnings.push(`Definition of Done evaluation failed (${describe(error)}).`);
+      log(`WARNING: step 13 DoD evaluation degraded (${describe(error)})`);
+    }
+  } else {
+    log('step 13 (Definition of Done): skipped — no targetTier supplied.');
+  }
+
   // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
@@ -919,6 +979,7 @@ export async function runPhase5Learner(
     evolutionProposals,
     evolutionPromotions,
     deployment,
+    dodResult,
     warnings,
     generatedAt
   );
@@ -962,6 +1023,7 @@ export async function runPhase5Learner(
     evolutionProposals,
     evolutionPromotions,
     deployment,
+    dodResult,
     summaryReport,
     reportPath,
     warnings,

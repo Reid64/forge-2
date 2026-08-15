@@ -1,37 +1,72 @@
 {
-  "buildRunId": "e800be70-ae34-4728-a8af-fe5bfd8c0f9c",
+  "buildRunId": "b3e13a22-68bc-4476-9eb7-a843511a5fc7",
   "project": "forge-2",
-  "startedAt": "2026-07-22T03:43:46.846Z",
-  "updatedAt": "2026-07-22T03:43:47.656Z",
+  "startedAt": "2026-08-15T04:12:02.736Z",
+  "updatedAt": "2026-08-15T04:17:45.379Z",
   "currentPrompt": {
-    "index": 1,
-    "id": "repair-000",
-    "name": "Fix missing module in src/retrofit",
+    "index": 2,
+    "id": "stage2-readiness-dod",
+    "name": "Build Readiness-Level Engine and machine-verifiable Definition of Done",
     "type": "feature",
     "phase": "executing"
   },
   "totals": {
-    "completed": 0,
+    "completed": 1,
     "failed": 0,
-    "remaining": 4,
-    "tokensEstimated": 0,
-    "costEstimatedUsd": 0,
-    "totalElapsedMs": 0
+    "remaining": 10,
+    "tokensEstimated": 1962,
+    "costEstimatedUsd": 0.070272,
+    "totalElapsedMs": 328775
   },
-  "lastSentinel": null,
+  "lastSentinel": {
+    "passed": false,
+    "failedCheck": null
+  },
   "recentEvents": [
     {
-      "timestamp": "2026-07-22T03:43:47.027Z",
-      "message": "prompt 1 'repair-000' (feature): start"
+      "timestamp": "2026-08-15T04:12:02.902Z",
+      "message": "prompt 1 'stage3-testing-wiring' (feature): start"
     },
     {
-      "timestamp": "2026-07-22T03:43:47.045Z",
-      "message": "prompt 1 'repair-000' (feature): assembled"
+      "timestamp": "2026-08-15T04:12:02.914Z",
+      "message": "prompt 1 'stage3-testing-wiring' (feature): assembled"
     },
     {
-      "timestamp": "2026-07-22T03:43:47.656Z",
-      "message": "prompt 1 'repair-000' (feature): executing"
+      "timestamp": "2026-08-15T04:12:21.965Z",
+      "message": "prompt 1 'stage3-testing-wiring' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T04:13:48.098Z",
+      "message": "prompt 1 'stage3-testing-wiring' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T04:13:48.101Z",
+      "message": "Sentinel FAIL (unknown)"
+    },
+    {
+      "timestamp": "2026-08-15T04:13:49.316Z",
+      "message": "Build Brain: applying targeted fix (confidence 0.30)"
+    },
+    {
+      "timestamp": "2026-08-15T04:13:49.319Z",
+      "message": "prompt 1 'stage3-testing-wiring': Build Brain targeted recovery (confidence 0.30)"
+    },
+    {
+      "timestamp": "2026-08-15T04:17:28.427Z",
+      "message": "prompt 1 'stage3-testing-wiring' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T04:17:31.989Z",
+      "message": "prompt 2 'stage2-readiness-dod' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T04:17:32.001Z",
+      "message": "prompt 2 'stage2-readiness-dod' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T04:17:45.379Z",
+      "message": "prompt 2 'stage2-readiness-dod' (feature): executing"
     }
   ],
-  "brainInterventions": 0
+  "brainInterventions": 1
 }

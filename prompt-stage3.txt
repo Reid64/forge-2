@@ -1,0 +1,15 @@
+﻿Per upgrades\SYSTEMS-5-9-GAP-MATRIX.md Section 3: wire the following already-working phase4-sentinel.ts validation checks into TestOrchestrator so their results get written to test_run_results via the existing persist.ts pattern used by the current 7 runners:
+
+- Trivy dependency/container scan (phase4-sentinel.ts Ring3a, approx lines 2109-2202) -> TestSuiteDb.DEPENDENCY_SCAN or the closest matching existing enum value
+- Gitleaks secret scan (Ring3b, approx lines 2219-2295) -> TestSuiteDb.SECRET_SCAN or closest match
+- Lighthouse (Ring3c, approx lines 2352-2498) -> TestSuiteDb.LIGHTHOUSE or closest match
+- axe-core accessibility (src/tools/accessibility-auditor.ts, referenced phase4-sentinel.ts lines 1445 and 3144) -> TestSuiteDb.ACCESSIBILITY or closest match
+- Visual regression (src/tools/visual-regression.ts, wired phase4-sentinel.ts lines 3688-3703) -> TestSuiteDb.VISUAL_REGRESSION
+- SEO/broken-link (src/tools/seo-validator.ts, referenced phase4-sentinel.ts line 1501) -> TestSuiteDb.SEO or closest match
+- Migration safety (src/tools/migration-safety.ts, referenced phase4-sentinel.ts line 1682) -> TestSuiteDb.MIGRATION or closest match
+
+For each: create a thin adapter in src/testing/runners/ following the exact pattern of the existing 7 runners (input RunnerInput, output RunnerOutcome, call persistRunnerOutcome from persist.ts). Do not duplicate the scanning logic itself - each adapter calls the existing phase4-sentinel.ts function or src/tools/*.ts module directly, matching the DRY pattern security-runner.ts already uses by calling security-scanner.ts. Do not modify phase4-sentinel.ts's existing Sentinel gate behavior - these adapters are additive, called separately by TestOrchestrator, not replacing what Sentinel already does. Register all 7 new runners in orchestrator.ts's runner list. First list the exact TestSuiteDb enum values from src/memory/test-results.ts before writing any code, and use only those exact values - do not invent new enum entries.
+
+Run pnpm run build in C:\Users\manag\Documents\forge-2 and confirm 0 errors.
+
+Commit: git add -A; git commit -m "feat(testing): wire Trivy, Gitleaks, Lighthouse, axe-core, visual-regression, SEO, and migration-safety checks into TestOrchestrator"

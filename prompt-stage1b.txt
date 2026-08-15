@@ -1,0 +1,11 @@
+﻿Create root MODEL-ROUTING.md defining which LLM handles architecture, frontend design, debugging, security review, consensus, research, and code generation - base this entirely on actual current provider usage in src\engine\provider-router.ts, do not invent routing not reflected in that file.
+
+Create root manifest.yaml with project identity, current autonomy flags, and approval-gate config reflecting actual current CLI flags in src\cli\index.ts, not invented ones.
+
+Append an explicit authority-precedence hierarchy section to the existing root SOURCE-OF-TRUTH.md (do not overwrite the file, append only): human approval greater than FORGE governance docs greater than security policy greater than architecture/ADRs greater than BEHAVIORAL_CONTRACTS.md greater than manifest.yaml greater than queue YAML greater than skill instructions greater than model-specific files greater than current prompt greater than agent-generated suggestions.
+
+Do not touch BLUEPRINT.md, PRD.md, TOOLCHAIN.md, BEHAVIORAL_CONTRACTS.md, or the existing content already in SOURCE-OF-TRUTH.md.
+
+Run pnpm run build in C:\Users\manag\Documents\forge-2 and confirm 0 errors.
+
+Commit: git add -A; git commit -m "docs(governance): MODEL-ROUTING.md, manifest.yaml, authority-precedence hierarchy - Stage 1 complete"

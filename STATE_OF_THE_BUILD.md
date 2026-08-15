@@ -1,6 +1,6 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-13 (Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Last Updated:** 2026-08-14 (Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + **Design Pipeline COMPLETE — Playwright-driven multi-viewport screenshot capture + optional Penpot design-file push + a human/accessibility-score-gated visual approval gate, wired into every `ui`/`feature` Phase 3 prompt after the Contract 13 Sentinel gate passes**
 **Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + **Design Pipeline (ALL COMPLETE)**
 **Schema version:** **3.1.0** — bumped from `3.0.0` by the Design Pipeline's `design_reviews`/`design_screenshots` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.1.0'` this session). Note: this session's task brief named schema version `2.9.0` for this addition — that value was already consumed by the Autonomy Upgrades tables bump (`2.8.0` → `2.9.0`) that landed before Design Artifacts (`2.9.0` → `3.0.0`) in an earlier session, so recording `2.9.0` here would be a downgrade that collides with and contradicts existing migration history already committed to this file. `3.1.0` is the actual next version in sequence and is what `CURRENT_SCHEMA_VERSION` and the code's own migration comment record — recording the brief's number over the code's actual constant would be a fabrication (Iron Law 3), per the identical precedent already set in the Enhanced Retrofit / UI Engine sections below.
@@ -8,6 +8,94 @@
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Readiness-Level Engine + machine-verifiable Definition of Done (2026-08-14) — COMPLETE
+
+**Objective:** `upgrades/CAPABILITIES_MEMO.md` § 7 ("Readiness-Level Engine") and
+`upgrades/ENGINEERING_COMPLETENESS.md` § 60 ("A formal definition of 'done'") both flagged the same
+gap: FORGE's nine readiness levels (PROTOTYPE through HYPERSCALE) were a label with no enforcement
+behind it, and build completion was never verified against anything beyond "the queue ran." This
+session made both real: `src/governance/readiness-levels.ts` formalizes the nine tiers as data
+(each with required governance artifacts, test suites, and security/observability items, grounded
+in existing project docs/types — no invented requirement), and `src/governance/definition-of-
+done.ts` exports `evaluateDoD(projectPath, targetTier)`, wired as an opt-in step 13 at Phase 5 end.
+
+**New modules:**
+1. `src/governance/readiness-levels.ts` — `READINESS_TIERS: ReadinessTier[]` (9 entries). Every
+   `requiredGovernanceArtifacts` value is drawn from the real `ArtifactName` union
+   (`src/resurrection/types.ts` › `ARTIFACT_NAMES`, the same 9-value set System 1's GapAuditor
+   already scores); every `requiredTestSuites` value is drawn from the real `TestSuiteDb` union
+   (`src/memory/test-results.ts`, the 19-value CHECK-constrained enum `test_run_results` is
+   persisted against), escalating in the order `upgrades/QA_TESTING_FRAMEWORK.md`'s progressive
+   gates describe (PROMPT COMPLETION → … → ENTERPRISE RELEASE); every
+   `requiredSecurityObservabilityItems` string is copied verbatim from CAPABILITIES_MEMO.md's own
+   Enterprise-Grade checklist (lines ~933-997) — no fabricated item. MISSION_CRITICAL and
+   HYPERSCALE intentionally reuse ENTERPRISE_GRADE's full set verbatim: the memo describes both
+   qualitatively ("even more stringent requirements", "changes architecture substantially") without
+   naming additional discrete checklist items, and inventing some would violate the same "do not
+   invent requirements not grounded in project docs" instruction this module was built under.
+2. `src/governance/definition-of-done.ts` — `evaluateDoD(projectPath, targetTier): Promise<DoDResult>`
+   runs four independently machine-verifiable checks against Build Memory / the filesystem, exactly
+   as specified: (1) every `queue.yaml` prompt reached a PASSED outcome — `PromptExecutionStatus`
+   (`src/types/index.ts`) has no literal `'passed'` value, so `'completed'` with
+   `sentinel_passed !== false` is that enum's PASSED, noted explicitly in the code rather than
+   silently assumed; (2) the latest `gap_audit_runs` row for the project has zero `gaps_critical`;
+   (3) the latest `test_run_results` row for every tier-required suite is not `'failed'` (a suite
+   with no run recorded also fails the check — an untested required suite cannot satisfy "tier-
+   required"); (4) `STATE_OF_THE_BUILD.md` carries no open `## ... BLOCKER` heading, checked at
+   BOTH observed locations a real BLOCKER gets appended to (`<projectPath>/STATE_OF_THE_BUILD.md`,
+   what every generated project actually ships — e.g. `projects/tarritrix/STATE_OF_THE_BUILD.md` —
+   and `<projectPath>/governance/STATE_OF_THE_BUILD.md`, the path `src/integration/bus.ts`'s
+   `appendSentinelPrimeBlocker` and `src/deploy/pre-deploy-gate.ts`'s `appendBlockerSection` both
+   actually write to) so neither existing write path is silently missed. Every check degrades to a
+   failed result with a clear reason (never an optimistic pass) when Build Memory is unreachable or
+   a project has never been audited/tested. Verified live against this repo's own build via
+   `forge readiness . --tier MVP` this session — correctly reported 0/2 completed-check passes
+   against the mid-run build, a real gap audit with zero criticals, real test_run_results, and no
+   open BLOCKER, i.e. real data end to end, not a mock.
+3. Phase 5 wiring (`src/phases/phase5-learner.ts`) — new step 13, opt-in via `Phase5Options.targetTier`
+   (`ReadinessTierId | undefined`). When supplied, `evaluateDoD` runs at Phase 5 end; a failing
+   result appends a `## BLOCKER — Definition of Done Not Met` section to
+   `<projectPath>/governance/STATE_OF_THE_BUILD.md` via the new `appendDoDFailureBlocker` (same
+   append convention, same non-fatal-on-write-failure posture as the existing
+   `appendSentinelPrimeBlocker`/`appendBlockerSection`). Honest reconciliation of the task brief's
+   "if DoD fails, do not mark build complete": by the time Phase 5 runs, `build_runs.status` has
+   already been finalized `'completed'` in `phase3-executor.ts` (confirmed by reading that file —
+   Phase 5 is invoked from `src/cli/index.ts` strictly after `runPhase3Executor` returns), and
+   `runPhase5Learner`'s own doc comment states it "touches no governance file and no target project
+   source" / "NEVER modifies a governance file" — reopening or failing an already-finalized
+   `build_run` from Phase 5 would both contradict that stated boundary and the exact precedent
+   `phase3-executor.ts` itself already sets for a post-finalization failure (its SupabaseMigrator
+   failure path: "a migration failure never reopens or fails an already-finalized build_run…
+   writing a BLOCKER to STATE_OF_THE_BUILD.md for human follow-up" instead). "Do not mark build
+   complete" is therefore honored the same way that precedent already establishes: the build's own
+   state document is left recording, in plain sight, that the requested readiness tier's Definition
+   of Done was NOT met — the only mutation Phase 5 is allowed to make. `targetTier` is opt-in
+   (skipped with a log line, not defaulted to some invented tier) because no `--readiness-target`
+   CLI flag threads a tier into `forge build` yet — see Known gap below.
+4. `forge readiness <project-path> [--tier <id>]` CLI command (`src/cli/index.ts`) — with no
+   `--tier`, lists all nine tiers and their governance/test requirements; with `--tier`, runs
+   `evaluateDoD` and prints each check's PASS/FAIL + detail.
+
+**Known gap, flagged not silently accepted:** `evaluateDoD`/the Phase 5 DoD step is fully built and
+independently invocable (`forge readiness --tier`, or by passing `Phase5Options.targetTier`
+directly), but no `forge build --readiness-target <tier>` flag exists yet to thread a target tier
+into a real build end-to-end automatically — `manifest.yaml`'s own header states it is regenerated
+strictly from `forge build`'s real CLI flags ("If this file and the CLI diverge, the CLI wins"), so
+adding a `readiness_target:` field there without a real wired flag behind it would itself be exactly
+the kind of fabrication this session's other work explicitly avoided. Wiring that flag (and
+threading it from `cmdBuild` through to the `runPhase5Learner` call sites in `src/cli/index.ts`
+lines ~834/960/1061/1409) is the natural next prompt for this capability.
+
+**Verification:** `pnpm run build` (`tsc`) — exit code 0, zero diagnostics, confirmed after all
+four changes above. `forge readiness --help`, `forge readiness projects/tarritrix` (tier listing),
+`forge readiness projects/tarritrix --tier MVP` (legacy `phases:`-format queue.yaml correctly
+parses to 0 entries via the same `parseQueueYaml` every other command already uses — not a bug in
+this session's code), and `forge readiness . --tier MVP` (this repo's own live build, all four
+checks read real Build Memory rows) were all run this session via Bash, not assumed from a
+read-through.
 
 ---
 
@@ -2109,3 +2197,5 @@ forge build ./my-project --start-at 5 --dry-run
 26. **`forge design screenshot\|review\|storage\|penpot-setup\|history` never run end-to-end against a real project** — the same "not yet verified this session" caveat every recent system in this file has carried at its live-integration layer, now covering the Design Pipeline's five new subcommands (distinct from the pre-existing UI Engine `forge design component\|tokens\|storybook\|audit\|install-shadcn` subcommands flagged at items 18/19/24 above — both families share the `forge design` command group but were built in different sessions).
 27. **No dedicated test file exists for any of the 5 `src/design-pipeline/` modules** — `PlaywrightScreenshotter`/`PenpotIntegration`/`DesignReviewGate`/`DesignPipeline` are verified only by comprehensive static read-through this session, not by a `__tests__/design-pipeline.test.ts` suite exercising them in isolation from a live project.
 28. **`forge health` does not yet report the `design_reviews`/`design_screenshots` tables or a WIRED status for the 5 Design Pipeline modules** — the same gap already flagged for Autonomy Upgrades (item 12) and UI Engine (item 19).
+
+> 2026-08-15T04:17:31.675Z [FORGE Phase 3] prompt 1 'stage3-testing-wiring' (feature): COMPLETED â€" Sentinel PASS.

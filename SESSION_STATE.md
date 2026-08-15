@@ -1,9 +1,29 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE
+## Current Session: Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-13 (Systems 1-4 Agent Registry + Runner Cleanup: AGENTS.md (6 new agent entries: BuildBrainEvolver, CrossProjectKnowledgeTransfer, PatternRetirer, EvolutionPromoter, TestOrchestrator, IntegrationBus, plus a "Files (Enterprise Test Suite)" table), BEHAVIORAL_CONTRACTS.md (Contracts R-1–R-5 confirmed already present and verbatim, no change needed), STATE_OF_THE_BUILD.md (new "Systems 1-4 — Agent Registry + Runner Cleanup" section, Module Status rows for Systems 3/4 updated), FORGE_HANDOFF.md (new section), SESSION_STATE.md (this file) updated; deleted 7 orphaned `src/testing/runners/` single-suite wrapper files (`unit.ts`/`api.ts`/`integration.ts`/`e2e.ts`/`security.ts`/`performance.ts`/`dependency.ts`) after confirming zero importers of each anywhere in `src/`; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors, confirmed live** (not the intermittent exec-gate rejection prior sessions in this file recorded))
+## Last Updated: 2026-08-14 (Readiness-Level Engine + Definition of Done: `src/governance/readiness-levels.ts` (new, `READINESS_TIERS` — 9 tiers grounded in `upgrades/CAPABILITIES_MEMO.md` § 7 + real `ArtifactName`/`TestSuiteDb` types), `src/governance/definition-of-done.ts` (new, `evaluateDoD` — 4 checks against Build Memory + STATE_OF_THE_BUILD.md), `src/phases/phase5-learner.ts` (step 13, opt-in via `Phase5Options.targetTier`), `src/cli/index.ts` (`forge readiness <path> [--tier <id>]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `forge readiness . --tier MVP` run live against this repo's own build — all 4 checks read real Build Memory rows, not mocked)
+
+---
+
+## Readiness-Level Engine + machine-verifiable Definition of Done (2026-08-14) — COMPLETE
+
+**Objective:** formalize CAPABILITIES_MEMO.md's nine readiness levels as enforced policy and
+ENGINEERING_COMPLETENESS.md's "formal definition of done" as a real, callable check — see
+`STATE_OF_THE_BUILD.md` § "Readiness-Level Engine + machine-verifiable Definition of Done" for the
+full grounding detail, the four DoD checks, the Phase 5 wiring decision (an unmet DoD appends a
+BLOCKER to STATE_OF_THE_BUILD.md rather than reopening an already-finalized `build_run`, matching
+the precedent `phase3-executor.ts`'s SupabaseMigrator failure path already sets), and the known gap
+(no `forge build --readiness-target` flag yet threads a tier into a real build automatically —
+`evaluateDoD` and the Phase 5 step are both fully built and independently invocable today via
+`forge readiness --tier` / `Phase5Options.targetTier`).
+
+**Verification:** `pnpm run build` — exit 0, 0 errors. `forge readiness --help`, `forge readiness
+projects/tarritrix` (tier listing), `forge readiness projects/tarritrix --tier MVP` (legacy
+`phases:`-format queue.yaml correctly yields 0 parsed entries via the same `parseQueueYaml` every
+other command uses), and `forge readiness . --tier MVP` (this repo's own live build) all run this
+session via Bash.
 
 ---
 
@@ -1425,3 +1445,9 @@ Changed files:
 - `SESSION_STATE.md` (this file — r9-013: marked COMPLETE)
 - `FORGE2-COMPLETE-PLACEHOLDER.md` (new — r9-013)
 - `.forge/FINAL-HANDOFF.md` (new — r9-013)
+
+## IDE STATUS
+
+- **VS Code path:** not detected
+- **CHANGESET.md reviewed:** NO
+- **Last changeset date:** 2026-08-15T04:13:22.786Z

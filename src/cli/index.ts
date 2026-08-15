@@ -1526,6 +1526,53 @@ async function cmdAudit(
   }
 }
 
+/**
+ * `forge readiness <path> [--tier <id>]` — the Readiness-Level Engine (`src/governance/
+ * readiness-levels.ts`). With `--tier`, also evaluates the machine-verifiable Definition of Done
+ * (`src/governance/definition-of-done.ts`) against that tier and reports the current gap.
+ */
+async function cmdReadiness(pathArg: string, opts: { tier?: string }): Promise<void> {
+  const { READINESS_TIERS, parseReadinessTierId } = await import('../governance/readiness-levels.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const projectName = basename(projectPath) || 'project';
+
+  if (!opts.tier) {
+    console.log(chalk.bold(`\nFORGE Readiness-Level Engine\n`));
+    for (const tier of READINESS_TIERS) {
+      console.log(`  ${chalk.bold(String(tier.level))}. ${chalk.cyan(tier.id)} — ${tier.label}`);
+      console.log(chalk.dim(`     ${tier.description}`));
+      console.log(
+        chalk.dim(
+          `     governance: ${tier.requiredGovernanceArtifacts.join(', ')} | ` +
+            `tests: ${tier.requiredTestSuites.join(', ')}`
+        )
+      );
+    }
+    console.log(chalk.dim('\nRun with --tier <id> to evaluate the Definition of Done for a specific tier against this project.'));
+    return;
+  }
+
+  const targetTier = parseReadinessTierId(opts.tier);
+  if (!targetTier) {
+    fail(`Unknown --tier "${opts.tier}". Expected one of: ${READINESS_TIERS.map((t) => t.id).join(', ')}.`);
+    return;
+  }
+
+  const { evaluateDoD } = await import('../governance/definition-of-done.js');
+  console.log(chalk.bold(`\nEvaluating Definition of Done for ${projectName} — target tier ${targetTier}\n`));
+  const result = await evaluateDoD(projectPath, targetTier);
+  for (const check of result.checks) {
+    const marker = check.passed ? chalk.green('[PASS]') : chalk.red('[FAIL]');
+    console.log(`  ${marker} ${check.name}: ${check.detail}`);
+  }
+  console.log('');
+  if (result.passed) {
+    console.log(chalk.green.bold(`Definition of Done PASSED for target tier ${targetTier}.`));
+  } else {
+    fail(`Definition of Done FAILED for target tier ${targetTier} — see the failed check(s) above.`);
+  }
+}
+
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
 async function cmdEstimate(pathArg: string, opts: { idea?: string; prd?: string }): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
@@ -3875,6 +3922,13 @@ async function main(): Promise<void> {
         process.exitCode = 1;
       }
     });
+
+  program
+    .command('readiness')
+    .description('Show readiness-tier requirements, or evaluate the machine-verifiable Definition of Done against one tier (--tier)')
+    .argument('<project-path>', 'target project directory')
+    .option('--tier <id>', 'readiness tier to evaluate (e.g. MVP, ENTERPRISE_GRADE) — omit to list all tiers and their requirements')
+    .action((pathArg: string, opts: { tier?: string }) => cmdReadiness(pathArg, opts));
 
   program
     .command('compose')
