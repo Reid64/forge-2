@@ -104,6 +104,13 @@ import {
   type ConsensusValidatorOptions,
   type ConsensusValidationResult,
 } from '../tools/consensus-validator.js';
+import {
+  runConsensusProposal,
+  MIN_PROPOSALS,
+  type ConsensusProposalInput,
+  type ConsensusProposalOptions,
+  type ConsensusProposalResult,
+} from '../tools/consensus-proposal.js';
 import type { PreviousSentinelStatus } from '../engine/prompt-assembler.js';
 import type { ErrorPattern, ErrorCategory, Resolution, Json, JsonObject, SecurityReport, SecurityGrade } from '../types/index.js';
 import { scanProjectSecurity } from '../tools/agent-shield.js';
@@ -149,6 +156,7 @@ export type SentinelCheckName =
   | 'seo'
   | 'architecture'
   | 'consensus_validation'
+  | 'consensus_proposal'
   | 'agent_shield'
   | 'live_schema_drift'
   | 'dead_code'
@@ -463,6 +471,26 @@ export interface SentinelOptions {
     input: ConsensusValidationInput,
     options?: ConsensusValidatorOptions
   ) => Promise<ConsensusValidationResult>;
+  /**
+   * Consensus-PROPOSAL configuration (the OPTIONAL independent-proposals + critique-round check).
+   * When supplied — the executor passes it BEFORE a prompt that is about to produce an artifact,
+   * with the task's `taskPrompt` and `promptType` — Sentinel drafts 2-3+ INDEPENDENT proposals
+   * (one per provider, each blind to the others; see {@link runConsensusProposal}), critiques
+   * every usable draft through the SAME multi-model consensus panel `consensusValidation` uses
+   * (each draft's own author excluded from its own panel — by default the panel is the OTHER
+   * proposers), and ranks the results. A generation with NO proposal that passed its own
+   * critique's `promptType` requirement FAILS the gate and blocks the build; an unreachable
+   * proposer panel (<2 usable drafts) SKIPS (never a false failure). Results — including the
+   * ranked scoreboard — are stored in Build Memory (guarded).
+   */
+  consensusProposal?: ConsensusProposalInput;
+  /** Options forwarded to {@link runConsensusProposal} (e.g. an injected router / proposer caller / store for tests). */
+  consensusProposalOptions?: ConsensusProposalOptions;
+  /** Override the consensus-proposal runner (tests). Default: {@link runConsensusProposal}. */
+  runConsensusProposalCheck?: (
+    input: ConsensusProposalInput,
+    options?: ConsensusProposalOptions
+  ) => Promise<ConsensusProposalResult>;
   /**
    * AgentShield security scan (OPTIONAL). When supplied, Sentinel runs the AgentShield scanner
    * against the project after every prompt. A grade below B+ (i.e. C / D / F) FAILS the gate
@@ -1670,6 +1698,47 @@ function evaluateConsensus(result: ConsensusValidationResult, durationMs: number
     result.verdict === 'VALIDATED_WITH_CONCERNS'
       ? `consensus with concerns — ${result.approvals}/${result.usableValidators} approved (requirement of ${result.requiredApprovals} met; concerns surfaced)`
       : `consensus validated — ${result.approvals}/${result.usableValidators} validator(s) approved`,
+    summary,
+    durationMs
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Check 18 (optional): Consensus Proposal (independent proposals + peer critique round)
+// ---------------------------------------------------------------------------
+
+/** Map a {@link ConsensusProposalResult} into the Sentinel's {@link CheckResult} contract. */
+function evaluateConsensusProposal(result: ConsensusProposalResult, durationMs: number): CheckResult {
+  // Too few usable proposals (proposer panel unreachable) → SKIP (no false failure).
+  if (result.usableProposals < MIN_PROPOSALS) {
+    return skip(
+      'consensus_proposal',
+      `only ${result.usableProposals} of ${result.proposalsDrafted} proposal(s) usable (need ≥${MIN_PROPOSALS}) — round not evaluated`
+    );
+  }
+
+  const summary =
+    `${result.usableProposals}/${result.proposalsDrafted} proposal(s) drafted, ${result.critiquedProposals} critiqued; ` +
+    `winner: ${result.winner ? `${result.winner.proposal.provider} (${result.winner.critique.verdict})` : 'none'}; ` +
+    `~$${result.totalCostUsd.toFixed(4)}.\n` +
+    result.report;
+
+  // No proposal met its own critique's prompt_type requirement — nothing safe to carry forward.
+  if (result.blocked) {
+    return fail(
+      'consensus_proposal',
+      `no proposal reached consensus for prompt_type '${result.promptType}' ` +
+        `(${result.critiquedProposals} critiqued, best did not meet its requirement); build blocked`,
+      summary,
+      durationMs
+    );
+  }
+  return pass(
+    'consensus_proposal',
+    result.winner
+      ? `winner: ${result.winner.proposal.provider} — verdict ${result.winner.critique.verdict} ` +
+        `(${result.winner.critique.approvals}/${result.winner.critique.usableValidators} approved)`
+      : 'proposal round not evaluated (skipped upstream)',
     summary,
     durationMs
   );
@@ -4069,6 +4138,42 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       record(
         await runCommandCheck('playwright', playwrightCmd, playwrightPath, playwrightTimeout, run, log)
       );
+    }
+  }
+
+  // --- 18. Consensus Proposal (OPTIONAL — independent proposals + peer critique round) ---------
+  // Not part of the mandatory Contract-13 five: appended only when `consensusProposal` is supplied
+  // (the executor passes it before a prompt that is about to produce an artifact, in place of — or
+  // alongside — the post-hoc `consensusValidation` check). Several providers draft BLIND to each
+  // other, every usable draft is critiqued by its peers through the same panel `consensusValidation`
+  // uses, and the best-ranked PASSING draft becomes the winner. No proposal reaching consensus FAILS
+  // the gate and blocks the build; an unreachable proposer panel (<2 usable drafts) SKIPS.
+  if (options.consensusProposal) {
+    if (shouldSkipRest()) {
+      record(skipRest('consensus_proposal'));
+    } else {
+      log('check 18: Consensus Proposal (independent multi-model proposals + peer critique round)');
+      const startedAt = nowMs();
+      const cpInput: ConsensusProposalInput = {
+        ...options.consensusProposal,
+        projectName: options.consensusProposal.projectName ?? basename(projectPath),
+      };
+      const runProposal = options.runConsensusProposalCheck ?? runConsensusProposal;
+      let cp: ConsensusProposalResult | null;
+      try {
+        cp = await runProposal(
+          cpInput,
+          options.consensusProposalOptions ?? { log: (m) => log(`consensus-proposal: ${m}`) }
+        );
+      } catch (error) {
+        log(`WARNING: consensus proposal round failed (${describe(error)})`);
+        cp = null;
+      }
+      if (cp === null) {
+        record(skip('consensus_proposal', 'consensus proposal runner failed — not evaluated'));
+      } else {
+        record(evaluateConsensusProposal(cp, nowMs() - startedAt));
+      }
     }
   }
 

@@ -24,6 +24,10 @@
  *   - gemini    : Gemini 1.5 Flash                 — documentation + research verification.
  *                                                    `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
  *   - deepseek  : DeepSeek Chat                    — code review + pattern matching. `DEEPSEEK_API_KEY`
+ *   - perplexity: Perplexity Sonar Pro              — research verification with LIVE web-search
+ *                                                    grounding (the one provider here that can see
+ *                                                    the current web, not just training data).
+ *                                                    `PERPLEXITY_API_KEY`
  *
  * INTELLIGENT ROUTING: a {@link ForgeTaskType} maps to an ORDERED list of providers — the first
  * is the preferred provider for that kind of work, the rest are the failover chain. The router
@@ -81,7 +85,7 @@ const CLI_CHARS_PER_TOKEN = 4;
 // ---------------------------------------------------------------------------
 
 /** The non-Claude-Code providers FORGE can route a reasoning call to. */
-export type ProviderName = 'anthropic' | 'openai' | 'gemini' | 'deepseek';
+export type ProviderName = 'anthropic' | 'openai' | 'gemini' | 'deepseek' | 'perplexity';
 
 /**
  * The KIND of work a call represents — the routing key. Each maps (via {@link DEFAULT_ROUTES})
@@ -188,6 +192,18 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
     pricing: { inputPerMTok: 0.14, outputPerMTok: 0.28 },
     freeTier: null,
   },
+  perplexity: {
+    name: 'perplexity',
+    apiKeyEnvs: ['PERPLEXITY_API_KEY'],
+    defaultModel: 'sonar-pro',
+    // Perplexity's Chat Completions endpoint is OpenAI-compatible — the shared `openai` direct
+    // path (callOpenAiDirect) handles it with no protocol-specific code.
+    endpoint: 'https://api.perplexity.ai/chat/completions',
+    protocol: 'openai',
+    litellmPrefix: 'perplexity/',
+    pricing: { inputPerMTok: 3, outputPerMTok: 15 },
+    freeTier: null,
+  },
 };
 
 /**
@@ -207,10 +223,12 @@ export const DEFAULT_PROVIDERS: Record<ProviderName, ProviderConfig> = {
  */
 export const DEFAULT_ROUTES: Record<ForgeTaskType, ProviderName[]> = {
   complex_reasoning: ['anthropic'],
-  validation: ['openai', 'gemini', 'anthropic', 'deepseek'],
-  simple_analysis: ['openai', 'gemini', 'deepseek', 'anthropic'],
-  documentation: ['gemini', 'openai', 'anthropic', 'deepseek'],
-  research_verification: ['gemini', 'openai', 'anthropic', 'deepseek'],
+  validation: ['openai', 'gemini', 'anthropic', 'deepseek', 'perplexity'],
+  simple_analysis: ['openai', 'gemini', 'deepseek', 'anthropic', 'perplexity'],
+  documentation: ['gemini', 'openai', 'anthropic', 'deepseek', 'perplexity'],
+  // `perplexity` LEADS this chain — live web-search grounding is exactly what "verify this claim
+  // against reality" needs; the rest is the same failover chain as before it existed.
+  research_verification: ['perplexity', 'gemini', 'openai', 'anthropic', 'deepseek'],
   code_review: ['deepseek', 'anthropic', 'openai', 'gemini'],
   pattern_matching: ['deepseek', 'openai', 'gemini', 'anthropic'],
 };
@@ -550,7 +568,7 @@ export class ProviderRouter {
     const getEnv = options.getEnv ?? ((n: string) => process.env[n]);
     this.getEnv = getEnv;
 
-    const names: ProviderName[] = ['anthropic', 'openai', 'gemini', 'deepseek'];
+    const names: ProviderName[] = ['anthropic', 'openai', 'gemini', 'deepseek', 'perplexity'];
     const providers = {} as Record<ProviderName, ProviderConfig>;
     for (const name of names) {
       providers[name] = mergeProvider(DEFAULT_PROVIDERS[name], options.providers?.[name]);

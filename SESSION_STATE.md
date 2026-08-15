@@ -1571,5 +1571,23 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T06:23:19.445Z
+- **Last changeset date:** 2026-08-15T06:50:26.745Z
+
+---
+
+## Files Modified This Session (prompt 8 — stage6-consensus-upgrade: Consensus Engine Upgrade)
+
+- `src/tools/consensus-proposal.ts` (new) — independent-proposals + peer-critique-round engine (`runConsensusProposal`)
+- `tests/consensus-proposal.test.ts` (new) — 8 unit tests, no network/no DB (all injected)
+- `src/engine/provider-router.ts` (modified) — added `perplexity` provider; `research_verification` now leads with it
+- `src/engine/free-tier-manager.ts` (modified) — `perplexity` added to the governed provider set
+- `src/tools/consensus-validator.ts` (modified) — research-mode validator order leads with `perplexity`
+- `src/phases/phase4-sentinel.ts` (modified) — wired `runConsensusProposal` as optional Sentinel check 18
+- `tests/provider-router.test.ts` (modified) — 4 new Perplexity tests appended
+- `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md` (this file) — updated from actual codebase audit
+
+**Verified:** `pnpm run build` → 0 TypeScript errors. `tests/consensus-proposal.test.ts` → 8/8 pass.
+`tests/provider-router.test.ts` → all Perplexity-related tests pass; 3 pre-existing unrelated tests
+fail in this sandbox due to the `anthropic` route shelling out to the real `claude` CLI (known
+environment quirk, not a regression — see FORGE Build Memory "exec is INTERMITTENT").
 

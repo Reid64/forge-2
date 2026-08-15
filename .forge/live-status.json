@@ -2,47 +2,27 @@
   "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
   "project": "forge-2",
   "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T06:23:45.680Z",
+  "updatedAt": "2026-08-15T06:50:58.529Z",
   "currentPrompt": {
-    "index": 7,
-    "id": "stage5-observability",
-    "name": "Build Control Plane run telemetry (.forge/runs/*.jsonl)",
+    "index": 8,
+    "id": "stage6-consensus-upgrade",
+    "name": "Upgrade Consensus Engine to independent proposals plus critique round plus Perplexity",
     "type": "feature",
     "phase": "recovering"
   },
   "totals": {
-    "completed": 6,
+    "completed": 7,
     "failed": 0,
-    "remaining": 5,
-    "tokensEstimated": 11381,
-    "costEstimatedUsd": 0.435264,
-    "totalElapsedMs": 4961659
+    "remaining": 4,
+    "tokensEstimated": 13422,
+    "costEstimatedUsd": 0.507744,
+    "totalElapsedMs": 5942070
   },
   "lastSentinel": {
     "passed": false,
     "failedCheck": null
   },
   "recentEvents": [
-    {
-      "timestamp": "2026-08-15T05:47:12.382Z",
-      "message": "prompt 5 'stage4-adr-risk-debt' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T05:47:12.387Z",
-      "message": "Sentinel FAIL (unknown)"
-    },
-    {
-      "timestamp": "2026-08-15T05:47:13.602Z",
-      "message": "Build Brain: applying targeted fix (confidence 0.57)"
-    },
-    {
-      "timestamp": "2026-08-15T05:47:13.604Z",
-      "message": "prompt 5 'stage4-adr-risk-debt': Build Brain targeted recovery (confidence 0.57)"
-    },
-    {
-      "timestamp": "2026-08-15T05:55:26.200Z",
-      "message": "prompt 5 'stage4-adr-risk-debt' (feature): merged"
-    },
     {
       "timestamp": "2026-08-15T05:55:33.882Z",
       "message": "prompt 6 'stage4-deadloop' (feature): start"
@@ -102,6 +82,26 @@
     {
       "timestamp": "2026-08-15T06:23:45.680Z",
       "message": "prompt 7 'stage5-observability': Build Brain targeted recovery (confidence 0.67)"
+    },
+    {
+      "timestamp": "2026-08-15T06:34:27.085Z",
+      "message": "prompt 7 'stage5-observability' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T06:34:40.412Z",
+      "message": "prompt 8 'stage6-consensus-upgrade' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T06:34:40.431Z",
+      "message": "prompt 8 'stage6-consensus-upgrade' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T06:35:20.281Z",
+      "message": "prompt 8 'stage6-consensus-upgrade' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T06:50:58.529Z",
+      "message": "Timeout retry: re-running with 2x budget (1800s)"
     }
   ],
   "brainInterventions": 6

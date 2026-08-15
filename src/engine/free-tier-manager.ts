@@ -68,8 +68,8 @@ import { logLine } from '../tools/forge-logger.js';
 // Public contract — per-provider settings
 // ---------------------------------------------------------------------------
 
-/** The four providers the Free-Tier Manager governs (mirrors the router). */
-export const PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'gemini', 'deepseek'];
+/** The providers the Free-Tier Manager governs (mirrors the router). */
+export const PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'gemini', 'deepseek', 'perplexity'];
 
 /** A provider's short-term rate limit. `null` on a field = that dimension is unconstrained. */
 export interface RateLimit {
@@ -133,6 +133,14 @@ export const DEFAULT_PROVIDER_SETTINGS: Record<ProviderName, ResolvedProviderSet
     freeTier: DEFAULT_PROVIDERS.anthropic.freeTier,
     rateLimit: null,
     pricing: DEFAULT_PROVIDERS.anthropic.pricing,
+  },
+  perplexity: {
+    name: 'perplexity',
+    paid: true,
+    priority: 60,
+    freeTier: DEFAULT_PROVIDERS.perplexity.freeTier,
+    rateLimit: null,
+    pricing: DEFAULT_PROVIDERS.perplexity.pricing,
   },
 };
 

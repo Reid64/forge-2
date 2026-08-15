@@ -1,9 +1,9 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Last Updated:** 2026-08-15 (Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)**
 **Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + **Dead-Loop / Stagnation Detection (ALL COMPLETE)**
-**Schema version:** unchanged at **3.2.0** — Dead-Loop / Stagnation Detection adds no new table; both modules read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
+**Schema version:** unchanged at **3.2.0** — the Consensus Engine Upgrade and Dead-Loop / Stagnation Detection add no new tables; the upgrade reuses `production_telemetry` (event kind `consensus_proposal`, alongside the existing `consensus_validator`) and Dead-Loop/Stagnation read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
@@ -2626,3 +2626,45 @@ forge build ./my-project --start-at 5 --dry-run
 > 2026-08-15T05:55:33.646Z [FORGE Phase 3] prompt 5 'stage4-adr-risk-debt' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T06:18:19.217Z [FORGE Phase 3] prompt 6 'stage4-deadloop' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T06:34:39.881Z [FORGE Phase 3] prompt 7 'stage5-observability' (feature): COMPLETED â€" Sentinel PASS.
+
+## Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity (prompt 8/stage6-consensus-upgrade) — COMPLETE
+
+**What shipped:**
+- `src/tools/consensus-proposal.ts` (new) — `runConsensusProposal`: Stage 1 recruits 2-3+ providers
+  (`DEFAULT_PROPOSER_ORDER` = anthropic, openai, gemini, deepseek, perplexity, capped at
+  `DEFAULT_PROPOSER_COUNT` = 3) who each draft a proposal blind to every other proposer's draft.
+  Stage 2 runs every usable draft back through the existing `runConsensusValidation`
+  (consensus-validator.ts) as a peer-critique panel — the draft's own author excluded, the default
+  panel being the OTHER proposers — reusing that module's issue-clustering, corroboration, and
+  per-`prompt_type` requirement scoring wholesale. Proposals are ranked (pass beats fail, then
+  approval margin, then fewest/mildest corroborated issues); the winner is the top-ranked proposal
+  that actually PASSED its own critique — never a best-of-failures. <2 usable drafts SKIPs (no
+  false block); non-fatal throughout (Iron Law 3); results persisted to `production_telemetry`
+  (event kind `consensus_proposal`, guarded — Contract 4).
+- `src/engine/provider-router.ts` + `src/engine/free-tier-manager.ts` — added `perplexity` as a
+  fifth `ProviderName` (Sonar Pro, OpenAI-compatible protocol via the existing `callOpenAiDirect`
+  path, `PERPLEXITY_API_KEY`). `research_verification` now leads with `perplexity` (the only
+  provider with live web-search grounding) ahead of the pre-existing gemini/openai/anthropic/deepseek
+  failover chain; `code_review`/`pattern_matching` deliberately do NOT include it.
+- `src/tools/consensus-validator.ts` — validator/proposer default orders already reference
+  `perplexity`; `DEFAULT_RESEARCH_VALIDATOR_ORDER` leads with it in research mode.
+- `src/phases/phase4-sentinel.ts` — wired as Sentinel check 18 (optional): when the executor
+  supplies `consensusProposal` (a `taskPrompt` + `promptType`) ahead of an artifact-producing
+  prompt, Sentinel drafts + critiques + ranks, and a round where no proposal reached consensus
+  FAILS the gate and blocks the build.
+- Tests: `tests/consensus-proposal.test.ts` (new, 8 tests — proposer selection, SKIP-on-too-few,
+  full winner/ranking flow, all-fail block path, unreachable-proposer resilience, throwing-critique
+  resilience, MIN_PROPOSALS sanity) + 4 new Perplexity tests appended to
+  `tests/provider-router.test.ts` (provider config, `research_verification` routing/failover,
+  exclusion from code_review/pattern_matching). All 12 new/changed tests pass.
+
+**Build:** `pnpm run build` — 0 TypeScript errors. `tsc` clean across the full project.
+
+**Verification note:** 3 pre-existing `provider-router.test.ts` tests (AllProvidersExhaustedError
+chain-exhaustion, cost/token tracking, `callModelFor` adapter) fail in this sandbox because the
+`anthropic`/`complex_reasoning` route shells out to the real `claude` CLI rather than being
+intercepted by the test's mocked `fetchImpl` — a pre-existing environment quirk (see FORGE Build
+Memory: "exec is INTERMITTENT"), not a regression from this change; none of the 3 touch Perplexity,
+routing tables, or the consensus engine.

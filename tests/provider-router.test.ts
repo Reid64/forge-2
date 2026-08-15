@@ -19,6 +19,7 @@ import {
   estimateProviderCost,
   AllProvidersExhaustedError,
   DEFAULT_PROVIDERS,
+  DEFAULT_ROUTES,
   type FetchLike,
   type ProviderName,
 } from '../src/engine/provider-router.js';
@@ -76,13 +77,25 @@ const REQUEST: ModelRequest = {
   apiKey: '',
 };
 
-/** Env with all four provider keys present (and proxy off). */
+/** Env with all four provider keys present (and proxy off). Perplexity is deliberately absent — see the dedicated tests below. */
 function allKeys(): (name: string) => string | undefined {
   const env: Record<string, string> = {
     ANTHROPIC_API_KEY: 'sk-ant',
     OPENAI_API_KEY: 'sk-oai',
     GEMINI_API_KEY: 'sk-gem',
     DEEPSEEK_API_KEY: 'sk-ds',
+  };
+  return (n) => env[n];
+}
+
+/** Env with all five provider keys present, including Perplexity. */
+function allKeysWithPerplexity(): (name: string) => string | undefined {
+  const env: Record<string, string> = {
+    ANTHROPIC_API_KEY: 'sk-ant',
+    OPENAI_API_KEY: 'sk-oai',
+    GEMINI_API_KEY: 'sk-gem',
+    DEEPSEEK_API_KEY: 'sk-ds',
+    PERPLEXITY_API_KEY: 'sk-pplx',
   };
   return (n) => env[n];
 }
@@ -266,4 +279,38 @@ test('callModelFor returns a CallModel adapting RoutedResponse to ModelResponse'
   const callModel = router.callModelFor('complex_reasoning');
   const out = await callModel(REQUEST);
   assert.deepEqual(out, { text: 'claude', tokensInput: 4, tokensOutput: 6 });
+});
+
+// ---------------------------------------------------------------------------
+// Perplexity (live web-search grounding for research_verification)
+// ---------------------------------------------------------------------------
+
+test('perplexity is configured with its own key env, OpenAI-compatible protocol, and endpoint', () => {
+  const cfg = DEFAULT_PROVIDERS.perplexity;
+  assert.deepEqual(cfg.apiKeyEnvs, ['PERPLEXITY_API_KEY']);
+  assert.equal(cfg.protocol, 'openai');
+  assert.equal(cfg.endpoint, 'https://api.perplexity.ai/chat/completions');
+  assert.equal(cfg.freeTier, null);
+});
+
+test('research_verification prefers perplexity when its key is present', async () => {
+  const { fetchImpl, calls } = makeFetch([{ match: 'api.perplexity.ai', reply: openAiOk('grounded-answer') }]);
+  const router = new ProviderRouter({ fetchImpl, getEnv: allKeysWithPerplexity() });
+  const res = await router.route('research_verification', REQUEST);
+  assert.equal(res.provider, 'perplexity');
+  assert.equal(res.text, 'grounded-answer');
+  assert.equal((calls[0]?.body as { model: string }).model, DEFAULT_PROVIDERS.perplexity.defaultModel);
+});
+
+test('research_verification fails over to gemini when perplexity has no key configured', async () => {
+  const { fetchImpl } = makeFetch([{ match: 'generativelanguage', reply: openAiOk('gem-answer') }]);
+  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys() }); // no PERPLEXITY_API_KEY
+  const res = await router.route('research_verification', REQUEST);
+  assert.equal(res.provider, 'gemini');
+  assert.equal(res.text, 'gem-answer');
+});
+
+test('perplexity is never in the default code_review or pattern_matching chains', () => {
+  assert.equal(DEFAULT_ROUTES.code_review.includes('perplexity'), false);
+  assert.equal(DEFAULT_ROUTES.pattern_matching.includes('perplexity'), false);
 });

@@ -18,7 +18,8 @@
  *      JSON: does the output correctly fulfill the prompt's requirements, with what confidence, and
  *      what specific issues exist (severity + description). For RESEARCH results it ALSO independently
  *      verifies each supplied claim — the existence of an opportunity and the accuracy of its
- *      eligibility requirements, deadlines, and dollar amounts.
+ *      eligibility requirements, deadlines, and dollar amounts — with `perplexity` (live web-search
+ *      grounding) LEADING the panel in this mode (see {@link DEFAULT_RESEARCH_VALIDATOR_ORDER}).
  *   3. Consensus scoring over the USABLE judgments (a validator whose JSON cannot be parsed abstains
  *      and is excluded — never a false failure):
  *        - ALL validators approve            → VALIDATED
@@ -155,6 +156,22 @@ export const DEFAULT_CONSENSUS_LEVEL: ConsensusRequirement = { required: 2, of: 
 
 /** Default order in which providers are recruited as validators (primary is removed at runtime). */
 export const DEFAULT_VALIDATOR_ORDER: readonly ProviderName[] = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'deepseek',
+  'perplexity',
+];
+
+/**
+ * Validator recruitment order for RESEARCH-mode runs (a claim to independently verify was
+ * supplied). `perplexity` LEADS — it is the one panel member with live web-search grounding, so
+ * it is the most useful independent check on whether an opportunity genuinely exists and whether
+ * its eligibility/deadline/dollar-amount claims are accurate, rather than a plausible-sounding
+ * hallucination from training-data recall alone.
+ */
+export const DEFAULT_RESEARCH_VALIDATOR_ORDER: readonly ProviderName[] = [
+  'perplexity',
   'anthropic',
   'openai',
   'gemini',
@@ -926,7 +943,13 @@ export async function runConsensusValidation(
   const claims = input.researchClaims ?? [];
   const researchMode = claims.length > 0;
 
-  const providers = selectValidatorProviders(input.primaryProvider, options);
+  // Research mode leads with `perplexity` (live web-search grounding) unless the caller pinned
+  // an explicit order/provider list of their own.
+  const orderOptions =
+    researchMode && options.validatorProviders === undefined && options.validatorOrder === undefined
+      ? { ...options, validatorOrder: DEFAULT_RESEARCH_VALIDATOR_ORDER }
+      : options;
+  const providers = selectValidatorProviders(input.primaryProvider, orderOptions);
   log(
     `validating ${input.promptType} output (primary=${input.primaryProvider}) ` +
       `against [${providers.join(', ') || 'no eligible providers'}]${researchMode ? ` + ${claims.length} claim(s)` : ''}`
