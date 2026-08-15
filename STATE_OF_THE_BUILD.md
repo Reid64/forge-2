@@ -1,13 +1,68 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory — COMPLETE, on top of Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Last Updated:** 2026-08-15 (Security/Quality Gate Expansion — Semgrep SAST (OWASP Top Ten ruleset) + OWASP ZAP DAST + Schemathesis API contract testing wired into Sentinel Ring 2/Ring 3 — COMPLETE, on top of Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory — COMPLETE, on top of Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)** + **Deferred Concurrent Execution COMPLETE — `src/phases/phase3-executor.ts`'s `runPromptsConcurrently` (the `maxConcurrency > 1` counterpart to the sequential prompt loop, driving `src/engine/parallel-scheduler.ts`'s pre-existing `executeSchedule` to fan each dependency-satisfied wave out onto its own linked git worktree via `src/engine/git-manager.ts`'s `createWorktree`/`mergeDelegate`, plus a new `tagDelegate` option so a linked worktree's checkpoint tag lands on the primary's real merge commit instead of the worktree's own stale HEAD)** + **Design Intelligence COMPLETE — `src/design-pipeline/app-profiler.ts` (App Profiler: deterministic `AppDesignProfile` derivation from queue corpus + `package.json`), `design-router.ts` (Design Capability Registry + Design Tool Router: spec-formula weighted scoring across `taste_skill`/`impeccable`/`awesome_design`/`img2threejs`, `playwright` always validation-only), `design-memory.ts` (cross-project prefer/reject tag ledger fed by real rejection feedback + tournament outcomes), `design-tournament.ts` (Design Tournament Engine: 2-4 structurally-distinct variants through the real `UIComponentGenerator`, scored on the 2/9 rubric dimensions with a real automated evaluator, never auto-selects a winner) — App Profiler + Design Router wired as a non-blocking step 0a into `design-pipeline/index.ts`'s `DesignPipeline.run()`; Design Tournament is complete, tested, standalone infrastructure not yet wired into the default per-prompt pipeline (opt-in, not called on every component)**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + Deferred Concurrent Execution + **Design Intelligence (ALL COMPLETE)**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + Deferred Concurrent Execution + Design Intelligence + **Security/Quality Gate Expansion (Semgrep SAST + OWASP ZAP DAST + Schemathesis, ALL COMPLETE)**
 **Schema version:** **3.3.0** — bumped from 3.2.0 by Design Intelligence: `app_design_profiles`, `design_router_decisions`, `design_preferences`, `design_tournament_runs`, `design_tournament_variants` (all added to `ALL_FORGE_TABLES` in `src/learning/database.ts`).
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8) + prompt 10/11 Design Intelligence (this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Security/Quality Gate Expansion — Semgrep SAST + OWASP ZAP DAST + Schemathesis API Contract Testing (2026-08-15) — COMPLETE
+
+**Objective:** Extend Sentinel's existing Ring 2/Ring 3 tool gates (TOOLCHAIN-adjacent, opt-in,
+never-throw, skip-gracefully-when-missing) with an OWASP-focused Semgrep ruleset, a genuine DAST
+scan (OWASP ZAP), and API contract testing (Schemathesis) — following the exact pattern already
+established by Trivy/Gitleaks/Lighthouse rather than inventing a new gate mechanism.
+
+**What shipped** (`src/phases/phase4-sentinel.ts`):
+- **Semgrep SAST upgrade** — `runRing2SemgrepCheck` (Ring 2b, exported for reuse) now runs
+  `npx semgrep --config=auto --config=p/owasp-top-ten --json`, adding the OWASP Top Ten ruleset
+  alongside the existing `auto` config. Threshold unchanged: 0 `severity=ERROR` findings block the
+  gate; WARNING findings surface but pass. Skips when semgrep is not installed.
+- **OWASP ZAP DAST** (Ring 3d, new) — `runRing3ZapCheck`: fast-path installed-check, boots a dev
+  server on port 3098, runs `zap-baseline.py -t <url> -J .forge/zap-report.json -m 5`, tears the
+  server down, parses the JSON report. Threshold: 0 High-risk alerts (`riskcode=3`); Medium/Low/
+  Informational surface but pass. Skips (never a false fail) when `zap-baseline.py` is not on PATH
+  or the dev server does not start.
+- **Schemathesis API contract testing** (Ring 3e, new) — `runRing3SchemathesisCheck`: fast-path
+  installed-check, boots a dev server on port 3097, probes 6 common well-known paths
+  (`/api/openapi.json`, `/openapi.json`, `/swagger.json`, …) to discover the app's OpenAPI/Swagger
+  schema, runs `schemathesis run <schema> --checks all --junit-xml=.forge/schemathesis-report.xml`,
+  tears the server down, parses the JUnit XML report via a light attribute-regex scan
+  (`parseJUnitTotals`, exported — no XML parser dependency added, matching the codebase's existing
+  JSON/report-file parsing convention). Threshold: 0 failing/erroring test cases. Skips when
+  `schemathesis` is not on PATH, the dev server does not start, or no schema is discoverable (not an
+  API project, or the schema isn't exposed).
+- Both new checks are wired into the Ring 3 block (`options.ring3.runZap` / `runSchemathesis`
+  overrides, same shape as `runTrivy`/`runGitleaks`/`runLighthouse`) and added to
+  `SentinelCheckName` (`'owasp_zap'`, `'schemathesis'`).
+- **TestOrchestrator parity** — `src/testing/runners/{semgrep,zap,schemathesis}-runner.ts` (new,
+  each ~20 lines, reuse the Sentinel check functions directly — DRY, no re-implementation),
+  registered in `src/testing/orchestrator.ts`'s `RUNNERS` map and `src/testing/types.ts`'s
+  `RunnerType` enum (`SEMGREP`, `OWASP_ZAP`, `SCHEMATHESIS`). `src/testing/runners/persist.ts`'s
+  `TEST_SUITE_DB` maps them to the existing `STATIC_ANALYSIS` / `DYNAMIC_ANALYSIS` / `API`
+  categories — no new DB enum values, no migration, no schema version bump.
+
+**NOT done:**
+- Neither new check is fired automatically during a real Phase 3 build yet — like Trivy/Gitleaks/
+  Lighthouse before them, `phase3-executor.ts` never sets `ring2`/`ring3` on `SentinelOptions`
+  today; all six Ring 2/Ring 3 tools currently only fire via the standalone
+  `forge sentinel <path> --ring 2|3` CLI command. Wiring an automatic end-of-run trigger into
+  `phase3-executor.ts` is a pre-existing gap, not introduced or closed by this change.
+- OWASP ZAP and Schemathesis were not exercised against a live booted app in this session (no
+  `zap-baseline.py`/`schemathesis` binary available in this environment) — verified via the
+  fast-path "not installed → skip" branch only (real unit-tested behavior); the report-parsing
+  branches (`parseJUnitTotals`, ZAP JSON alert parsing) are unit-tested directly against fixture
+  strings, not end-to-end against a real scan.
+
+**Verified:** `pnpm run build` (tsc) — 0 errors. `node --import tsx --test tests/sentinel.test.ts` —
+34 tests, 30 pass / 4 fail; all 4 failures pre-exist on `main` before this change (confirmed via
+`git stash`: 23 pass / 4 fail before, 30 pass / 4 fail after — every test added by this change
+passes, zero regressions introduced).
 
 ---
 
@@ -2806,3 +2861,5 @@ routing tables, or the consensus engine.
 > 2026-08-15T07:34:52.211Z [FORGE Phase 3] prompt 9 'stage7-queue-concurrency' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T07:50:17.167Z [FORGE Phase 3] prompt 10 'Build App Profiler, Design Router, Design Tournament, Design Memory' (feature): COMPLETED â€" build fixed (design-router.ts tsc error), 23 new tests added, tsc/build/test all pass.
+
+> 2026-08-15T07:59:56.764Z [FORGE Phase 3] prompt 10 'stage8-design-intelligence' (feature): COMPLETED â€" Sentinel PASS.

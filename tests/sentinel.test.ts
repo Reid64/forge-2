@@ -26,6 +26,10 @@ import {
   normalizeErrorSignature,
   signatureSimilarity,
   categorizeError,
+  runRing2SemgrepCheck,
+  runRing3ZapCheck,
+  runRing3SchemathesisCheck,
+  parseJUnitTotals,
   type CommandResult,
   type SentinelOptions,
   type SentinelResult,
@@ -551,4 +555,103 @@ test('recovery: an already-passing Sentinel is a no-op', async () => {
   assert.equal(result.attempted, false);
   assert.equal(result.recovered, true);
   assert.equal(result.escalated, false);
+});
+
+// ---------------------------------------------------------------------------
+// Semgrep SAST (Ring 2b) — OWASP Top Ten ruleset
+// ---------------------------------------------------------------------------
+
+test('semgrep: runs with the OWASP Top Ten ruleset alongside auto', async () => {
+  let seenCommand = '';
+  await runRing2SemgrepCheck(
+    'C:/demo',
+    async (cmd) => {
+      seenCommand = cmd;
+      return { ok: true, exitCode: 0, stdout: JSON.stringify({ results: [] }), stderr: '', timedOut: false };
+    },
+    () => {}
+  );
+  assert.match(seenCommand, /--config=auto/);
+  assert.match(seenCommand, /--config=p\/owasp-top-ten/);
+});
+
+test('semgrep: an ERROR-severity finding fails the gate', async () => {
+  const output = JSON.stringify({
+    results: [
+      {
+        check_id: 'owasp.sql-injection',
+        path: 'src/api/users.ts',
+        start: { line: 42 },
+        extra: { severity: 'ERROR', message: 'Possible SQL injection' },
+      },
+    ],
+  });
+  const result = await runRing2SemgrepCheck(
+    'C:/demo',
+    async () => ({ ok: false, exitCode: 1, stdout: output, stderr: '', timedOut: false }),
+    () => {}
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.detail, /ERROR finding/);
+  assert.match(result.detail, /owasp\.sql-injection/);
+});
+
+test('semgrep: not installed skips (never a false fail)', async () => {
+  const result = await runRing2SemgrepCheck(
+    'C:/demo',
+    async () => ({ ok: false, exitCode: 127, stdout: '', stderr: "'semgrep' is not recognized", timedOut: false }),
+    () => {}
+  );
+  assert.equal(result.skipped, true);
+  assert.equal(result.passed, false);
+});
+
+// ---------------------------------------------------------------------------
+// OWASP ZAP DAST (Ring 3d)
+// ---------------------------------------------------------------------------
+
+test('OWASP ZAP: not installed skips before any dev server is spawned (never a false fail)', async () => {
+  const result = await runRing3ZapCheck(
+    'C:/demo',
+    async () => ({ ok: false, exitCode: 127, stdout: '', stderr: "'zap-baseline.py' is not recognized", timedOut: false }),
+    () => {}
+  );
+  assert.equal(result.name, 'owasp_zap');
+  assert.equal(result.skipped, true);
+  assert.equal(result.passed, false);
+});
+
+// ---------------------------------------------------------------------------
+// Schemathesis API contract testing (Ring 3e)
+// ---------------------------------------------------------------------------
+
+test('Schemathesis: not installed skips before any dev server is spawned (never a false fail)', async () => {
+  const result = await runRing3SchemathesisCheck(
+    'C:/demo',
+    async () => ({ ok: false, exitCode: 127, stdout: '', stderr: "'schemathesis' is not recognized", timedOut: false }),
+    () => {}
+  );
+  assert.equal(result.name, 'schemathesis');
+  assert.equal(result.skipped, true);
+  assert.equal(result.passed, false);
+});
+
+test('parseJUnitTotals: sums tests/failures/errors across every <testsuite> tag', () => {
+  const xml = [
+    '<testsuites>',
+    '<testsuite name="a" tests="5" failures="1" errors="0">',
+    '<testcase name="check_status" />',
+    '</testsuite>',
+    '<testsuite name="b" tests="3" failures="0" errors="2">',
+    '<testcase name="check_content_type" />',
+    '</testsuite>',
+    '</testsuites>',
+  ].join('\n');
+  const totals = parseJUnitTotals(xml);
+  assert.deepEqual(totals, { tests: 8, failures: 1, errors: 2 });
+});
+
+test('parseJUnitTotals: unparseable/empty input yields all-zero totals, never throws', () => {
+  assert.deepEqual(parseJUnitTotals(''), { tests: 0, failures: 0, errors: 0 });
+  assert.deepEqual(parseJUnitTotals('not xml at all'), { tests: 0, failures: 0, errors: 0 });
 });

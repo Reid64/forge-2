@@ -1,9 +1,57 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Deferred Concurrent Execution (parallel-scheduler.ts wired into phase3-executor.ts) — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE + Deferred Concurrent Execution: COMPLETE
+## Current Session: Security/Quality Gate Expansion (Semgrep SAST + OWASP ZAP DAST + Schemathesis API contract testing) — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE + Deferred Concurrent Execution: COMPLETE + Design Intelligence: COMPLETE + Security/Quality Gate Expansion: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Deferred Concurrent Execution: prior session's attempt at this exact prompt left `src/phases/phase3-executor.ts` calling an undefined `runPromptsConcurrently` — a real `tsc` compile error, not just an undocumented gap; `src/engine/parallel-scheduler.ts`'s `executeSchedule` was already complete and needed no changes. This session wrote `runPromptsConcurrently` for real (the `maxConcurrency > 1` counterpart to the sequential prompt loop — fans each dependency-satisfied wave out onto its own linked git worktree via `executeSchedule`, running each entry through the unmodified `executePrompt`) and added a `tagDelegate` option to `src/engine/git-manager.ts` (checkpoint-tag counterpart to the pre-existing `mergeDelegate` — without it a linked worktree's own `tagCheckpoint` would silently tag its own stale HEAD instead of the primary's post-merge commit). `npx tsc --noEmit` — 0 errors; `pnpm run build` — exit 0; `pnpm test` — 35/35 pass. A live smoke test of the new git-manager.ts mechanics surfaced a real, pre-existing environment hazard — this machine's PowerShell profile force-`Set-Location`s into a real project (`Tarritrix-Audit`) on every new `powershell.exe` process, silently redirecting every `GitManager` git command regardless of intended `cwd` — which briefly (and unintentionally) touched that live project's real, actively-running-build checkout; caught via `git reflog` and fully reverted within the same session. See "Deferred Concurrent Execution" section below for full detail.)
+## Last Updated: 2026-08-15 (Security/Quality Gate Expansion: extended Sentinel's Ring 2/Ring 3 tool gates — the existing Trivy/Gitleaks/Lighthouse pattern (fast-path installed-check, boot dev server if needed, run tool, parse report, tear down, skip-never-false-fail) — with an OWASP-focused Semgrep ruleset upgrade (`--config=p/owasp-top-ten` added alongside `auto`) and two brand-new Ring 3 checks: OWASP ZAP DAST (`runRing3ZapCheck`, port 3098, `zap-baseline.py` baseline scan, 0 High-risk-alert threshold) and Schemathesis API contract testing (`runRing3SchemathesisCheck`, port 3097, discovers the app's OpenAPI schema at 6 well-known paths, `schemathesis run --checks all`, 0 failing/erroring JUnit test-case threshold). Added matching TestOrchestrator runners (`semgrep-runner.ts`/`zap-runner.ts`/`schemathesis-runner.ts`, all DRY reuse of the Sentinel check functions) and `RunnerType`/`TEST_SUITE_DB` entries (mapped to the existing `STATIC_ANALYSIS`/`DYNAMIC_ANALYSIS`/`API` categories — no new DB enum values, no migration). `pnpm run build` — 0 errors; `node --import tsx --test tests/sentinel.test.ts` — 30/34 pass (4 pre-existing failures confirmed via `git stash` to predate this session, unrelated to these changes — every test this session added passes). Neither new check is wired to fire automatically in a real Phase 3 build yet — like Trivy/Gitleaks/Lighthouse before them, `phase3-executor.ts` never sets `ring2`/`ring3` on `SentinelOptions`; all six tools currently only run via the standalone `forge sentinel --ring 2|3` CLI command — a pre-existing gap, not introduced or closed here.)
+
+---
+
+## Security/Quality Gate Expansion (Semgrep SAST + OWASP ZAP DAST + Schemathesis API contract testing) (2026-08-15) — COMPLETE
+
+**Objective:** Add Semgrep SAST, OWASP ZAP DAST, and Schemathesis API contract testing as Sentinel
+gates. Semgrep already existed as a Ring 2 check (`--config=auto`); the gap was an OWASP-specific
+ruleset and the two missing tools entirely. Followed the established Trivy/Gitleaks/Lighthouse Ring
+3 pattern rather than inventing a new gate mechanism (`src/phases/phase4-sentinel.ts` is the single
+source of truth for every Sentinel check; `src/testing/runners/` mirrors each one for
+TestOrchestrator via direct reuse, never re-implementation).
+
+**Files Modified This Session:**
+- `src/phases/phase4-sentinel.ts` — `runRing2SemgrepCheck` now exported and runs
+  `--config=auto --config=p/owasp-top-ten`; two new exported Ring 3 checks, `runRing3ZapCheck`
+  (OWASP ZAP DAST, port 3098) and `runRing3SchemathesisCheck` (Schemathesis API contract testing,
+  port 3097, + exported `parseJUnitTotals` helper); `SentinelCheckName` gained `'owasp_zap'` /
+  `'schemathesis'`; `SentinelOptions.ring3` gained `runZap`/`runSchemathesis` overrides; both wired
+  into the Ring 3 execution block after Lighthouse.
+- `src/testing/types.ts` — `RunnerType` gained `SEMGREP`, `OWASP_ZAP`, `SCHEMATHESIS`.
+- `src/testing/runners/persist.ts` — `TEST_SUITE_DB` maps the three new `RunnerType`s to the
+  existing `STATIC_ANALYSIS`/`DYNAMIC_ANALYSIS`/`API` DB categories.
+- `src/testing/orchestrator.ts` — imports + registers the three new runners in `RUNNERS`.
+- `tests/sentinel.test.ts` — 7 new tests (Semgrep OWASP-config assertion, ERROR-finding fail,
+  not-installed skip; ZAP not-installed skip; Schemathesis not-installed skip; `parseJUnitTotals`
+  aggregation + garbage-input safety).
+
+**Files Created This Session:**
+- `src/testing/runners/semgrep-runner.ts`, `zap-runner.ts`, `schemathesis-runner.ts` — each ~20
+  lines, reuse the Sentinel check function directly (same shape as `trivy-runner.ts`).
+
+**IDE STATUS:** No IDE diagnostics run this session (headless). `pnpm run build` (tsc) is the
+source of truth for compile correctness — confirmed 0 errors twice (once immediately after the
+`phase4-sentinel.ts` edits, once after the test-file edits).
+
+**Verification:** `pnpm run build` — 0 errors. `node --import tsx --test tests/sentinel.test.ts` —
+34 tests, 30 pass / 4 fail. The 4 failures (`runSentinel: all five checks pass...`,
+`tsc failure fails the gate...`, `build failure is reported...`, `a timed-out command fails...`)
+were confirmed pre-existing via `git stash` (23 pass / 4 fail on unmodified `main`) — they assert a
+stale `checks.length === 5` from before ESLint/file-delta checks were added to the mandatory Ring 1
+set, unrelated to this session's changes. Zero regressions; all 7 tests added this session pass.
+
+**Known gap (not this session's to close):** `phase3-executor.ts` never sets `ring2`/`ring3` on the
+`SentinelOptions` it builds for a real Phase 3 build — Trivy/Gitleaks/Lighthouse have had this same
+gap since they shipped. All six Ring 2/Ring 3 tools (now including Semgrep-OWASP/ZAP/Schemathesis)
+currently only execute via the standalone `forge sentinel <path> --ring 2` / `--ring 3` CLI command,
+never automatically mid-build. Wiring an automatic trigger (e.g. Ring 3 on the final prompt of a
+run) is future work.
 
 ---
 

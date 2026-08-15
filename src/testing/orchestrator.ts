@@ -30,6 +30,9 @@ import { run as runAccessibility } from './runners/accessibility-runner.js';
 import { run as runVisualRegression } from './runners/visual-regression-runner.js';
 import { run as runSeo } from './runners/seo-runner.js';
 import { run as runMigrationSafety } from './runners/migration-safety-runner.js';
+import { run as runSemgrep } from './runners/semgrep-runner.js';
+import { run as runZap } from './runners/zap-runner.js';
+import { run as runSchemathesis } from './runners/schemathesis-runner.js';
 
 type RunnerFn = (input: RunnerInput) => Promise<RunnerOutcome>;
 
@@ -48,6 +51,9 @@ const RUNNERS: Record<RunnerType, RunnerFn> = {
   [RunnerType.VISUAL_REGRESSION]: runVisualRegression,
   [RunnerType.SEO]: runSeo,
   [RunnerType.MIGRATION_SAFETY]: runMigrationSafety,
+  [RunnerType.SEMGREP]: runSemgrep,
+  [RunnerType.OWASP_ZAP]: runZap,
+  [RunnerType.SCHEMATHESIS]: runSchemathesis,
 };
 
 /** TriggerType -> test_run_results.trigger. The schema has no POST_DEPLOY value (F9/DeployVerifier

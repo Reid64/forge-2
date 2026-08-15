@@ -168,7 +168,9 @@ export type SentinelCheckName =
   | 'knip'
   | 'trivy'
   | 'gitleaks'
-  | 'lighthouse';
+  | 'lighthouse'
+  | 'owasp_zap'
+  | 'schemathesis';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
@@ -601,7 +603,8 @@ export interface SentinelOptions {
    * Tools:
    *  - **Vitest** (`npx vitest run --reporter=json`): 0 failures AND ≥60% line coverage. Skips
    *    gracefully when `vitest.config.ts` is absent.
-   *  - **Semgrep** (`npx semgrep --config=auto --json`): 0 severity ERROR findings. Skips when
+   *  - **Semgrep SAST** (`npx semgrep --config=auto --config=p/owasp-top-ten --json`): the default
+   *    `auto` ruleset plus the OWASP Top Ten ruleset. 0 severity ERROR findings. Skips when
    *    semgrep is not installed.
    *  - **knip** (`npx knip --reporter json`): 0 unused exports. Skips when knip is not installed.
    *
@@ -623,7 +626,7 @@ export interface SentinelOptions {
   };
   /**
    * Ring 3 gate (final-prompt of a run OR explicit `forge sentinel --ring 3`). When supplied,
-   * Sentinel runs three additional tools after Ring 1/2 have passed:
+   * Sentinel runs five additional tools after Ring 1/2 have passed:
    *
    *  - **Trivy** (`trivy fs --severity CRITICAL,HIGH --format json --quiet .`): 0 CRITICAL + 0
    *    HIGH CVEs. Skips when trivy binary is not in PATH.
@@ -632,8 +635,18 @@ export interface SentinelOptions {
    *  - **Lighthouse** (starts dev server on port 3099, runs lighthouse, stops server): all four
    *    categories (performance / accessibility / best-practices / SEO) must score ≥ 90. Skips
    *    when lighthouse is not installed or the dev server does not start.
+   *  - **OWASP ZAP DAST** (starts dev server on port 3098, runs `zap-baseline.py -t <url> -J
+   *    .forge/zap-report.json -m 5`, stops server): 0 High-risk alerts (`riskcode=3`). Medium/Low/
+   *    Informational alerts are surfaced but pass. Skips when `zap-baseline.py` is not on PATH or
+   *    the dev server does not start.
+   *  - **Schemathesis API contract testing** (starts dev server on port 3097, probes common
+   *    well-known paths for an OpenAPI/Swagger schema, runs `schemathesis run <schema> --checks all
+   *    --junit-xml=.forge/schemathesis-report.xml`, stops server): 0 failing/erroring test cases in
+   *    the JUnit report. Skips when `schemathesis` is not on PATH, the dev server does not start, or
+   *    no OpenAPI/Swagger schema is discoverable (not an API project, or the schema isn't exposed).
    *
-   * All three tools degrade gracefully (SKIP, never FAIL) when the binary is unavailable.
+   * All five tools degrade gracefully (SKIP, never FAIL) when the binary is unavailable or their
+   * precondition (a booted dev server, a discoverable schema) cannot be met.
    */
   ring3?: {
     /** Set to true on the last prompt of a run so Ring 3 fires automatically. */
@@ -646,6 +659,10 @@ export interface SentinelOptions {
     runGitleaks?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
     /** Override Lighthouse runner (tests). */
     runLighthouse?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Override OWASP ZAP DAST runner (tests). */
+    runZap?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
+    /** Override Schemathesis API-contract runner (tests). */
+    runSchemathesis?: (projectPath: string, run: CommandRunner, log: (m: string) => void) => Promise<CheckResult>;
   };
   /**
    * Post-PASS Enterprise Test Suite hook (TESTING_BLUEPRINT.md § TestOrchestrator, § Sentinel
@@ -1983,18 +2000,21 @@ interface SemgrepJsonOutput {
 }
 
 /**
- * Ring 2b: Semgrep check.
- * Runs `npx semgrep --config=auto --json`. Skips when semgrep is not installed.
+ * Ring 2b: Semgrep SAST check.
+ * Runs `npx semgrep --config=auto --config=p/owasp-top-ten --json` — the default `auto` ruleset
+ * plus the OWASP Top Ten ruleset, so injection, broken auth, XSS, SSRF, and the rest of the OWASP
+ * Top Ten class of findings are covered explicitly, not just whatever `auto` happens to select.
+ * Skips when semgrep is not installed.
  * Threshold: 0 `severity=ERROR` findings. WARNING findings are surfaced but pass.
  * Registers ERROR findings to the learning DB.
  */
-async function runRing2SemgrepCheck(
+export async function runRing2SemgrepCheck(
   projectPath: string,
   run: CommandRunner,
   log: (m: string) => void
 ): Promise<CheckResult> {
   const startedAt = nowMs();
-  const res = await run('npx semgrep --config=auto --json', projectPath, 5 * 60 * 1000);
+  const res = await run('npx semgrep --config=auto --config=p/owasp-top-ten --json', projectPath, 5 * 60 * 1000);
   const durationMs = nowMs() - startedAt;
   const combined = [res.stdout, res.stderr].filter((s) => s.trim() !== '').join('\n');
   logFullOutputIfTruncated(log, 'semgrep', combined);
@@ -2568,6 +2588,366 @@ export async function runRing3LighthouseCheck(
     summary,
     durationMs
   );
+}
+
+/** Port used by the dev server spawned for Ring 3 OWASP ZAP DAST scan. */
+const ZAP_DEV_PORT = 3098;
+/** ZAP alert `riskcode`: '3' = High, '2' = Medium, '1' = Low, '0' = Informational. High blocks. */
+const ZAP_HIGH_RISK_CODE = '3';
+const ZAP_MEDIUM_RISK_CODE = '2';
+
+/** One alert from a `zap-baseline.py -J` report. */
+interface ZapAlert {
+  pluginid?: string;
+  alert?: string;
+  name?: string;
+  riskcode?: string;
+  riskdesc?: string;
+  confidence?: string;
+  desc?: string;
+  instances?: Array<{ uri?: string; method?: string }>;
+}
+interface ZapSite {
+  '@name'?: string;
+  alerts?: ZapAlert[];
+}
+/** Shape of a `zap-baseline.py -J <path>` JSON report. */
+interface ZapBaselineReport {
+  site?: ZapSite[];
+}
+
+/**
+ * Ring 3d: OWASP ZAP DAST (dynamic application security testing) baseline scan.
+ * Starts a dev server on port {@link ZAP_DEV_PORT}, runs `zap-baseline.py` against it, stops the
+ * dev server. Skips gracefully when `zap-baseline.py` is not installed or the dev server does not
+ * start. Threshold: 0 High-risk alerts (`riskcode=3`); Medium/Low/Informational are surfaced but
+ * pass — matching the OWASP ZAP baseline scan's own severity model.
+ */
+export async function runRing3ZapCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const reportPath = join(projectPath, '.forge', 'zap-report.json');
+  const devUrl = `http://localhost:${ZAP_DEV_PORT}`;
+
+  // Fast-path: check if zap-baseline.py is installed before spinning up a dev server.
+  const versionRes = await run('zap-baseline.py -h', projectPath, 15_000);
+  const versionOut = [versionRes.stdout, versionRes.stderr].filter((s) => s.trim() !== '').join('\n');
+  if (
+    /command not found|is not recognized|no such file|ENOENT|not installed/i.test(versionOut) ||
+    (!versionRes.ok && !versionOut.trim())
+  ) {
+    return skip('owasp_zap', 'zap-baseline.py not installed or not in PATH — Ring 3 OWASP ZAP check skipped');
+  }
+
+  // Spawn the dev server.
+  log(`Ring 3d: starting dev server on port ${ZAP_DEV_PORT} for OWASP ZAP DAST scan`);
+  let devServer: ChildProcess | null = null;
+  try {
+    devServer = spawn('pnpm', ['dev', '--port', String(ZAP_DEV_PORT)], {
+      cwd: projectPath,
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: process.platform === 'win32',
+    });
+  } catch (err) {
+    log(`WARNING: Ring 3 OWASP ZAP — could not spawn dev server (${err instanceof Error ? err.message : String(err)})`);
+    return skip('owasp_zap', 'dev server could not be spawned — OWASP ZAP check skipped');
+  }
+
+  // Wait for the dev server to accept connections (up to 30 s).
+  const ready = await waitForDevServer(devUrl, 30_000, log);
+  if (!ready) {
+    killChildProcess(devServer, log);
+    return skip(
+      'owasp_zap',
+      `dev server on port ${ZAP_DEV_PORT} did not become ready within 30s — OWASP ZAP check skipped`
+    );
+  }
+
+  // Run the ZAP baseline scan against the live server. `-m 5` caps the passive-scan spider at 5
+  // minutes so a stuck/slow app can't hang the gate; `-J` always writes the report file regardless
+  // of the scan's own exit code (0 = no alerts above threshold, 1 = warn, 2 = fail, 3 = error).
+  log(`Ring 3d: running OWASP ZAP baseline scan against ${devUrl}`);
+  const zapRes = await run(
+    `zap-baseline.py -t ${devUrl} -J .forge/zap-report.json -m 5`,
+    projectPath,
+    8 * 60 * 1000
+  );
+  const zapCombined = [zapRes.stdout, zapRes.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'owasp_zap', zapCombined);
+
+  // Always stop the dev server.
+  killChildProcess(devServer, log);
+
+  const durationMs = nowMs() - startedAt;
+
+  if (zapRes.timedOut) {
+    return fail('owasp_zap', 'OWASP ZAP baseline scan TIMED OUT after 480s', zapCombined, durationMs);
+  }
+
+  // Read and parse the report file — it is written even when the scan's own exit code is non-zero.
+  const reportContent = await readTextSafe(reportPath);
+  if (!reportContent) {
+    if (!zapRes.ok) {
+      return fail(
+        'owasp_zap',
+        `OWASP ZAP exited ${zapRes.exitCode ?? 'null'}: ${firstLine(zapCombined)}`,
+        clip(zapCombined),
+        durationMs
+      );
+    }
+    return skip('owasp_zap', 'OWASP ZAP report not found at .forge/zap-report.json — not evaluated');
+  }
+
+  let report: ZapBaselineReport | null = null;
+  try {
+    report = JSON.parse(reportContent) as ZapBaselineReport;
+  } catch {
+    return fail('owasp_zap', 'OWASP ZAP report JSON could not be parsed', clip(reportContent), durationMs);
+  }
+
+  const alerts = (report?.site ?? []).flatMap((s) => s.alerts ?? []);
+  const highRisk = alerts.filter((a) => a.riskcode === ZAP_HIGH_RISK_CODE);
+  const mediumRisk = alerts.filter((a) => a.riskcode === ZAP_MEDIUM_RISK_CODE);
+
+  const summary =
+    `OWASP ZAP baseline scan of ${devUrl}: ${alerts.length} alert(s) — ${highRisk.length} High, ${mediumRisk.length} Medium.\n` +
+    alerts
+      .slice(0, 30)
+      .map(
+        (a) =>
+          `[${a.riskdesc ?? a.riskcode ?? '?'}] ${a.alert ?? a.name ?? '?'} (${(a.instances ?? []).length} instance(s))`
+      )
+      .join('\n');
+
+  if (highRisk.length > 0) {
+    const worst = highRisk.slice(0, 8).map((a) => a.alert ?? a.name ?? '?').join('; ');
+    tryRegisterRing1Error(
+      {
+        file: projectPath,
+        code: 'ZAP_HIGH_RISK_ALERT',
+        message: `${highRisk.length} High-risk OWASP ZAP alert(s): ${worst}`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail(
+      'owasp_zap',
+      `OWASP ZAP: ${highRisk.length} High-risk alert(s) — build blocked: ${worst}`,
+      summary,
+      durationMs
+    );
+  }
+
+  const note = mediumRisk.length > 0 ? ` (${mediumRisk.length} Medium-risk alert(s) surfaced — non-blocking)` : '';
+  return pass('owasp_zap', `OWASP ZAP: 0 High-risk alerts${note}`, summary, durationMs);
+}
+
+/** Port used by the dev server spawned for Ring 3 Schemathesis API contract scan. */
+const SCHEMATHESIS_DEV_PORT = 3097;
+/** Well-known paths probed to discover a booted app's OpenAPI/Swagger schema. */
+const OPENAPI_SCHEMA_CANDIDATE_PATHS = [
+  '/api/openapi.json',
+  '/api/swagger.json',
+  '/openapi.json',
+  '/swagger.json',
+  '/api-docs/openapi.json',
+  '/api/docs/openapi.json',
+];
+
+/**
+ * Probe a booted dev server for an OpenAPI/Swagger schema at common well-known paths. Returns the
+ * first URL that responds HTTP 200 with a JSON body, or `null` when none do (never throws).
+ */
+async function discoverOpenApiSchemaUrl(baseUrl: string, log: (m: string) => void): Promise<string | null> {
+  for (const p of OPENAPI_SCHEMA_CANDIDATE_PATHS) {
+    const url = `${baseUrl}${p}`;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (resp.status === 200) {
+        const contentType = resp.headers.get('content-type') ?? '';
+        if (/json|yaml/i.test(contentType) || p.endsWith('.json')) return url;
+      }
+    } catch {
+      // Not found / server not ready for this candidate path — try the next one.
+    }
+  }
+  log('Ring 3e: no OpenAPI/Swagger schema found at common well-known paths');
+  return null;
+}
+
+/** Aggregate test/failure/error counts parsed from a JUnit XML report. */
+interface JUnitTotals {
+  tests: number;
+  failures: number;
+  errors: number;
+}
+
+/**
+ * Extract aggregate `tests`/`failures`/`errors` totals from a JUnit XML report by summing every
+ * `<testsuite>` tag's attributes. There is no XML parser dependency in this codebase (every other
+ * check here reads its report as JSON or a flat report file — see Gitleaks/Lighthouse) so this is a
+ * light, order-independent attribute regex scan rather than a full XML parse. Returns all-zero
+ * totals for unparseable/empty input — never throws.
+ */
+export function parseJUnitTotals(xml: string): JUnitTotals {
+  const totals: JUnitTotals = { tests: 0, failures: 0, errors: 0 };
+  const tagRe = /<testsuite\b[^>]*>/g;
+  let tagMatch: RegExpExecArray | null;
+  let matchedAny = false;
+  while ((tagMatch = tagRe.exec(xml)) !== null) {
+    matchedAny = true;
+    const tag = tagMatch[0];
+    totals.tests += parseInt(/\btests="(\d+)"/.exec(tag)?.[1] ?? '0', 10);
+    totals.failures += parseInt(/\bfailures="(\d+)"/.exec(tag)?.[1] ?? '0', 10);
+    totals.errors += parseInt(/\berrors="(\d+)"/.exec(tag)?.[1] ?? '0', 10);
+  }
+  if (!matchedAny) return totals;
+  return totals;
+}
+
+/** Extract up to `limit` failing/erroring `<testcase>` names + messages from a JUnit XML report. */
+function extractJUnitFailures(xml: string, limit = 20): string[] {
+  const out: string[] = [];
+  const re = /<testcase\b[^>]*\bname="([^"]*)"[^>]*>[\s\S]*?<(?:failure|error)\b[^>]*?(?:\bmessage="([^"]*)")?[^>]*\/?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null && out.length < limit) {
+    const name = m[1] ?? '?';
+    const message = m[2] ?? '';
+    out.push(message ? `${name}: ${message}` : name);
+  }
+  return out;
+}
+
+/**
+ * Ring 3e: Schemathesis API contract testing.
+ * Starts a dev server on port {@link SCHEMATHESIS_DEV_PORT}, discovers the app's OpenAPI/Swagger
+ * schema at common well-known paths, runs `schemathesis run <schema> --checks all` against it, stops
+ * the dev server. Skips gracefully when `schemathesis` is not installed, the dev server does not
+ * start, or no schema is discoverable (not an API project, or the schema isn't exposed). Threshold:
+ * 0 failing/erroring test cases in the JUnit report.
+ */
+export async function runRing3SchemathesisCheck(
+  projectPath: string,
+  run: CommandRunner,
+  log: (m: string) => void
+): Promise<CheckResult> {
+  const startedAt = nowMs();
+  const reportPath = join(projectPath, '.forge', 'schemathesis-report.xml');
+  const devUrl = `http://localhost:${SCHEMATHESIS_DEV_PORT}`;
+
+  // Fast-path: check if schemathesis is installed before spinning up a dev server.
+  const versionRes = await run('schemathesis --version', projectPath, 10_000);
+  const versionOut = [versionRes.stdout, versionRes.stderr].filter((s) => s.trim() !== '').join('\n');
+  if (
+    /command not found|is not recognized|no such file|ENOENT|not installed/i.test(versionOut) ||
+    (!versionRes.ok && !versionOut.trim())
+  ) {
+    return skip('schemathesis', 'schemathesis not installed or not in PATH — Ring 3 Schemathesis check skipped');
+  }
+
+  // Spawn the dev server.
+  log(`Ring 3e: starting dev server on port ${SCHEMATHESIS_DEV_PORT} for Schemathesis API contract scan`);
+  let devServer: ChildProcess | null = null;
+  try {
+    devServer = spawn('pnpm', ['dev', '--port', String(SCHEMATHESIS_DEV_PORT)], {
+      cwd: projectPath,
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: process.platform === 'win32',
+    });
+  } catch (err) {
+    log(`WARNING: Ring 3 Schemathesis — could not spawn dev server (${err instanceof Error ? err.message : String(err)})`);
+    return skip('schemathesis', 'dev server could not be spawned — Schemathesis check skipped');
+  }
+
+  // Wait for the dev server to accept connections (up to 30 s).
+  const ready = await waitForDevServer(devUrl, 30_000, log);
+  if (!ready) {
+    killChildProcess(devServer, log);
+    return skip(
+      'schemathesis',
+      `dev server on port ${SCHEMATHESIS_DEV_PORT} did not become ready within 30s — Schemathesis check skipped`
+    );
+  }
+
+  // Discover the OpenAPI/Swagger schema. No schema exposed → this isn't an API project (or the
+  // schema isn't exposed yet) — skip, never a false failure.
+  const schemaUrl = await discoverOpenApiSchemaUrl(devUrl, log);
+  if (!schemaUrl) {
+    killChildProcess(devServer, log);
+    return skip(
+      'schemathesis',
+      'no OpenAPI/Swagger schema found at common well-known paths — Schemathesis check skipped'
+    );
+  }
+
+  log(`Ring 3e: running Schemathesis contract tests against ${schemaUrl}`);
+  const stRes = await run(
+    `schemathesis run ${schemaUrl} --checks all --junit-xml=.forge/schemathesis-report.xml`,
+    projectPath,
+    5 * 60 * 1000
+  );
+  const stCombined = [stRes.stdout, stRes.stderr].filter((s) => s.trim() !== '').join('\n');
+  logFullOutputIfTruncated(log, 'schemathesis', stCombined);
+
+  // Always stop the dev server.
+  killChildProcess(devServer, log);
+
+  const durationMs = nowMs() - startedAt;
+
+  if (stRes.timedOut) {
+    return fail('schemathesis', 'Schemathesis TIMED OUT after 300s', stCombined, durationMs);
+  }
+
+  const reportContent = await readTextSafe(reportPath);
+  if (!reportContent) {
+    if (!stRes.ok) {
+      return fail(
+        'schemathesis',
+        `Schemathesis exited ${stRes.exitCode ?? 'null'}: ${firstLine(stCombined)}`,
+        clip(stCombined),
+        durationMs
+      );
+    }
+    return skip('schemathesis', 'Schemathesis report not found at .forge/schemathesis-report.xml — not evaluated');
+  }
+
+  const totals = parseJUnitTotals(reportContent);
+  const failing = totals.failures + totals.errors;
+
+  const summary =
+    `Schemathesis tested ${schemaUrl}: ${totals.tests} test case(s), ${totals.failures} failure(s), ${totals.errors} error(s).\n` +
+    extractJUnitFailures(reportContent).join('\n');
+
+  if (failing > 0) {
+    const firstFailures = extractJUnitFailures(reportContent, 5).join('; ');
+    tryRegisterRing1Error(
+      {
+        file: schemaUrl,
+        code: 'SCHEMATHESIS_CONTRACT_VIOLATION',
+        message: `${failing} API contract violation(s) found by Schemathesis: ${firstFailures}`,
+        category: 'COMPILE',
+      },
+      log
+    );
+    return fail(
+      'schemathesis',
+      `Schemathesis: ${failing} API contract violation(s) — build blocked: ${firstFailures}`,
+      summary,
+      durationMs
+    );
+  }
+
+  return pass('schemathesis', `Schemathesis: ${totals.tests} test case(s), 0 contract violations`, summary, durationMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -4285,6 +4665,38 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
       }
       record(lighthouseResult);
     }
+
+    // Ring 3d: OWASP ZAP DAST (dynamic scan — 0 High-risk alerts threshold)
+    if (shouldSkipRest()) {
+      record(skipRest('owasp_zap'));
+    } else {
+      log('Ring 3d: OWASP ZAP baseline DAST scan (0 High-risk alert threshold)');
+      const zapFn = options.ring3.runZap ?? runRing3ZapCheck;
+      let zapResult: CheckResult;
+      try {
+        zapResult = await zapFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 3 OWASP ZAP check threw (${describe(err)})`);
+        zapResult = skip('owasp_zap', 'Ring 3 OWASP ZAP runner threw — not evaluated');
+      }
+      record(zapResult);
+    }
+
+    // Ring 3e: Schemathesis API contract testing (0 failing/erroring test cases threshold)
+    if (shouldSkipRest()) {
+      record(skipRest('schemathesis'));
+    } else {
+      log('Ring 3e: Schemathesis API contract testing (0 contract-violation threshold)');
+      const schemathesisFn = options.ring3.runSchemathesis ?? runRing3SchemathesisCheck;
+      let schemathesisResult: CheckResult;
+      try {
+        schemathesisResult = await schemathesisFn(projectPath, run, log);
+      } catch (err) {
+        log(`WARNING: Ring 3 Schemathesis check threw (${describe(err)})`);
+        schemathesisResult = skip('schemathesis', 'Ring 3 Schemathesis runner threw — not evaluated');
+      }
+      record(schemathesisResult);
+    }
   }
 
   const failedCheck = checks.find((c) => !c.passed && !c.skipped)?.name ?? null;
@@ -4715,8 +5127,9 @@ function describe(error: unknown): string {
 /**
  * Run a specific Sentinel ring (1, 2, or 3) as a standalone operation.
  * Ring 1 = mandatory checks (tsc, eslint, build, file-integrity, schema-drift, deps).
- * Ring 2 = every-10th-prompt checks (Vitest, Semgrep, knip) — fires unconditionally here.
- * Ring 3 = end-of-run checks (Trivy, Gitleaks, Lighthouse) — fires unconditionally here.
+ * Ring 2 = every-10th-prompt checks (Vitest, Semgrep SAST, knip) — fires unconditionally here.
+ * Ring 3 = end-of-run checks (Trivy, Gitleaks, Lighthouse, OWASP ZAP DAST, Schemathesis API
+ * contract testing) — fires unconditionally here.
  * Returns the aggregate pass/fail and the per-check results.
  */
 export async function runSentinelRing(

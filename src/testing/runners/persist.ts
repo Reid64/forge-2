@@ -26,9 +26,11 @@ const MAX_FAILURE_SUMMARY = 20;
 /** RunnerType (src/testing/types.ts) -> test_run_results.test_suite (the DB's CHECK-constrained
  *  19-value enum). Several RunnerTypes share one TestSuiteDb value on purpose — e.g. both
  *  DEPENDENCY (pnpm audit) and TRIVY write DEPENDENCY_SCAN — the enum is a coarser category than
- *  the concrete tool, distinguished by `runner` (SCHEMA_ADDITIONS §5), not `test_suite`. The five
- *  newest entries (SECRET_SCAN, LIGHTHOUSE, SEO, MIGRATION_SAFETY have no exact TestSuiteDb match)
- *  map to the closest existing category per upgrades/SYSTEMS-5-9-GAP-MATRIX.md §3 — no new enum
+ *  the concrete tool, distinguished by `runner` (SCHEMA_ADDITIONS §5), not `test_suite`. Entries
+ *  with no exact TestSuiteDb match (SECRET_SCAN, LIGHTHOUSE, SEO, MIGRATION_SAFETY, SEMGREP,
+ *  OWASP_ZAP, SCHEMATHESIS) map to the closest existing category — SEMGREP (SAST) and
+ *  MIGRATION_SAFETY share STATIC_ANALYSIS, OWASP_ZAP (DAST) shares DYNAMIC_ANALYSIS with SEO, and
+ *  SCHEMATHESIS (API contract testing) shares API with the hand-written API runner — no new enum
  *  values were added, only the existing 19-value CHECK constraint is used. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
@@ -45,6 +47,9 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.VISUAL_REGRESSION]: 'VISUAL_REGRESSION',
   [RunnerType.SEO]: 'DYNAMIC_ANALYSIS',
   [RunnerType.MIGRATION_SAFETY]: 'STATIC_ANALYSIS',
+  [RunnerType.SEMGREP]: 'STATIC_ANALYSIS',
+  [RunnerType.OWASP_ZAP]: 'DYNAMIC_ANALYSIS',
+  [RunnerType.SCHEMATHESIS]: 'API',
 };
 
 const ANSI_RESET = '\x1b[0m';

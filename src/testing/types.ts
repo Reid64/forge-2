@@ -23,6 +23,9 @@ export enum RunnerType {
   VISUAL_REGRESSION = 'VISUAL_REGRESSION',
   SEO = 'SEO',
   MIGRATION_SAFETY = 'MIGRATION_SAFETY',
+  SEMGREP = 'SEMGREP',
+  OWASP_ZAP = 'OWASP_ZAP',
+  SCHEMATHESIS = 'SCHEMATHESIS',
 }
 
 export interface TestRunResult {
