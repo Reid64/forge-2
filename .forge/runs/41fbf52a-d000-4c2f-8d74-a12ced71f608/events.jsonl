@@ -72,3 +72,14 @@
 {"ts":"2026-08-15T19:38:14.660Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
 {"ts":"2026-08-15T19:38:14.661Z","level":"FAIL","message":"FAILED at 2026-08-15 14:38:14 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
 {"ts":"2026-08-15T19:38:14.796Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T19:42:39.832Z","level":"PASS","message":"PASSED at 2026-08-15 14:42:39"}
+{"ts":"2026-08-15T19:42:39.833Z","level":"PASS","message":"PROMPT scratch-promote-gate-and-locks : ALL GATES PASSED"}
+{"ts":"2026-08-15T19:42:39.834Z","level":"INFO","message":"Prompt 2/2 'promote_scratch gate type and concurrent-session lock mechanism' â€” PASS (0e14e51) â€” 20m32s"}
+{"ts":"2026-08-15T19:42:40.703Z","level":"INFO","message":""}
+{"ts":"2026-08-15T19:42:40.704Z","level":"INFO","message":"========================================"}
+{"ts":"2026-08-15T19:42:40.704Z","level":"INFO","message":"  FORGE Pipeline Complete"}
+{"ts":"2026-08-15T19:42:40.704Z","level":"PASS","message":"  Passed: 2"}
+{"ts":"2026-08-15T19:42:40.705Z","level":"INFO","message":"  Failed: 0"}
+{"ts":"2026-08-15T19:42:40.705Z","level":"INFO","message":"  Halted: false"}
+{"ts":"2026-08-15T19:42:40.705Z","level":"INFO","message":"========================================"}
+{"ts":"2026-08-15T19:42:40.706Z","level":"PASS","message":"Phase 3 COMPLETED â€” 2/2 completed, 0 failed, 0 skipped; ~3721 tokens."}

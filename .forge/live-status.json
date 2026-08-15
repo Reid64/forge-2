@@ -2,21 +2,21 @@
   "buildRunId": "41fbf52a-d000-4c2f-8d74-a12ced71f608",
   "project": "forge-2",
   "startedAt": "2026-08-15T18:43:56.858Z",
-  "updatedAt": "2026-08-15T19:38:14.797Z",
+  "updatedAt": "2026-08-15T19:42:40.358Z",
   "currentPrompt": {
     "index": 2,
     "id": "scratch-promote-gate-and-locks",
     "name": "promote_scratch gate type and concurrent-session lock mechanism",
     "type": "feature",
-    "phase": "recovering"
+    "phase": "merged"
   },
   "totals": {
-    "completed": 1,
+    "completed": 2,
     "failed": 0,
-    "remaining": 1,
-    "tokensEstimated": 1946,
-    "costEstimatedUsd": 0.071568,
-    "totalElapsedMs": 2290103
+    "remaining": 0,
+    "tokensEstimated": 3721,
+    "costEstimatedUsd": 0.146256,
+    "totalElapsedMs": 3522040
   },
   "lastSentinel": {
     "passed": true,
@@ -66,6 +66,18 @@
     {
       "timestamp": "2026-08-15T19:38:14.797Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
+    },
+    {
+      "timestamp": "2026-08-15T19:42:27.185Z",
+      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T19:42:27.189Z",
+      "message": "Sentinel PASS"
+    },
+    {
+      "timestamp": "2026-08-15T19:42:30.210Z",
+      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): merged"
     }
   ],
   "brainInterventions": 0

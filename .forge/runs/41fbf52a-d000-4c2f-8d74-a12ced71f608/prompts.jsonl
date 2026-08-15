@@ -21,3 +21,4 @@
 {"ts":"2026-08-15T19:38:14.658Z","event":"gate","index":2,"id":"scratch-promote-gate-and-locks","checkName":"lint","passed":false,"skipped":true,"detail":"no .eslintrc.* or eslint.config.* found — lint gate skipped"}
 {"ts":"2026-08-15T19:38:14.659Z","event":"gate","index":2,"id":"scratch-promote-gate-and-locks","checkName":"format","passed":false,"skipped":true,"detail":"no .prettierrc.* or prettier.config.* found — format gate skipped"}
 {"ts":"2026-08-15T19:38:14.660Z","event":"gate","index":2,"id":"scratch-promote-gate-and-locks","checkName":"bundle_size","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T19:42:39.834Z","event":"end","index":2,"id":"scratch-promote-gate-and-locks","name":"promote_scratch gate type and concurrent-session lock mechanism","disposition":"completed","durationMs":1231937,"commitHash":"0e14e51d0d6f3e4d0dd42de2aaf491847d3b66c9","failedCheck":null}
