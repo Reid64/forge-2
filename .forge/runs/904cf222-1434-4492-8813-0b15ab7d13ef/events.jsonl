@@ -47,3 +47,27 @@
 {"ts":"2026-08-15T22:41:09.259Z","level":"INFO","message":"STARTED at 2026-08-15 17:41:09"}
 {"ts":"2026-08-15T22:41:24.097Z","level":"INFO","message":"Executing Build Agent..."}
 {"ts":"2026-08-15T22:41:24.098Z","level":"INFO","message":"[timeout 900s]"}
+{"ts":"2026-08-15T22:56:24.273Z","level":"INFO","message":"Claude exit null (TIMEOUT) â€” 900.2s"}
+{"ts":"2026-08-15T22:57:20.200Z","level":"GATE","message":"Sentinel â€” 10 check(s)"}
+{"ts":"2026-08-15T22:57:20.203Z","level":"GATE","message":"Running gate: typescript"}
+{"ts":"2026-08-15T22:57:20.204Z","level":"PASS","message":"Gate TYPESCRIPT: PASS"}
+{"ts":"2026-08-15T22:57:20.206Z","level":"GATE","message":"Running gate: eslint"}
+{"ts":"2026-08-15T22:57:20.207Z","level":"PASS","message":"Gate ESLINT: PASS"}
+{"ts":"2026-08-15T22:57:20.208Z","level":"GATE","message":"Running gate: build"}
+{"ts":"2026-08-15T22:57:20.209Z","level":"PASS","message":"Gate BUILD: PASS"}
+{"ts":"2026-08-15T22:57:20.210Z","level":"GATE","message":"Running gate: file_integrity"}
+{"ts":"2026-08-15T22:57:20.210Z","level":"PASS","message":"Gate FILE_INTEGRITY: PASS"}
+{"ts":"2026-08-15T22:57:20.211Z","level":"GATE","message":"Running gate: file_delta"}
+{"ts":"2026-08-15T22:57:20.212Z","level":"PASS","message":"Gate FILE_DELTA: PASS"}
+{"ts":"2026-08-15T22:57:20.213Z","level":"GATE","message":"Running gate: schema_drift"}
+{"ts":"2026-08-15T22:57:20.213Z","level":"WARN","message":"Gate SCHEMA_DRIFT: SKIP"}
+{"ts":"2026-08-15T22:57:20.215Z","level":"GATE","message":"Running gate: dependencies"}
+{"ts":"2026-08-15T22:57:20.215Z","level":"WARN","message":"Gate DEPENDENCIES: SKIP"}
+{"ts":"2026-08-15T22:57:20.216Z","level":"GATE","message":"Running gate: lint"}
+{"ts":"2026-08-15T22:57:20.217Z","level":"WARN","message":"Gate LINT: SKIP"}
+{"ts":"2026-08-15T22:57:20.219Z","level":"GATE","message":"Running gate: format"}
+{"ts":"2026-08-15T22:57:20.219Z","level":"WARN","message":"Gate FORMAT: SKIP"}
+{"ts":"2026-08-15T22:57:20.221Z","level":"GATE","message":"Running gate: bundle_size"}
+{"ts":"2026-08-15T22:57:20.221Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
+{"ts":"2026-08-15T22:57:20.228Z","level":"FAIL","message":"FAILED at 2026-08-15 17:57:20 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
+{"ts":"2026-08-15T22:57:20.436Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}

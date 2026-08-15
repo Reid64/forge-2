@@ -1701,7 +1701,7 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T22:40:40.221Z
+- **Last changeset date:** 2026-08-15T23:03:23.000Z
 
 ## Files Modified This Session (prompt 8 — stage6-consensus-upgrade: Consensus Engine Upgrade)
 
@@ -1774,4 +1774,42 @@ modules do real filesystem/git I/O (`GitManager.pull`/`push`/`commitPath`, real 
 `scratch-lock.ts`/`scratch-promote.ts` in `tests/` — consistent with the immediately prior commit
 (993aac5, which introduced `path-classifier.ts` and also shipped without tests and passed Sentinel),
 so none were added here either.
+
+## Files Modified This Session (prompt 2 retry — fix-contract10-branch-isolation: Contract 10 Branch Isolation root cause)
+
+An earlier attempt at this same prompt (committed as `191e739`) investigated the
+`no-direct-commits-to-main-during-build` failures and made `src/governance/invariants.ts` report
+richer diagnostics, but concluded the actual mechanism bypassing GitManager was external to `src/`
+and out of scope. That conclusion was wrong — it IS in `src/`, and this retry reproduced it live:
+on entry, `main` was checked out in this repo with zero `forge/904cf222/prompt-2-...` branch in
+`git branch --list --all`, even though `GitManager.createBranch` + its post-checkout verification
+(`phase3-executor.ts` step e) had already run and reported success for this exact prompt.
+
+- `src/engine/git-manager.ts` (modified) — root cause + fix. `GitManager`'s default `execImpl` ran
+  every command via `execSync(command, { shell: 'powershell.exe' })`; Node's `shell` option only
+  accepts a shell *path*, never extra argv, so it always spawns `powershell.exe -c <command>` with
+  no way to pass `-NoProfile`. The user's real `$PROFILE` ends in an unconditional `Set-Location`
+  to a different project, so every GitManager git command (branch create, branch-verify, merge)
+  silently ran against the wrong repository while still reporting `success: true`, leaving this
+  repo's actual checkout on `main` throughout — the real source of the Contract 10
+  telemetry-says-branch-existed / git-says-it-never-did mismatch (matches the standing
+  `forge2-powershell-profile-git-hijack` incident memory, now confirmed as more than a smoke-test
+  hazard). Fix: the default `execImpl` special-cases a `powershell.exe` shell and invokes it via
+  `execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], ...)`,
+  bypassing Node's implicit `-c`-only shell wrapping so the profile never loads and `this.cwd` is
+  always honored. The injectable `execImpl` override (all of `tests/engine.test.ts`'s GitManager
+  suite) is unaffected — it never goes through the default path.
+- `CHANGESET.md`, `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md` (this file) — updated with the
+  corrected root-cause finding, superseding (not deleting) the prior "out of scope" note.
+
+**Verified:** `npx tsc --noEmit` → 0 errors. `pnpm run build` → 0 errors. `node --import tsx --test
+tests/engine.test.ts` → same 18 pass / 9 fail split before and after this change (confirmed via
+`git stash`), i.e. this fix introduces no regressions — the 9 pre-existing failures are unrelated
+(`assemblePrompt`/`selectModel`/`predictFailure`/`rewritePrompt` cases, none touch GitManager); all
+7 GitManager-specific subtests pass both before and after.
+
+**Not applicable this session:** the Architecture Guardian HTTP boilerplate (auth middleware, zod
+request validation, rate limiting, structured error responses) targets route handlers; this is an
+internal `child_process` shell-invocation fix with no HTTP endpoint, so none apply. No hardcoded
+mock data — the change replaces one real shell-exec code path with another.
 

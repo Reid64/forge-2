@@ -31,7 +31,7 @@
  * pattern: the temp file lives in the working dir, not `$env:TEMP`, and is always cleaned up).
  */
 
-import { execSync, type ExecSyncOptions } from 'node:child_process';
+import { execSync, execFileSync, type ExecSyncOptions } from 'node:child_process';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 
@@ -252,6 +252,27 @@ function quoteArg(arg: string): string {
   return `"${arg.replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Default `execImpl`: runs `command` through `opts.shell` when it is set. Windows PowerShell is
+ * special-cased — `execSync(command, { shell: 'powershell.exe' })` has Node spawn
+ * `powershell.exe -c <command>` under the hood, which loads the user's `$PROFILE` first (Node's
+ * `shell` option accepts only a shell path, not extra argv, so there is no way to inject
+ * `-NoProfile` through `ExecSyncOptions.shell`). A `$PROFILE` ending in an unconditional
+ * `Set-Location` silently redirects EVERY GitManager command — including `git checkout -b`,
+ * the post-checkout branch verification, and the merge/commit that follow — to run against
+ * whatever directory the profile last `cd`'d to, not `this.cwd`, defeating Contract 10 branch
+ * isolation without any individual git command reporting failure (confirmed live incident:
+ * see CHANGESET.md). Invoking `powershell.exe` directly via `execFileSync` with `-NoProfile
+ * -NonInteractive` sidesteps Node's implicit `-c` wrapping and its profile-loading entirely.
+ */
+function runShellCommand(command: string, opts: ExecSyncOptions): string | Buffer {
+  if (typeof opts.shell === 'string' && /(?:^|[\\/])powershell(?:\.exe)?$/i.test(opts.shell)) {
+    const { shell: psPath, ...rest } = opts;
+    return execFileSync(psPath, ['-NoProfile', '-NonInteractive', '-Command', command], rest);
+  }
+  return execSync(command, opts);
+}
+
 /** The shape of the error `execSync` throws on a non-zero exit. */
 interface ExecError {
   status?: number | null;
@@ -285,7 +306,7 @@ export class GitManager {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
     this.shell = options.shell ?? (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh');
     this.log = options.log ?? logLine('git');
-    this.execImpl = options.execImpl ?? ((command, opts) => execSync(command, opts));
+    this.execImpl = options.execImpl ?? runShellCommand;
     this.mergeDelegate = options.mergeDelegate;
     this.tagDelegate = options.tagDelegate;
   }

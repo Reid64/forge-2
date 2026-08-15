@@ -503,3 +503,47 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T22:56:33.391Z â€” Investigate and fix root cause of Contract 10 Branch Isolation violations (prompt 2/22)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---
+## 2026-08-15T23:03:23.000Z â€” Investigate and fix root cause of Contract 10 Branch Isolation violations, retry (prompt 2/22)
+
+Root cause found and fixed: `GitManager` (`src/engine/git-manager.ts`) invoked every git command
+via `execSync(command, { shell: 'powershell.exe' })`, which Node always expands to
+`powershell.exe -c <command>` with no way to inject `-NoProfile` through `ExecSyncOptions.shell`.
+The user's real PowerShell `$PROFILE` ends in an unconditional `Set-Location` to a different
+project, so it silently redirected every GitManager command (branch create, branch verify, merge)
+to run against the wrong repository while reporting success and leaving this repo's real checkout
+on `main` â€” exactly the Contract 10 telemetry/reality mismatch under investigation, reproduced
+live during this retry. Confirmed as the source, not just a smoke-test hazard (see prior
+`[[forge2-powershell-profile-git-hijack]]` incident note).
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- src/engine/git-manager.ts (default `execImpl` now runs a `powershell.exe` shell via
+  `execFileSync` with `-NoProfile -NonInteractive`, bypassing Node's implicit shell wrapping so
+  the user's profile can no longer redirect GitManager's working directory)
+- STATE_OF_THE_BUILD.md
+- CHANGESET.md
+
+### Files Deleted
+
+- (none)
+
+---

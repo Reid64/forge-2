@@ -2908,3 +2908,36 @@ a diagnostic note when none exist as real refs, so the failure message stops imp
 git-manager.ts's merge flow and instead points at the real gap — whatever process is actually
 producing these builds bypasses GitManager entirely. That external mechanism is not present
 anywhere under `src/`, so it is out of scope to fix directly from within this repo.
+
+## Contract 10 Branch Isolation — ROOT CAUSE FOUND AND FIXED (prompt 2 retry, build 904cf222)
+
+The prior entry's "out of scope" conclusion was wrong about one thing: the "external mechanism"
+bypassing GitManager IS reachable from `src/` — it's a latent bug in `git-manager.ts` itself, not
+a process outside this repo. Reproduced live during this very retry of prompt 2: the executing
+agent found `main` checked out with zero `forge/904cf222/prompt-2-...` branch anywhere in
+`git branch --list --all`, i.e. `GitManager.createBranch`'s post-checkout verification
+(`phase3-executor.ts` step e) had already reported success for a checkout that never took effect
+in this repo's real working tree.
+
+Root cause: `GitManager` runs every git command via `execSync(command, { cwd, shell:
+'powershell.exe', ... })` (Contract 6). Node's `execSync` accepts `shell` only as a shell
+*path*, not extra argv — for a non-`cmd.exe` shell string it always spawns `<shell> -c <command>`,
+so there is no way to pass `-NoProfile` through `ExecSyncOptions.shell`. That means every
+GitManager git command loads the user's real `C:\Users\manag\Documents\WindowsPowerShell\
+Microsoft.PowerShell_profile.ps1`, which ends in an unconditional `Set-Location` to a different
+project. Node's `cwd` option sets the *spawned process's* starting directory, but the profile's
+`Set-Location` runs *inside* that process before the `-c` command executes and silently moves it
+elsewhere — so `git checkout -b`, the branch-verification `git branch --show-current`, and the
+eventual `git merge --no-ff` all run against the WRONG repository, all report `success: true`
+(the commands themselves don't fail, they just execute in the wrong place), while this repo's own
+checkout is left untouched on `main`. This is the same mechanism already flagged as a live
+incident risk in `[[forge2-powershell-profile-git-hijack]]` memory, now confirmed as the actual
+source of the Contract 10 telemetry/reality mismatch, not merely a smoke-test hazard.
+
+Fix applied (`src/engine/git-manager.ts`): the default `execImpl` now special-cases a
+`powershell.exe` shell and invokes it via `execFileSync('powershell.exe', ['-NoProfile',
+'-NonInteractive', '-Command', command], ...)` instead of `execSync`'s implicit shell wrapping —
+this bypasses Node's `-c`-only argv and stops the profile from loading at all, so `this.cwd` is
+respected for every GitManager command. Tests (`tests/engine.test.ts`, GitManager suite, all 7
+green) inject their own `execImpl` and are unaffected; `npx tsc --noEmit` and `pnpm run build`
+both clean.

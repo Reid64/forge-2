@@ -2,13 +2,13 @@
   "buildRunId": "904cf222-1434-4492-8813-0b15ab7d13ef",
   "project": "forge-2",
   "startedAt": "2026-08-15T22:38:43.448Z",
-  "updatedAt": "2026-08-15T22:41:23.766Z",
+  "updatedAt": "2026-08-15T22:57:20.438Z",
   "currentPrompt": {
     "index": 2,
     "id": "fix-contract10-branch-isolation",
     "name": "Investigate and fix root cause of Contract 10 Branch Isolation violations",
     "type": "feature",
-    "phase": "executing"
+    "phase": "recovering"
   },
   "totals": {
     "completed": 1,
@@ -58,6 +58,10 @@
     {
       "timestamp": "2026-08-15T22:41:23.766Z",
       "message": "prompt 2 'fix-contract10-branch-isolation' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T22:57:20.438Z",
+      "message": "Timeout retry: re-running with 2x budget (1800s)"
     }
   ],
   "brainInterventions": 0

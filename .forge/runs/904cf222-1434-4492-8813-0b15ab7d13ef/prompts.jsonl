@@ -11,3 +11,13 @@
 {"ts":"2026-08-15T22:41:04.247Z","event":"gate","index":1,"id":"fix-boundary-check-false-positive","checkName":"bundle_size","passed":true,"skipped":false,"detail":null}
 {"ts":"2026-08-15T22:41:08.667Z","event":"end","index":1,"id":"fix-boundary-check-false-positive","name":"Allowlist known external read-only paths in project-boundary heuristic","disposition":"completed","durationMs":145108,"commitHash":"41a868a7e30f0f1fbbbf401ee68658bc4ea2caf0","failedCheck":null}
 {"ts":"2026-08-15T22:41:09.259Z","event":"start","index":2,"id":"fix-contract10-branch-isolation","name":"Investigate and fix root cause of Contract 10 Branch Isolation violations","promptType":"feature"}
+{"ts":"2026-08-15T22:57:20.205Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"typescript","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T22:57:20.207Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"eslint","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T22:57:20.209Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"build","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T22:57:20.211Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"file_integrity","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T22:57:20.212Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"file_delta","passed":true,"skipped":false,"detail":null}
+{"ts":"2026-08-15T22:57:20.214Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"schema_drift","passed":false,"skipped":true,"detail":"no schema prompts have run yet — drift check not applicable"}
+{"ts":"2026-08-15T22:57:20.216Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"dependencies","passed":false,"skipped":true,"detail":"no dependency baseline (TOOLCHAIN.md has no dependencies section and none supplied) — not evaluated"}
+{"ts":"2026-08-15T22:57:20.217Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"lint","passed":false,"skipped":true,"detail":"no .eslintrc.* or eslint.config.* found — lint gate skipped"}
+{"ts":"2026-08-15T22:57:20.220Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"format","passed":false,"skipped":true,"detail":"no .prettierrc.* or prettier.config.* found — format gate skipped"}
+{"ts":"2026-08-15T22:57:20.222Z","event":"gate","index":2,"id":"fix-contract10-branch-isolation","checkName":"bundle_size","passed":true,"skipped":false,"detail":null}
