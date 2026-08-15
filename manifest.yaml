@@ -1,0 +1,76 @@
+# FORGE 2.0 — manifest.yaml
+#
+# This is the root-level `manifest.yaml` required by `upgrades/GOVERNANCE_FRAMEWORK.md` §1.1
+# (see SOURCE-OF-TRUTH.md §1). It is generated entirely from the actual `forge build` command
+# surface defined in src/cli/index.ts (search that file for `.command('build')`) — every flag
+# below is a real, wired commander option, not an aspirational one. If this file and the CLI
+# diverge, the CLI wins; regenerate this file rather than editing the CLI to match it.
+#
+# Authority: per SOURCE-OF-TRUTH.md §2, this file ranks BELOW BEHAVIORAL_CONTRACTS.md and
+# ARCHITECTURE.md/ADRs — it configures a run, it does not override a contract or an ADR.
+
+project:
+  name: forge-2
+  version: 2.0.0
+  description: >-
+    FORGE 2.0 — Factory for Orchestrated Replicable Governed Execution.
+    A self-learning autonomous software factory CLI.
+  bin: forge
+  entrypoint: dist/cli/index.js
+
+# Every field below mirrors a `forge build <path> [flags]` option (src/cli/index.ts, `.command('build')`).
+# Defaults shown are the CLI's own defaults when a flag is omitted.
+autonomy:
+  # --autonomous-recovery (default: false)
+  # Contract 14: self-heals Sentinel FAILURES during Phase 3 by re-running prompts.
+  # Does NOT bypass adversary-review BLOCKER findings or approval gates — those are
+  # separate, explicit overrides (accept_blockers / auto_approve_gates below).
+  autonomous_recovery: false
+
+  # --auto-resume (default: false)
+  # Resumes automatically from Build Memory / SESSION_STATE.md + STATE_OF_THE_BUILD.md
+  # after a claude-runner timeout/exit, looping until done, genuinely halted, or
+  # resume.max_resumes is spent.
+  auto_resume:
+    enabled: false
+    resume_wait_minutes: 5   # --resume-wait-minutes <n>
+    max_resumes: 20          # --max-resumes <n>
+
+  # --dry-run (default: false) — simulate the build (plan + cost, no execution).
+  dry_run: false
+
+  # --skip-design (default: false) — skip Phase 1A+1B and use existing governance docs.
+  skip_design: false
+
+  # --use-existing-queue (default: false) — skip Phase 1 (design) and Phase 2
+  # (governance + queue generation); run Phase 3 directly against the existing queue.yaml.
+  use_existing_queue: false
+
+  # --start-at <number> — 1-based prompt index to resume from, skipping every prompt
+  # before it. No CLI default (unset = start from prompt 1).
+  start_at: null
+
+# Both of these are the ONLY overrides for their respective halts — deliberately kept
+# separate per the module docstring in src/cli/index.ts (Session 5 findings #2/#3 and the
+# Session 5.1 hotfix): neither autonomy.autonomous_recovery nor auto_resume bypasses either
+# gate below.
+approval_gates:
+  # --accept-blockers (default: false)
+  # The ONLY override for adversarial-review BLOCKER findings (Phase 1A/1B): proceed
+  # instead of halting. A halt without this flag writes <project>/state/halt-reason.md.
+  accept_blockers: false
+
+  # --auto-approve-gates (default: false)
+  # Acknowledges the three human-approval gates (Contract 2) without pausing for review.
+  # FORGE already proceeds past these gates automatically in autonomous mode — they
+  # render as banners, never a real pause — so this flag exists for explicit, logged
+  # acknowledgment only. Does NOT bypass an adversary-review BLOCKER; use accept_blockers
+  # for that.
+  auto_approve_gates: false
+
+# Known gap (do not "fix" by adding a flag here — fix by wiring the CLI first):
+# opts.skipSecurityGate is declared in the build command's action() type signature in
+# src/cli/index.ts but has no corresponding `.option('--skip-security-gate', ...)`
+# registered on the `build` command, so it is always undefined when `forge build` runs.
+# It IS wired for lower-level helpers (runScout, cmdDesign) but not exposed as a build-time
+# flag. Omitted from this manifest because it is not currently a real, callable flag.
