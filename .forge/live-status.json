@@ -1,108 +1,41 @@
 {
-  "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
+  "buildRunId": "3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889",
   "project": "forge-2",
-  "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T08:15:35.783Z",
+  "startedAt": "2026-08-15T15:06:18.901Z",
+  "updatedAt": "2026-08-15T15:22:28.142Z",
   "currentPrompt": {
-    "index": 11,
-    "id": "stage9-qa-tooling-gap",
-    "name": "Add Semgrep SAST, OWASP ZAP DAST, Schemathesis API contract testing",
+    "index": 1,
+    "id": "fix-output-format-parity",
+    "name": "Match FORGE 1.0 console output format exactly in Phase 3",
     "type": "feature",
-    "phase": "merged"
+    "phase": "recovering"
   },
   "totals": {
-    "completed": 11,
+    "completed": 0,
     "failed": 0,
-    "remaining": 0,
-    "tokensEstimated": 21098,
-    "costEstimatedUsd": 0.806352,
-    "totalElapsedMs": 11996131
+    "remaining": 1,
+    "tokensEstimated": 0,
+    "costEstimatedUsd": 0,
+    "totalElapsedMs": 0
   },
-  "lastSentinel": {
-    "passed": true,
-    "failedCheck": null
-  },
+  "lastSentinel": null,
   "recentEvents": [
     {
-      "timestamp": "2026-08-15T06:54:35.755Z",
-      "message": "prompt 9 'stage7-queue-concurrency' (feature): start"
+      "timestamp": "2026-08-15T15:06:19.052Z",
+      "message": "prompt 1 'fix-output-format-parity' (feature): start"
     },
     {
-      "timestamp": "2026-08-15T06:54:35.768Z",
-      "message": "prompt 9 'stage7-queue-concurrency' (feature): assembled"
+      "timestamp": "2026-08-15T15:06:19.063Z",
+      "message": "prompt 1 'fix-output-format-parity' (feature): assembled"
     },
     {
-      "timestamp": "2026-08-15T06:54:50.427Z",
-      "message": "prompt 9 'stage7-queue-concurrency' (feature): executing"
+      "timestamp": "2026-08-15T15:06:49.217Z",
+      "message": "prompt 1 'fix-output-format-parity' (feature): executing"
     },
     {
-      "timestamp": "2026-08-15T07:10:15.774Z",
+      "timestamp": "2026-08-15T15:22:28.142Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
-    },
-    {
-      "timestamp": "2026-08-15T07:34:36.539Z",
-      "message": "prompt 9 'stage7-queue-concurrency' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T07:34:36.551Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T07:34:39.327Z",
-      "message": "prompt 9 'stage7-queue-concurrency' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T07:34:52.478Z",
-      "message": "prompt 10 'stage8-design-intelligence' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T07:34:52.487Z",
-      "message": "prompt 10 'stage8-design-intelligence' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T07:35:10.309Z",
-      "message": "prompt 10 'stage8-design-intelligence' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T07:50:48.997Z",
-      "message": "Timeout retry: re-running with 2x budget (1800s)"
-    },
-    {
-      "timestamp": "2026-08-15T07:59:33.337Z",
-      "message": "prompt 10 'stage8-design-intelligence' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T07:59:33.342Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T07:59:36.968Z",
-      "message": "prompt 10 'stage8-design-intelligence' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T07:59:57.181Z",
-      "message": "prompt 11 'stage9-qa-tooling-gap' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T07:59:57.207Z",
-      "message": "prompt 11 'stage9-qa-tooling-gap' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T08:00:21.809Z",
-      "message": "prompt 11 'stage9-qa-tooling-gap' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T08:15:17.375Z",
-      "message": "prompt 11 'stage9-qa-tooling-gap' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T08:15:17.378Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T08:15:20.127Z",
-      "message": "prompt 11 'stage9-qa-tooling-gap' (feature): merged"
     }
   ],
-  "brainInterventions": 6
+  "brainInterventions": 0
 }

@@ -1109,6 +1109,13 @@ function humanDuration(ms: number): string {
 
 // ---------------------------------------------------------------------------
 // Human-readable progress renderer (FORGE 1.0 forge.ps1 `Log` parity)
+//
+// Ported line-for-line from FORGE 1.0's `forge.ps1` (C:\Users\manag\Documents\FORGE\forge.ps1):
+// `Log`, `Write-ColoredLogLine`, `Write-ProjectBanner`, `Write-PromptCounter`, `Write-Transition`,
+// and `Run-Gate`'s "Running gate: X" / "Gate X: PASS|FAIL" lines. Every helper below corresponds
+// 1:1 to one of those PowerShell functions so the terminal output an operator watching a FORGE 2.0
+// build sees is byte-for-byte the same shape as FORGE 1.0's, timestamp format and color scheme
+// included.
 // ---------------------------------------------------------------------------
 
 /** Progress levels, matching forge.ps1's `Log -level` switch. */
@@ -1116,34 +1123,102 @@ type ProgressLevel = 'INFO' | 'PASS' | 'FAIL' | 'ERROR' | 'WARN' | 'GATE';
 
 const ANSI_RESET = '\x1b[0m';
 
-/** forge.ps1's `Write-Host -ForegroundColor` switch, ported to ANSI SGR codes. */
+/**
+ * forge.ps1's `Write-Host -ForegroundColor` switch, ported to ANSI SGR codes. `Log`'s switch names
+ * the PLAIN (bright) ConsoleColor variants (Red/Yellow/Green/Cyan/White), not the Dark* variants,
+ * so these map to the bright 9x codes â€” distinct from {@link BANNER_COLOR} (`DarkYellow`, the
+ * project banner's own color), which forge.ps1 deliberately chose as a DIFFERENT, non-bright yellow.
+ */
 const ANSI_COLOR: Record<ProgressLevel, string> = {
-  ERROR: '\x1b[31m', // Red
-  FAIL: '\x1b[31m', // Red
-  WARN: '\x1b[33m', // Yellow
-  PASS: '\x1b[32m', // Green
-  GATE: '\x1b[36m', // Cyan
-  INFO: '\x1b[37m', // White
+  ERROR: '\x1b[91m', // Red
+  FAIL: '\x1b[91m', // Red
+  WARN: '\x1b[93m', // Yellow
+  PASS: '\x1b[92m', // Green
+  GATE: '\x1b[96m', // Cyan
+  INFO: '\x1b[97m', // White
 };
+
+/** forge.ps1's `Write-ProjectBanner` color (`DarkYellow`) â€” distinct from WARN's plain `Yellow`. */
+const BANNER_COLOR = '\x1b[33m';
+/** forge.ps1's `Write-PromptCounter` color (`Magenta`). */
+const PROMPT_COUNTER_COLOR = '\x1b[95m';
 
 function twoDigit(n: number): string {
   return String(n).padStart(2, '0');
 }
 
+/** forge.ps1's `Get-Date -Format "yyyy-MM-dd HH:mm:ss"` â€” the exact FORGE 1.0 timestamp format. */
+function forgeTimestamp(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${twoDigit(now.getMonth() + 1)}-${twoDigit(now.getDate())} ${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
+}
+
 /**
- * Write one `[HH:mm:ss] [LEVEL] message` line to stdout, colorized to match forge.ps1's `Log`
- * function (green PASS, red FAIL/ERROR, cyan GATE, yellow WARN, white INFO). This is a distinct,
- * purpose-built console renderer for human operators watching a live build â€” separate from `log`
- * (Build Memory / death-forensics / pino), which every collaborator above already feeds.
+ * Write one `[yyyy-MM-dd HH:mm:ss] [LEVEL] message` line to stdout, colorized to match forge.ps1's
+ * `Log` function (green PASS, red FAIL/ERROR, cyan GATE, yellow WARN, white INFO). This is a
+ * distinct, purpose-built console renderer for human operators watching a live build â€” separate
+ * from `log` (Build Memory / death-forensics / pino), which every collaborator above already feeds.
  */
 function renderProgress(level: ProgressLevel, message: string): void {
-  const now = new Date();
-  const ts = `${now.getFullYear()}-${twoDigit(now.getMonth()+1)}-${twoDigit(now.getDate())} ${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
-  const color = ANSI_COLOR[level];
-  process.stdout.write(`${color}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
+  const ts = forgeTimestamp();
+  process.stdout.write(`${ANSI_COLOR[level]}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
   // Control Plane run telemetry: mirror this same line to .forge/runs/<run-id>/events.jsonl,
   // never replacing the console output above â€” a no-op outside a live (non-dry-run) Phase 3 build.
   getActiveRunRecorder()?.recordEvent(level, message);
+}
+
+/**
+ * forge.ps1's `Write-ColoredLogLine` â€” prints `text` in `color` with NO `[ts] [LEVEL]` wrapper
+ * (used for the project banner / prompt counter, whose colors don't correspond to a `Log` level).
+ */
+function renderColoredLine(text: string, color: string): void {
+  process.stdout.write(`${color}${text}${ANSI_RESET}\n`);
+  getActiveRunRecorder()?.recordEvent('INFO', text);
+}
+
+/** forge.ps1's `Write-ProjectBanner` â€” `=== PROJECTNAME ===`, bold caps, its own distinct color. */
+function renderProjectBanner(projectName: string): void {
+  renderColoredLine(`=== ${projectName.toUpperCase()} ===`, BANNER_COLOR);
+}
+
+/** forge.ps1's `Write-PromptCounter` â€” `PROMPT X OF Y`, bold caps, its own distinct color. */
+function renderPromptCounter(current: number, total: number): void {
+  renderColoredLine(`PROMPT ${current} OF ${total}`, PROMPT_COUNTER_COLOR);
+}
+
+/**
+ * forge.ps1's `Write-Transition` â€” one timestamped state-transition line for the current prompt
+ * (`STARTED` / `RETRY n` / `FAILED` / `PASSED`), with an optional short reason appended after ` - `.
+ * The level follows forge.ps1's `switch -Wildcard`: `RETRY*` is WARN, `FAILED` is FAIL, `PASSED` is
+ * PASS, everything else (`STARTED`) is INFO.
+ */
+function renderTransition(state: string, reason?: string): void {
+  const ts = forgeTimestamp();
+  const line = reason ? `${state} at ${ts} - ${reason}` : `${state} at ${ts}`;
+  const level: ProgressLevel = state.startsWith('RETRY')
+    ? 'WARN'
+    : state === 'FAILED'
+      ? 'FAIL'
+      : state === 'PASSED'
+        ? 'PASS'
+        : 'INFO';
+  renderProgress(level, line);
+}
+
+/** forge.ps1's `Run-Gate` entry line: `Log "Running gate: $gateType" "GATE"`. */
+function renderGateStart(gateName: string): void {
+  renderProgress('GATE', `Running gate: ${gateName}`);
+}
+
+/**
+ * forge.ps1's `Run-Gate` result line: `Log "Gate $($gateType.ToUpper()): PASS|FAIL" "PASS|FAIL"`.
+ * FORGE 2.0 Sentinel checks can also be SKIPPED (an optional tool not installed) â€” a state
+ * forge.ps1's gates never had â€” rendered at WARN so a skip is never confused with a hard pass.
+ */
+function renderGateResult(gateName: string, passed: boolean, skipped: boolean): void {
+  const verdict = skipped ? 'SKIP' : passed ? 'PASS' : 'FAIL';
+  const level: ProgressLevel = skipped ? 'WARN' : passed ? 'PASS' : 'FAIL';
+  renderProgress(level, `Gate ${gateName.toUpperCase()}: ${verdict}`);
 }
 
 /**
@@ -1435,10 +1510,18 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   }
 
   if (!dryRun) {
+    // forge.ps1's `Start-ForgePipeline` header: project banner, then the "FORGE Pipeline Starting"
+    // divider block.
+    renderProjectBanner(projectName);
+    renderProgress('INFO', '========================================');
+    renderProgress('INFO', '  FORGE Pipeline Starting');
+    renderProgress('INFO', `  Project: ${projectName}`);
+    renderProgress('INFO', `  Time: ${generatedAt}`);
+    renderProgress('INFO', '========================================');
+    // FORGE 2.0 supplementary build metadata â€” no FORGE 1.0 equivalent (Build Memory, prompt count).
     renderProgress(
       'GATE',
-      `FORGE PIPELINE STARTING : project "${projectName}" : build ${buildRunId ?? '(stateless)'} : ` +
-        `${schedule.order.length} prompt(s) : started ${generatedAt}`
+      `Build ${buildRunId ?? '(stateless)'} â€” ${schedule.order.length} prompt(s) â€” started ${generatedAt}`
     );
   }
 
@@ -1920,6 +2003,15 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   );
 
   if (!dryRun) {
+    // forge.ps1's `Start-ForgePipeline` footer: blank line + divider block + Passed/Failed/Halted.
+    renderProgress('INFO', '');
+    renderProgress('INFO', '========================================');
+    renderProgress('INFO', '  FORGE Pipeline Complete');
+    renderProgress('PASS', `  Passed: ${completedPrompts}`);
+    renderProgress(failedPrompts > 0 ? 'FAIL' : 'INFO', `  Failed: ${failedPrompts}`);
+    renderProgress(halted ? 'ERROR' : 'INFO', `  Halted: ${halted}`);
+    renderProgress('INFO', '========================================');
+    // FORGE 2.0 supplementary summary â€” no FORGE 1.0 equivalent (skip count, token estimate).
     renderProgress(
       status === 'completed' ? 'PASS' : status === 'halted' ? 'FAIL' : status === 'failed' ? 'FAIL' : 'WARN',
       `Phase 3 ${status.toUpperCase()} â€” ${completedPrompts}/${schedule.order.length} completed, ` +
@@ -2144,7 +2236,14 @@ async function executePrompt(
   // Session 5 finding #12/#7: per-prompt elapsed duration, for console/live-status/prompt_executions.
   const promptStartedAt = Date.now();
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) â€” start`);
-  renderProgress('INFO', `PROMPT ${index}/${ctx.totalPrompts} : ${entry.id}`);
+  // forge.ps1's per-prompt header: project banner + prompt counter (each repeated per prompt) +
+  // PROMPT ID / PROMPT NAME / PHASE, then the STARTED transition.
+  renderProjectBanner(ctx.projectName);
+  renderPromptCounter(index, ctx.totalPrompts);
+  renderProgress('INFO', `PROMPT ID: ${entry.id}`);
+  renderProgress('INFO', `PROMPT NAME: ${entry.name}`);
+  renderProgress('INFO', `PHASE: ${entry.prompt_type}`);
+  renderTransition('STARTED');
   getActiveRunRecorder()?.recordPromptStart({ index, id: entry.id, name: entry.name, promptType: entry.prompt_type });
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
@@ -2385,7 +2484,8 @@ async function executePrompt(
         promptText,
         {
           runClaude: async (p) => {
-            renderProgress('INFO', `Claude exec start â€” timeout ${Math.round(timeoutMs / 1000)}s`);
+            renderProgress('INFO', 'Executing Build Agent...');
+            renderProgress('INFO', `[timeout ${Math.round(timeoutMs / 1000)}s]`);
             const execStartedAt = Date.now();
             const r = await ctx.runClaudeImpl(p, ctx.projectPath, timeoutMs);
             renderProgress(
@@ -2427,7 +2527,8 @@ async function executePrompt(
             `run failed (${preRunCheckout.error ?? 'unknown error'})`
         );
       }
-      renderProgress('INFO', `Claude exec start â€” timeout ${Math.round(timeoutMs / 1000)}s`);
+      renderProgress('INFO', 'Executing Build Agent...');
+      renderProgress('INFO', `[timeout ${Math.round(timeoutMs / 1000)}s]`);
       const execStartedAt = Date.now();
       run = await ctx.runClaudeImpl(promptText, ctx.projectPath, timeoutMs);
       renderProgress(
@@ -2494,11 +2595,9 @@ async function executePrompt(
 
     renderProgress('GATE', `Sentinel â€” ${sentinel.checks.length} check(s)`);
     for (const check of sentinel.checks) {
-      const verdict = check.skipped ? 'SKIP' : check.passed ? 'PASS' : 'FAIL';
-      renderProgress(
-        check.skipped ? 'WARN' : check.passed ? 'PASS' : 'FAIL',
-        `  ${check.name} â€” ${verdict}${verdict === 'FAIL' ? ` (${check.detail})` : ''}`
-      );
+      // forge.ps1's `Run-Gate`: "Running gate: X" then "Gate X: PASS|FAIL|SKIP".
+      renderGateStart(check.name);
+      renderGateResult(check.name, check.passed, check.skipped);
       getActiveRunRecorder()?.recordGateCheck({
         index,
         id: entry.id,
@@ -2533,6 +2632,15 @@ async function executePrompt(
     // project-boundary violation above) must ALSO force a passing Sentinel to read as a failure â€”
     // never let a prompt whose own execution didn't succeed merge on the back of a Sentinel PASS.
     sentinel = forceFailOnClaudeFailure(sentinel, run, entry, log, index);
+
+    // forge.ps1's per-attempt gate-failure transition: `Write-Transition -state "FAILED" -reason
+    // $shortReason` (the failed gate's own output, truncated to 200 chars). Fires once the FINAL
+    // Sentinel verdict for this attempt is known (after the force-fail overrides above), so a
+    // silent timeout / claude failure reads as FAILED here exactly like a genuine gate failure.
+    if (!sentinel.passed) {
+      const shortReason = (sentinel.diagnosticReport || sentinel.failedCheck || 'gate failure').slice(0, 200);
+      renderTransition('FAILED', shortReason);
+    }
 
     // Sentinel Prime (System 5): a second, independent observation pass over this SAME completed
     // prompt, run in addition to (never in place of) the mandatory Contract-13 gate above â€”
@@ -2651,6 +2759,10 @@ async function executePrompt(
     const wasFailingInitially = !sentinel.passed;
     const initialErrorText = sentinel.diagnosticReport;
     const initialFailedCheck = sentinel.failedCheck;
+    // forge.ps1's `$retryCount` â€” display-only counter for the RETRY N / "FAILED after N retries"
+    // transition lines below. Never read by any pass/fail/merge decision (Iron Law: output
+    // formatting only).
+    let retryAttempts = 0;
     let brainDiagnosis: BrainDiagnosis | null = null;
     // DEAD-LOOP DETECTION (src/governance/dead-loop-detection.ts, ENGINEERING_COMPLETENESS.md
     // section 38): populated below once recordFailureObserved has upserted this failure's
@@ -2707,6 +2819,11 @@ async function executePrompt(
           `prompt ${index} '${entry.id}': Build Brain matched a known fix ` +
             `(confidence ${brainDiagnosis.confidence.toFixed(2)}) â€” applying targeted recovery`
         );
+        // forge.ps1's per-attempt cycle: Invoking Recovery Agent... -> RETRY N -> Executing Build Agent....
+        renderProgress('WARN', 'Invoking Recovery Agent...');
+        retryAttempts += 1;
+        renderTransition(`RETRY ${retryAttempts}`);
+        renderProgress('INFO', 'Executing Build Agent...');
         const fixRun = await ctx.runClaudeImpl(brainDiagnosis.recoveryPrompt, ctx.projectPath, timeoutMs);
         let recovered = false;
         if (fixRun.success) {
@@ -2714,6 +2831,10 @@ async function executePrompt(
             `[FORGE] brain-fix: ${entry.name}\n\nBuild Brain targeted recovery for prompt ${index} (${entry.id}).`
           );
           const fixedSentinel = await ctx.runSentinelImpl(sentinelOptions);
+          for (const check of fixedSentinel.checks) {
+            renderGateStart(check.name);
+            renderGateResult(check.name, check.passed, check.skipped);
+          }
           recovered = fixedSentinel.passed;
           if (recovered) {
             log(`prompt ${index} '${entry.id}': Build Brain fix succeeded â€” sentinel now green`);
@@ -2786,6 +2907,10 @@ async function executePrompt(
           { index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' },
           'Design review rejected â€” re-running with reviewer feedback'
         );
+        renderProgress('WARN', 'Invoking Recovery Agent...');
+        retryAttempts += 1;
+        renderTransition(`RETRY ${retryAttempts}`);
+        renderProgress('INFO', 'Executing Build Agent...');
         const designFixRun = await ctx.runClaudeImpl(`${promptText}\n\n${feedback}`, ctx.projectPath, timeoutMs);
         let designRecovered = false;
         if (designFixRun.success) {
@@ -2793,6 +2918,10 @@ async function executePrompt(
             `[FORGE] design-feedback-fix: ${entry.name}\n\nPrompt ${index} (${entry.id}) re-run with design review feedback.`
           );
           const designFixSentinel = await ctx.runSentinelImpl(sentinelOptions);
+          for (const check of designFixSentinel.checks) {
+            renderGateStart(check.name);
+            renderGateResult(check.name, check.passed, check.skipped);
+          }
           designRecovered = designFixSentinel.passed;
           if (designRecovered) {
             sentinel = designFixSentinel;
@@ -2831,7 +2960,26 @@ async function executePrompt(
       // Reaching `runRecoveryImpl` at all already requires the outer guard above to have found
       // `sentinel.passed === false` â€” the type system enforces that (TS proves the reverse check
       // here is unreachable), so this call site can never fire on a green Sentinel.
+      renderProgress('WARN', 'Invoking Recovery Agent...');
       recovery = await ctx.runRecoveryImpl(sentinel, rerunPrompt, sentinelOptions, promptExecutionId);
+      // Contract 14 runs its own internal (up to MAX_RECOVERY_ATTEMPTS) attempt loop inside
+      // runAutonomousRecovery (phase4-sentinel.ts) rather than surfacing each attempt live to this
+      // renderer â€” narrate the already-computed `recovery.attempts` here, post-hoc, in forge.ps1's
+      // RETRY N / Executing Build Agent... / gate shape, with zero change to what was decided.
+      for (const attempt of recovery.attempts) {
+        retryAttempts += 1;
+        renderTransition(`RETRY ${retryAttempts}`);
+        renderProgress('INFO', 'Executing Build Agent...');
+        if (attempt.sentinel) {
+          for (const check of attempt.sentinel.checks) {
+            renderGateStart(check.name);
+            renderGateResult(check.name, check.passed, check.skipped);
+          }
+        } else {
+          renderGateStart(attempt.errorCategory);
+          renderGateResult(attempt.errorCategory, attempt.rerunSucceeded, false);
+        }
+      }
       sentinel = recovery.finalSentinel;
       // Second guard: the disposition is decided from `sentinel.passed` (the actual, current
       // Sentinel verdict recovery just produced), not merely from `recovery.recovered` â€” a passing
@@ -3055,14 +3203,22 @@ async function executePrompt(
       accessibilityIssueCount !== null ? `, ${accessibilityIssueCount} accessibility issue(s)` : '';
     log(`prompt ${index} '${entry.id}': ${disposition} â€” ${note} (${humanDuration(durationMs)})${accessibilitySummarySuffix}`);
     if (disposition === 'completed') {
+      // forge.ps1's final-pass shape: `Write-Transition -state "PASSED"` then
+      // `Log "PROMPT $promptId : ALL GATES PASSED" "PASS"`.
+      renderTransition('PASSED');
+      renderProgress('PASS', `PROMPT ${entry.id} : ALL GATES PASSED`);
       renderProgress(
-        'PASS',
+        'INFO',
         `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' â€” PASS` +
           `${commitHash ? ` (${commitHash.slice(0, 7)})` : ''} â€” ${humanDuration(durationMs)}`
       );
     } else {
+      // forge.ps1's final-fail shape: `Write-Transition -state "FAILED" -reason "exhausted N
+      // retries"` then `Log "PROMPT $promptId : FAILED after $maxRetries retries" "ERROR"`.
+      renderTransition('FAILED', retryAttempts > 0 ? `exhausted ${retryAttempts} retries` : (sentinel.failedCheck ?? note));
+      renderProgress('ERROR', `PROMPT ${entry.id} : FAILED after ${retryAttempts} retries`);
       renderProgress(
-        'FAIL',
+        'INFO',
         `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' â€” FAIL (${sentinel.failedCheck ?? 'unknown check'}) â€” ${humanDuration(durationMs)}`
       );
     }

@@ -428,3 +428,18 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T15:21:55.974Z â€” Match FORGE 1.0 console output format exactly in Phase 3 (prompt 1/1)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---
