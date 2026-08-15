@@ -28,6 +28,10 @@ import * as profiles from './profiles.js';
 import * as patterns from './patterns.js';
 import * as brands from './brands.js';
 import * as scheduledTasks from './scheduled-tasks.js';
+import * as adr from './adr.js';
+import * as assumptions from './assumptions.js';
+import * as risks from './risks.js';
+import * as techDebt from './tech-debt.js';
 import { getClient, resetClient } from './client.js';
 
 // Per-module namespaces (avoids cross-module function-name collisions).
@@ -44,6 +48,10 @@ export {
   patterns,
   brands,
   scheduledTasks,
+  adr,
+  assumptions,
+  risks,
+  techDebt,
 };
 
 // Type-only re-exports — insert/update input types are uniquely named, so these
@@ -68,6 +76,10 @@ export const BuildMemory = {
   patterns,
   brands,
   scheduledTasks,
+  adr,
+  assumptions,
+  risks,
+  techDebt,
   /** Direct access to the underlying SQLite database handle (or null in stateless mode). */
   getClient,
   /** Reset the cached database handle (tests / re-initializing). */

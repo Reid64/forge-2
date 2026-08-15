@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '3.1.0';
+export const CURRENT_SCHEMA_VERSION = '3.2.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -720,6 +720,107 @@ const DESIGN_REVIEWS_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_design_screenshots_prompt ON design_screenshots(prompt_id);
 `;
 
+/**
+ * Governance provenance ledgers (schema bump 3.1.0 -> 3.2.0): the ADR provenance log, assumption
+ * registry, risk register, and tech-debt ledger. Same posture as the sibling `src/governance/`
+ * modules (traceability, invariants, blast-radius, build-state-machine) — real, persisted rows
+ * written by CLI/phase callers, never fabricated. `tech_debt_items.source`/`source_finding_id`
+ * let entries be seeded from findings FORGE already records (`dead_code_findings`,
+ * `schema_drift_findings`, `dependency_audit_findings`, `adversary_findings`) with a dedup key,
+ * as well as accept manual entries.
+ */
+const GOVERNANCE_LEDGERS_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS adr_records (
+      id                       TEXT PRIMARY KEY,
+      project_name             TEXT NOT NULL,
+      project_path             TEXT NOT NULL,
+      adr_number                INTEGER NOT NULL,
+      title                    TEXT NOT NULL,
+      status                   TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed','accepted','rejected','deprecated','superseded')),
+      context                  TEXT NOT NULL,
+      decision                 TEXT NOT NULL,
+      consequences              TEXT,
+      alternatives_considered    TEXT NOT NULL DEFAULT '[]',
+      decided_by                TEXT NOT NULL,
+      source                   TEXT,
+      related_files              TEXT NOT NULL DEFAULT '[]',
+      supersedes                TEXT,
+      superseded_by              TEXT,
+      build_run_id               TEXT,
+      created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_adr_records_project_number ON adr_records(project_name, adr_number);
+    CREATE INDEX IF NOT EXISTS idx_adr_records_status ON adr_records(project_name, status);
+
+    CREATE TABLE IF NOT EXISTS assumptions (
+      id                      TEXT PRIMARY KEY,
+      project_name            TEXT NOT NULL,
+      project_path            TEXT NOT NULL,
+      statement                TEXT NOT NULL,
+      category                 TEXT NOT NULL CHECK(category IN ('technical','business','user','infra','data','security')),
+      status                   TEXT NOT NULL DEFAULT 'unvalidated' CHECK(status IN ('unvalidated','validated','invalidated','stale')),
+      confidence                REAL CHECK(confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
+      impact_if_wrong            TEXT NOT NULL,
+      owner                    TEXT,
+      related_adr_id             TEXT,
+      validation_method          TEXT,
+      validation_evidence        TEXT,
+      validated_at               TEXT,
+      build_run_id               TEXT,
+      created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_assumptions_project ON assumptions(project_name, status);
+    CREATE INDEX IF NOT EXISTS idx_assumptions_adr ON assumptions(related_adr_id);
+
+    CREATE TABLE IF NOT EXISTS risks (
+      id                       TEXT PRIMARY KEY,
+      project_name             TEXT NOT NULL,
+      project_path             TEXT NOT NULL,
+      title                    TEXT NOT NULL,
+      description               TEXT NOT NULL,
+      category                  TEXT NOT NULL CHECK(category IN ('technical','schedule','security','operational','compliance','financial','vendor')),
+      probability                INTEGER NOT NULL CHECK(probability BETWEEN 1 AND 5),
+      impact                    INTEGER NOT NULL CHECK(impact BETWEEN 1 AND 5),
+      severity_score              INTEGER NOT NULL,
+      status                    TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','mitigating','accepted','closed','realized')),
+      mitigation_plan             TEXT,
+      owner                     TEXT,
+      related_adr_id              TEXT,
+      related_assumption_id        TEXT,
+      build_run_id                TEXT,
+      closed_at                  TEXT,
+      created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_risks_project ON risks(project_name, status);
+    CREATE INDEX IF NOT EXISTS idx_risks_severity ON risks(severity_score DESC);
+
+    CREATE TABLE IF NOT EXISTS tech_debt_items (
+      id                       TEXT PRIMARY KEY,
+      project_name             TEXT NOT NULL,
+      project_path             TEXT NOT NULL,
+      title                    TEXT NOT NULL,
+      description               TEXT NOT NULL,
+      category                  TEXT NOT NULL CHECK(category IN ('code_quality','architecture','test_coverage','security','performance','documentation','dependency','dead_code','schema_drift')),
+      severity                  TEXT NOT NULL CHECK(severity IN ('low','medium','high','critical')),
+      effort_estimate             TEXT NOT NULL DEFAULT 'unknown' CHECK(effort_estimate IN ('trivial','small','medium','large','unknown')),
+      status                    TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','resolved','wont_fix')),
+      file_path                  TEXT,
+      source                    TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual','dead_code_findings','schema_drift_findings','dependency_audit_findings','adversary_findings')),
+      source_finding_id            TEXT,
+      introduced_build_id          TEXT,
+      resolved_build_id           TEXT,
+      resolved_at                TEXT,
+      created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tech_debt_dedup ON tech_debt_items(project_name, source, source_finding_id) WHERE source_finding_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tech_debt_project ON tech_debt_items(project_name, status);
+    CREATE INDEX IF NOT EXISTS idx_tech_debt_severity ON tech_debt_items(severity);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -763,6 +864,11 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   // Design review + screenshot pipeline (schema 3.1.0)
   'design_reviews',
   'design_screenshots',
+  // Governance provenance ledgers (schema 3.2.0)
+  'adr_records',
+  'assumptions',
+  'risks',
+  'tech_debt_items',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -1083,6 +1189,9 @@ export function initializeForgeMemory(dbPath?: string): void {
   db.exec(DESIGN_ARTIFACTS_SCHEMA_SQL);
   // 3.0.0 -> 3.1.0 (Design Review Pipeline): design_reviews, design_screenshots.
   db.exec(DESIGN_REVIEWS_SCHEMA_SQL);
+  // 3.1.0 -> 3.2.0 (Governance Provenance Ledgers): adr_records, assumptions, risks,
+  // tech_debt_items.
+  db.exec(GOVERNANCE_LEDGERS_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

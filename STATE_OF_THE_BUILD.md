@@ -1,13 +1,92 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + **Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE — a formal 13-state project lifecycle (CONCEPT→…→OPTIMIZATION) and 10-state task lifecycle (PLANNED→…→SUPERSEDED), each a real directed transition graph plus a pure derivation function grounded in existing Build Memory signals, and a reverse-import-dependency blast-radius analyzer (reusing Architecture Guardian's own parser) that answers "what else could this change affect," both wired into Phase 3 (observational, per-prompt) and Phase 5 (end-of-build) plus two new `forge state`/`forge blast-radius` CLI commands**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + **Build State Machine + Blast-Radius Analysis (ALL COMPLETE)**
-**Schema version:** **3.1.0** — bumped from `3.0.0` by the Design Pipeline's `design_reviews`/`design_screenshots` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.1.0'` this session). Note: this session's task brief named schema version `2.9.0` for this addition — that value was already consumed by the Autonomy Upgrades tables bump (`2.8.0` → `2.9.0`) that landed before Design Artifacts (`2.9.0` → `3.0.0`) in an earlier session, so recording `2.9.0` here would be a downgrade that collides with and contradicts existing migration history already committed to this file. `3.1.0` is the actual next version in sequence and is what `CURRENT_SCHEMA_VERSION` and the code's own migration comment record — recording the brief's number over the code's actual constant would be a fabrication (Iron Law 3), per the identical precedent already set in the Enhanced Retrofit / UI Engine sections below.
+**Last Updated:** 2026-08-15 (Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + **Governance Provenance Ledgers COMPLETE — four new Build Memory tables (`adr_records`, `assumptions`, `risks`, `tech_debt_items`) plus a `src/governance/provenance-ledgers.ts` domain layer (sequential ADR numbering + supersede chains, severity-score/staleness derivation, and tech-debt seeding from findings FORGE already persists — `dead_code_findings`/`schema_drift_findings`/`dependency_audit_findings`/`adversary_findings` — with a dedup key so re-seeding is idempotent) and four new `forge adr`/`forge assumption`/`forge risk`/`forge techdebt` CLI command groups**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + **Governance Provenance Ledgers (ALL COMPLETE)**
+**Schema version:** **3.2.0** — bumped from `3.1.0` by the Governance Provenance Ledgers' `adr_records`/`assumptions`/`risks`/`tech_debt_items` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.2.0'` this session; `GOVERNANCE_LEDGERS_SCHEMA_SQL` added to the migration guard and all four table names added to `ALL_FORGE_TABLES`).
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger (2026-08-15) — COMPLETE
+
+**Objective:** the sibling `src/governance/` modules already answer "why is the build in this
+state" (`build-state-machine.ts`), "where is this requirement implemented" (`traceability.ts`),
+and "what rules must hold" (`invariants.ts`) — but FORGE had nowhere to persist WHY a design
+decision was made, WHAT was assumed without proof, WHAT could go wrong, or WHAT was cut for later.
+This session added the four ledgers a mature engineering org keeps for exactly that, grounded
+entirely in real, caller-supplied or findings-derived rows — no fabricated entries, matching the
+degrade-honestly posture already established by every prior `src/governance/` module.
+
+**New tables** (`src/learning/database.ts` › `GOVERNANCE_LEDGERS_SCHEMA_SQL`, schema bump `3.1.0`
+→ `3.2.0`):
+1. `adr_records` — one row per Architecture Decision Record, sequentially numbered per project
+   (`adr_number`, enforced unique per `project_name`), with an explicit supersede chain
+   (`supersedes`/`superseded_by`) so a decision's full history is reconstructible without prose.
+2. `assumptions` — a statement taken as true during design/build, its category, confidence,
+   validation status (`unvalidated`/`validated`/`invalidated`/`stale`), and what breaks if it's
+   wrong.
+3. `risks` — title/description/category/probability/impact, with `severity_score` (probability ×
+   impact, 1-25) computed and stored at write time.
+4. `tech_debt_items` — title/description/category/severity/effort estimate/status, plus
+   `source`/`source_finding_id` recording whether an item was entered manually or seeded from a
+   real findings table, with a partial unique index (`idx_tech_debt_dedup`) on
+   `(project_name, source, source_finding_id)` making re-seeding idempotent.
+
+**New modules:**
+1. `src/memory/adr.ts`, `src/memory/assumptions.ts`, `src/memory/risks.ts`,
+   `src/memory/tech-debt.ts` — one CRUD module per table, following the exact
+   `runQuery`/`newId`/`nowIso` pattern every sibling `src/memory/*.ts` module already uses; wired
+   into the `BuildMemory` facade (`src/memory/index.ts`) as `BuildMemory.adr`/`.assumptions`/
+   `.risks`/`.techDebt`.
+2. `src/governance/provenance-ledgers.ts` — the domain layer: `recordAdr` auto-assigns the next
+   sequential `adr_number` and, when `supersedes` is given, atomically re-marks the prior ADR
+   `superseded` after the new row is created (a real, queryable chain); `recordAssumption`/
+   `validateAssumption`/`flagStaleAssumptions` (marks `unvalidated` assumptions older than a
+   caller-supplied age `stale` — a real signal, not a guess at whether they still hold);
+   `recordRisk`/`computeSeverityScore`/`updateRiskStatus` (stamps `closed_at` on `closed`/
+   `realized`); `recordTechDebtItem`/`resolveTechDebtItem`; and
+   `seedTechDebtFromFindings(projectPath)`, which reads `dead_code_findings`,
+   `schema_drift_findings`, and `dependency_audit_findings` directly by `project_path`, resolves
+   this project's `build_runs` to pull its `adversary_findings` (keyed by `build_id`, excluding
+   `DISMISSED`/already-`FIXED` rows), maps each finding's native severity into the ledger's
+   `low`/`medium`/`high`/`critical` scale, and inserts one `tech_debt_items` row per finding via
+   the dedup key — re-running the seed is always safe and reports `scanned`/`seeded`/
+   `alreadyLedgered` counts per source.
+3. Four new CLI command groups (`src/cli/index.ts`): `forge adr add|list`, `forge assumption
+   add|list|validate`, `forge risk add|list|status`, `forge techdebt add|list|resolve|seed` —
+   argument/option validation follows the exact pattern `forge schedule add`/`forge schedule list`
+   already established (reject unknown enum values before touching Build Memory, `fail()` on any
+   Build-Memory-unreachable write).
+
+**Architecture Guardian note:** the enforced-standards block appended to this session's task brief
+(auth middleware / zod request validation / rate limiting / structured `{error:{code,message}}`
+responses on "every route handler") targets HTTP API route handlers. FORGE is a CLI + library
+(`src/cli/index.ts` via commander, no Next.js API routes for this feature — the repo's only
+`app/api/*/route.ts` is the pre-existing `auth/signout`, unrelated); every sibling
+`src/governance/` module added in this and prior sessions (`traceability.ts`, `invariants.ts`,
+`blast-radius.ts`, `build-state-machine.ts`, `definition-of-done.ts`) is the same shape and
+none of them implement those web-specific concerns either, since there is no HTTP boundary here to
+guard. What does apply — no hardcoded/mock data standing in for a real call — is honored: every
+row written by this feature comes from an explicit caller argument or a real, already-persisted
+findings/build-runs row; nothing is fabricated.
+
+**Verification:** `pnpm run build` (`tsc`) — exit code 0, zero diagnostics, run via Bash this
+session. `pnpm test` — 35/35 tests pass (unaffected; no existing test file covers any sibling
+`src/governance/` module, matching that established precedent). Live-ran the full CLI surface
+against a scratch project and this repo's own `~/.forge/forge_memory.db` this session: `forge adr
+add`/`forge adr list` (recorded ADR-001, then recorded ADR-002 with `--supersedes <ADR-001 id>`
+and confirmed ADR-001 flipped to `SUPERSEDED` in the printed log); `forge assumption
+add`/`list`/`validate` (recorded an assumption, then validated it `invalidated` with evidence);
+`forge risk add`/`list`/`status` (recorded a risk, confirmed `severity_score` = probability ×
+impact printed correctly, transitioned it to `mitigating`); `forge techdebt
+add`/`list`/`resolve`/`seed` (recorded and resolved a manual item; inserted a real
+`dead_code_findings` row directly, ran `seed` twice, confirmed `scanned: 1, seeded: 1` on the first
+run and `scanned: 1, seeded: 0, alreadyLedgered: 1` on the second — dedup verified idempotent).
+All scratch-project rows were deleted from Build Memory after verification.
 
 ---
 
@@ -2378,3 +2457,5 @@ forge build ./my-project --start-at 5 --dry-run
 > 2026-08-15T05:02:25.936Z [FORGE Phase 3] prompt 2 'stage2-readiness-dod' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T05:16:24.558Z [FORGE Phase 3] prompt 3 'stage4-traceability-invariants' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T05:34:08.449Z [FORGE Phase 3] prompt 4 'stage4-state-machine-blast-radius' (feature): COMPLETED â€" Sentinel PASS.

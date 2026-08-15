@@ -2,59 +2,27 @@
   "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
   "project": "forge-2",
   "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T05:16:44.043Z",
+  "updatedAt": "2026-08-15T05:34:24.391Z",
   "currentPrompt": {
-    "index": 4,
-    "id": "stage4-state-machine-blast-radius",
-    "name": "Build formal build state machine and change-impact blast-radius analysis",
+    "index": 5,
+    "id": "stage4-adr-risk-debt",
+    "name": "Build ADR provenance log, assumption registry, risk register, tech-debt ledger",
     "type": "feature",
     "phase": "executing"
   },
   "totals": {
-    "completed": 3,
+    "completed": 4,
     "failed": 0,
-    "remaining": 8,
-    "tokensEstimated": 5513,
-    "costEstimatedUsd": 0.216528,
-    "totalElapsedMs": 1247853
+    "remaining": 7,
+    "tokensEstimated": 7385,
+    "costEstimatedUsd": 0.289344,
+    "totalElapsedMs": 2311366
   },
   "lastSentinel": {
     "passed": false,
     "failedCheck": null
   },
   "recentEvents": [
-    {
-      "timestamp": "2026-08-15T04:57:19.181Z",
-      "message": "prompt 1 'stage3-testing-wiring' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T04:57:21.511Z",
-      "message": "prompt 2 'stage2-readiness-dod' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T04:57:21.519Z",
-      "message": "prompt 2 'stage2-readiness-dod' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T04:57:31.465Z",
-      "message": "prompt 2 'stage2-readiness-dod' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T04:59:08.805Z",
-      "message": "prompt 2 'stage2-readiness-dod' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T04:59:08.807Z",
-      "message": "Sentinel FAIL (unknown)"
-    },
-    {
-      "timestamp": "2026-08-15T04:59:09.826Z",
-      "message": "Build Brain: applying targeted fix (confidence 0.30)"
-    },
-    {
-      "timestamp": "2026-08-15T04:59:09.830Z",
-      "message": "prompt 2 'stage2-readiness-dod': Build Brain targeted recovery (confidence 0.30)"
-    },
     {
       "timestamp": "2026-08-15T05:02:23.929Z",
       "message": "prompt 2 'stage2-readiness-dod' (feature): merged"
@@ -102,7 +70,39 @@
     {
       "timestamp": "2026-08-15T05:16:44.043Z",
       "message": "prompt 4 'stage4-state-machine-blast-radius' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T05:30:59.604Z",
+      "message": "prompt 4 'stage4-state-machine-blast-radius' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T05:30:59.607Z",
+      "message": "Sentinel FAIL (unknown)"
+    },
+    {
+      "timestamp": "2026-08-15T05:31:00.669Z",
+      "message": "Build Brain: applying targeted fix (confidence 0.50)"
+    },
+    {
+      "timestamp": "2026-08-15T05:31:00.670Z",
+      "message": "prompt 4 'stage4-state-machine-blast-radius': Build Brain targeted recovery (confidence 0.50)"
+    },
+    {
+      "timestamp": "2026-08-15T05:34:02.347Z",
+      "message": "prompt 4 'stage4-state-machine-blast-radius' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T05:34:08.692Z",
+      "message": "prompt 5 'stage4-adr-risk-debt' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T05:34:08.704Z",
+      "message": "prompt 5 'stage4-adr-risk-debt' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T05:34:24.391Z",
+      "message": "prompt 5 'stage4-adr-risk-debt' (feature): executing"
     }
   ],
-  "brainInterventions": 2
+  "brainInterventions": 3
 }

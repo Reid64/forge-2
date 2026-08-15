@@ -122,12 +122,20 @@ import {
   type SchedulerDashboardRow,
 } from '../tools/task-scheduler.js';
 import type {
+  AdrStatus,
+  Assumption,
+  AssumptionCategory,
   BuildRun,
   JsonObject,
   PromptExecution,
   RepairConfig,
+  RiskCategory,
+  RiskStatus,
   ScheduledTaskType,
   SelfCreatedAgent,
+  TechDebtCategory,
+  TechDebtItem,
+  TechDebtSeverity,
 } from '../types/index.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
 
@@ -1647,6 +1655,269 @@ async function cmdBlastRadius(pathArg: string, files: string[]): Promise<void> {
       `minimum safe validation set: ${result.impactedTestFiles.length} test file(s), ${result.impactedApiRoutes.length} API route(s)`
     )
   );
+}
+
+/**
+ * `forge adr` — the ADR (Architecture Decision Record) provenance log
+ * (`src/governance/provenance-ledgers.ts`). `add` records a decision with automatic sequential
+ * numbering and an optional supersede chain; `list` prints the full log for a project.
+ */
+async function cmdAdrAdd(
+  pathArg: string,
+  opts: { title?: string; context?: string; decision?: string; decidedBy?: string; status?: string; consequences?: string; alternatives?: string; source?: string; supersedes?: string }
+): Promise<void> {
+  if (!opts.title || !opts.context || !opts.decision || !opts.decidedBy) {
+    fail('adr add requires --title, --context, --decision, and --decided-by.');
+    return;
+  }
+  const { recordAdr } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  let alternativesConsidered: string[] | undefined;
+  if (opts.alternatives) {
+    try {
+      const parsed: unknown = JSON.parse(opts.alternatives);
+      if (!Array.isArray(parsed)) throw new Error('not an array');
+      alternativesConsidered = parsed as string[];
+    } catch {
+      fail('--alternatives must be a JSON array of strings.');
+      return;
+    }
+  }
+  const record = await recordAdr(projectPath, {
+    title: opts.title,
+    context: opts.context,
+    decision: opts.decision,
+    decidedBy: opts.decidedBy,
+    status: opts.status as AdrStatus | undefined,
+    consequences: opts.consequences,
+    alternativesConsidered,
+    source: opts.source,
+    supersedes: opts.supersedes,
+  });
+  if (!record) {
+    fail('could not record ADR — Build Memory is unreachable.');
+    return;
+  }
+  console.log(chalk.green(`\n✓ recorded ADR-${String(record.adr_number).padStart(3, '0')}: ${record.title}`));
+}
+
+async function cmdAdrList(pathArg: string): Promise<void> {
+  const { listAdrs, formatAdrLog } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const records = await listAdrs(projectPath);
+  console.log(chalk.bold(`\nFORGE ADR Log — ${basename(projectPath)}\n`));
+  console.log(formatAdrLog(records ?? []));
+  console.log('');
+}
+
+/**
+ * `forge assumption` — the assumption registry (`src/governance/provenance-ledgers.ts`). `add`
+ * records an assumption (starts `unvalidated`); `validate` records the outcome of independently
+ * checking one; `list` prints the registry for a project.
+ */
+async function cmdAssumptionAdd(
+  pathArg: string,
+  opts: { statement?: string; category?: string; impact?: string; confidence?: string; owner?: string; adr?: string }
+): Promise<void> {
+  const categories = ['technical', 'business', 'user', 'infra', 'data', 'security'];
+  if (!opts.statement || !opts.category || !opts.impact) {
+    fail('assumption add requires --statement, --category, and --impact.');
+    return;
+  }
+  if (!categories.includes(opts.category)) {
+    fail(`--category must be one of: ${categories.join(', ')}`);
+    return;
+  }
+  let confidence: number | undefined;
+  if (opts.confidence !== undefined) {
+    confidence = Number(opts.confidence);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      fail('--confidence must be a number between 0 and 1.');
+      return;
+    }
+  }
+  const { recordAssumption } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const created = await recordAssumption(projectPath, {
+    statement: opts.statement,
+    category: opts.category as AssumptionCategory,
+    impactIfWrong: opts.impact,
+    confidence,
+    owner: opts.owner,
+    relatedAdrId: opts.adr,
+  });
+  if (!created) {
+    fail('could not record assumption — Build Memory is unreachable.');
+    return;
+  }
+  console.log(chalk.green(`\n✓ recorded assumption: ${created.statement}`));
+}
+
+async function cmdAssumptionList(pathArg: string, opts: { status?: string }): Promise<void> {
+  const { listAssumptions, formatAssumptionRegistry } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const list = await listAssumptions(projectPath, opts.status as Assumption['status'] | undefined);
+  console.log(chalk.bold(`\nFORGE Assumption Registry — ${basename(projectPath)}\n`));
+  console.log(formatAssumptionRegistry(list ?? []));
+  console.log('');
+}
+
+async function cmdAssumptionValidate(
+  id: string,
+  opts: { outcome?: string; method?: string; evidence?: string }
+): Promise<void> {
+  if (opts.outcome !== 'validated' && opts.outcome !== 'invalidated') {
+    fail('assumption validate requires --outcome validated|invalidated.');
+    return;
+  }
+  if (!opts.method || !opts.evidence) {
+    fail('assumption validate requires --method and --evidence.');
+    return;
+  }
+  const { validateAssumption } = await import('../governance/provenance-ledgers.js');
+  const updated = await validateAssumption(id, opts.outcome, opts.method, opts.evidence);
+  if (!updated) {
+    fail(`no assumption found with id '${id}', or Build Memory is unreachable.`);
+    return;
+  }
+  console.log(chalk.green(`\n✓ assumption ${id} marked ${updated.status}`));
+}
+
+/**
+ * `forge risk` — the risk register (`src/governance/provenance-ledgers.ts`). `add` records a risk
+ * with a derived severity score (probability × impact); `status` transitions it; `list` prints
+ * the register sorted by severity.
+ */
+async function cmdRiskAdd(
+  pathArg: string,
+  opts: { title?: string; description?: string; category?: string; probability?: string; impact?: string; mitigation?: string; owner?: string }
+): Promise<void> {
+  const categories = ['technical', 'schedule', 'security', 'operational', 'compliance', 'financial', 'vendor'];
+  if (!opts.title || !opts.description || !opts.category || !opts.probability || !opts.impact) {
+    fail('risk add requires --title, --description, --category, --probability, and --impact.');
+    return;
+  }
+  if (!categories.includes(opts.category)) {
+    fail(`--category must be one of: ${categories.join(', ')}`);
+    return;
+  }
+  const probability = Number(opts.probability);
+  const impact = Number(opts.impact);
+  if (!Number.isInteger(probability) || probability < 1 || probability > 5 || !Number.isInteger(impact) || impact < 1 || impact > 5) {
+    fail('--probability and --impact must be integers between 1 and 5.');
+    return;
+  }
+  const { recordRisk } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const created = await recordRisk(projectPath, {
+    title: opts.title,
+    description: opts.description,
+    category: opts.category as RiskCategory,
+    probability,
+    impact,
+    mitigationPlan: opts.mitigation,
+    owner: opts.owner,
+  });
+  if (!created) {
+    fail('could not record risk — Build Memory is unreachable.');
+    return;
+  }
+  console.log(chalk.green(`\n✓ recorded risk (severity ${created.severity_score}): ${created.title}`));
+}
+
+async function cmdRiskList(pathArg: string, opts: { status?: string }): Promise<void> {
+  const { listRisks, formatRiskRegister } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const list = await listRisks(projectPath, opts.status as RiskStatus | undefined);
+  console.log(chalk.bold(`\nFORGE Risk Register — ${basename(projectPath)}\n`));
+  console.log(formatRiskRegister(list ?? []));
+  console.log('');
+}
+
+async function cmdRiskStatus(id: string, opts: { status?: string }): Promise<void> {
+  const statuses = ['open', 'mitigating', 'accepted', 'closed', 'realized'];
+  if (!opts.status || !statuses.includes(opts.status)) {
+    fail(`risk status requires --status <${statuses.join('|')}>.`);
+    return;
+  }
+  const { updateRiskStatus } = await import('../governance/provenance-ledgers.js');
+  const updated = await updateRiskStatus(id, opts.status as RiskStatus);
+  if (!updated) {
+    fail(`no risk found with id '${id}', or Build Memory is unreachable.`);
+    return;
+  }
+  console.log(chalk.green(`\n✓ risk ${id} marked ${updated.status}`));
+}
+
+/**
+ * `forge techdebt` — the tech-debt ledger (`src/governance/provenance-ledgers.ts`). `add` records
+ * a manual item; `seed` populates it from real findings FORGE already recorded (dead code, schema
+ * drift, dependency audit, adversary review); `resolve` closes an item; `list` prints the ledger.
+ */
+async function cmdTechDebtAdd(
+  pathArg: string,
+  opts: { title?: string; description?: string; category?: string; severity?: string; effort?: string; file?: string }
+): Promise<void> {
+  const categories = ['code_quality', 'architecture', 'test_coverage', 'security', 'performance', 'documentation', 'dependency', 'dead_code', 'schema_drift'];
+  const severities = ['low', 'medium', 'high', 'critical'];
+  if (!opts.title || !opts.description || !opts.category || !opts.severity) {
+    fail('techdebt add requires --title, --description, --category, and --severity.');
+    return;
+  }
+  if (!categories.includes(opts.category)) {
+    fail(`--category must be one of: ${categories.join(', ')}`);
+    return;
+  }
+  if (!severities.includes(opts.severity)) {
+    fail(`--severity must be one of: ${severities.join(', ')}`);
+    return;
+  }
+  const { recordTechDebtItem } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const created = await recordTechDebtItem(projectPath, {
+    title: opts.title,
+    description: opts.description,
+    category: opts.category as TechDebtCategory,
+    severity: opts.severity as TechDebtSeverity,
+    effortEstimate: opts.effort as TechDebtItem['effort_estimate'] | undefined,
+    filePath: opts.file,
+  });
+  if (!created) {
+    fail('could not record tech-debt item — Build Memory is unreachable.');
+    return;
+  }
+  console.log(chalk.green(`\n✓ recorded tech debt [${created.severity}]: ${created.title}`));
+}
+
+async function cmdTechDebtList(pathArg: string, opts: { status?: string }): Promise<void> {
+  const { listTechDebt, formatTechDebtLedger } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const list = await listTechDebt(projectPath, opts.status as TechDebtItem['status'] | undefined);
+  console.log(chalk.bold(`\nFORGE Tech-Debt Ledger — ${basename(projectPath)}\n`));
+  console.log(formatTechDebtLedger(list ?? []));
+  console.log('');
+}
+
+async function cmdTechDebtResolve(id: string, opts: { build?: string }): Promise<void> {
+  const { resolveTechDebtItem } = await import('../governance/provenance-ledgers.js');
+  const updated = await resolveTechDebtItem(id, opts.build);
+  if (!updated) {
+    fail(`no tech-debt item found with id '${id}', or Build Memory is unreachable.`);
+    return;
+  }
+  console.log(chalk.green(`\n✓ tech debt ${id} marked resolved`));
+}
+
+async function cmdTechDebtSeed(pathArg: string): Promise<void> {
+  const { seedTechDebtFromFindings } = await import('../governance/provenance-ledgers.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const result = await seedTechDebtFromFindings(projectPath);
+  console.log(chalk.bold(`\nSeeding tech-debt ledger from recorded findings — ${basename(projectPath)}\n`));
+  console.log(`  scanned: ${result.scanned}  ·  newly seeded: ${result.seeded}  ·  already ledgered: ${result.alreadyLedgered}`);
+  for (const [source, count] of Object.entries(result.bySource)) {
+    if (count > 0) console.log(chalk.dim(`    ${source}: ${count}`));
+  }
+  console.log('');
 }
 
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
@@ -4026,6 +4297,149 @@ async function main(): Promise<void> {
     .argument('[project-path]', 'target project directory', '.')
     .argument('[files...]', 'explicit changed files (relative or absolute) — omit to auto-detect from git')
     .action((pathArg: string, files: string[]) => cmdBlastRadius(pathArg, files));
+
+  const adrCmd = program
+    .command('adr')
+    .description('Manage the ADR (Architecture Decision Record) provenance log (add / list)');
+
+  adrCmd
+    .command('add')
+    .description('Record a new architecture decision, auto-numbered sequentially')
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--title <text>', 'short decision title')
+    .requiredOption('--context <text>', 'the situation that motivated the decision')
+    .requiredOption('--decision <text>', 'what was decided')
+    .requiredOption('--decided-by <who>', 'human name or agent/prompt identifier')
+    .option('--status <status>', 'proposed | accepted | rejected | deprecated | superseded', 'proposed')
+    .option('--consequences <text>', 'expected consequences, positive and negative')
+    .option('--alternatives <json>', 'alternatives considered, as a JSON array of strings')
+    .option('--source <text>', 'provenance — the prompt, build, or discussion that produced this decision')
+    .option('--supersedes <adr-id>', 'id of a prior ADR this one supersedes')
+    .action(
+      (
+        pathArg: string,
+        opts: { title?: string; context?: string; decision?: string; decidedBy?: string; status?: string; consequences?: string; alternatives?: string; source?: string; supersedes?: string }
+      ) => cmdAdrAdd(pathArg, opts)
+    );
+
+  adrCmd
+    .command('list')
+    .description('Print the full ADR log for a project, oldest first')
+    .argument('[project-path]', 'target project directory', '.')
+    .action((pathArg: string) => cmdAdrList(pathArg));
+
+  const assumptionCmd = program
+    .command('assumption')
+    .description('Manage the assumption registry (add / list / validate)');
+
+  assumptionCmd
+    .command('add')
+    .description('Record a new assumption (starts unvalidated)')
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--statement <text>', 'the assumption, stated as a claim')
+    .requiredOption('--category <cat>', 'technical | business | user | infra | data | security')
+    .requiredOption('--impact <text>', 'what breaks if this assumption is wrong')
+    .option('--confidence <0-1>', 'confidence the assumption holds, 0.0-1.0')
+    .option('--owner <name>', 'who owns validating this assumption')
+    .option('--adr <adr-id>', 'id of the ADR this assumption underpins')
+    .action(
+      (pathArg: string, opts: { statement?: string; category?: string; impact?: string; confidence?: string; owner?: string; adr?: string }) =>
+        cmdAssumptionAdd(pathArg, opts)
+    );
+
+  assumptionCmd
+    .command('list')
+    .description('Print the assumption registry for a project')
+    .argument('[project-path]', 'target project directory', '.')
+    .option('--status <status>', 'filter by unvalidated | validated | invalidated | stale')
+    .action((pathArg: string, opts: { status?: string }) => cmdAssumptionList(pathArg, opts));
+
+  assumptionCmd
+    .command('validate')
+    .description('Record the outcome of independently checking an assumption')
+    .argument('<id>', 'assumption id')
+    .requiredOption('--outcome <outcome>', 'validated | invalidated')
+    .requiredOption('--method <text>', 'how it was checked')
+    .requiredOption('--evidence <text>', 'the evidence that decided the outcome')
+    .action((id: string, opts: { outcome?: string; method?: string; evidence?: string }) => cmdAssumptionValidate(id, opts));
+
+  const riskCmd = program
+    .command('risk')
+    .description('Manage the risk register (add / list / status)');
+
+  riskCmd
+    .command('add')
+    .description('Record a new risk with a derived severity score (probability x impact)')
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--title <text>', 'short risk title')
+    .requiredOption('--description <text>', 'what the risk is')
+    .requiredOption('--category <cat>', 'technical | schedule | security | operational | compliance | financial | vendor')
+    .requiredOption('--probability <1-5>', 'likelihood, 1 (rare) - 5 (near-certain)')
+    .requiredOption('--impact <1-5>', 'severity if realized, 1 (negligible) - 5 (severe)')
+    .option('--mitigation <text>', 'mitigation plan')
+    .option('--owner <name>', 'who owns this risk')
+    .action(
+      (
+        pathArg: string,
+        opts: { title?: string; description?: string; category?: string; probability?: string; impact?: string; mitigation?: string; owner?: string }
+      ) => cmdRiskAdd(pathArg, opts)
+    );
+
+  riskCmd
+    .command('list')
+    .description('Print the risk register for a project, highest severity first')
+    .argument('[project-path]', 'target project directory', '.')
+    .option('--status <status>', 'filter by open | mitigating | accepted | closed | realized')
+    .action((pathArg: string, opts: { status?: string }) => cmdRiskList(pathArg, opts));
+
+  riskCmd
+    .command('status')
+    .description('Transition a risk\'s status')
+    .argument('<id>', 'risk id')
+    .requiredOption('--status <status>', 'open | mitigating | accepted | closed | realized')
+    .action((id: string, opts: { status?: string }) => cmdRiskStatus(id, opts));
+
+  const techDebtCmd = program
+    .command('techdebt')
+    .description('Manage the tech-debt ledger (add / list / resolve / seed from recorded findings)');
+
+  techDebtCmd
+    .command('add')
+    .description('Record a manual tech-debt item')
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--title <text>', 'short title')
+    .requiredOption('--description <text>', 'what the debt is')
+    .requiredOption(
+      '--category <cat>',
+      'code_quality | architecture | test_coverage | security | performance | documentation | dependency | dead_code | schema_drift'
+    )
+    .requiredOption('--severity <sev>', 'low | medium | high | critical')
+    .option('--effort <effort>', 'trivial | small | medium | large | unknown', 'unknown')
+    .option('--file <path>', 'file the debt is located in')
+    .action(
+      (pathArg: string, opts: { title?: string; description?: string; category?: string; severity?: string; effort?: string; file?: string }) =>
+        cmdTechDebtAdd(pathArg, opts)
+    );
+
+  techDebtCmd
+    .command('list')
+    .description('Print the tech-debt ledger for a project, most severe first')
+    .argument('[project-path]', 'target project directory', '.')
+    .option('--status <status>', 'filter by open | in_progress | resolved | wont_fix')
+    .action((pathArg: string, opts: { status?: string }) => cmdTechDebtList(pathArg, opts));
+
+  techDebtCmd
+    .command('resolve')
+    .description('Mark a tech-debt item resolved')
+    .argument('<id>', 'tech-debt item id')
+    .option('--build <build-run-id>', 'the build that resolved it')
+    .action((id: string, opts: { build?: string }) => cmdTechDebtResolve(id, opts));
+
+  techDebtCmd
+    .command('seed')
+    .description('Seed the ledger from findings FORGE already recorded (dead code, schema drift, dependency audit, adversary review)')
+    .argument('[project-path]', 'target project directory', '.')
+    .action((pathArg: string) => cmdTechDebtSeed(pathArg));
 
   program
     .command('compose')

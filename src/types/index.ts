@@ -656,3 +656,155 @@ export interface TestResult {
   duration: number;
   generatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Governance provenance ledgers: adr_records, assumptions, risks, tech_debt_items
+// ---------------------------------------------------------------------------
+
+export type AdrStatus = 'proposed' | 'accepted' | 'rejected' | 'deprecated' | 'superseded';
+
+/**
+ * Table: adr_records — the ADR (Architecture Decision Record) provenance log. One row per
+ * decision, numbered sequentially per project, with an explicit supersede chain (`supersedes`/
+ * `superseded_by`) so a decision's full history is reconstructible.
+ */
+export interface AdrRecord {
+  id: string;
+  project_name: string;
+  project_path: string;
+  /** Sequential per-project ADR number (ADR-001, ADR-002, …). */
+  adr_number: number;
+  title: string;
+  status: AdrStatus;
+  context: string;
+  decision: string;
+  consequences: string | null;
+  alternatives_considered: string[];
+  /** Who/what made the decision — a human name, or an agent/prompt identifier. */
+  decided_by: string;
+  /** Free-form provenance — the prompt, build, or discussion that produced this decision. */
+  source: string | null;
+  related_files: string[];
+  /** id of the ADR this one supersedes, if any. */
+  supersedes: string | null;
+  /** id of the ADR that superseded this one, if any (set when that later ADR is recorded). */
+  superseded_by: string | null;
+  build_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AssumptionCategory = 'technical' | 'business' | 'user' | 'infra' | 'data' | 'security';
+export type AssumptionStatus = 'unvalidated' | 'validated' | 'invalidated' | 'stale';
+
+/**
+ * Table: assumptions — the assumption registry. Tracks a claim taken as true during design/build
+ * that has not (yet) been independently verified, its validation status, and what breaks if it's
+ * wrong.
+ */
+export interface Assumption {
+  id: string;
+  project_name: string;
+  project_path: string;
+  statement: string;
+  category: AssumptionCategory;
+  status: AssumptionStatus;
+  /** Confidence in the assumption holding true, 0.0-1.0. Null if not yet assessed. */
+  confidence: number | null;
+  impact_if_wrong: string;
+  owner: string | null;
+  /** id of the ADR this assumption underpins, if any. */
+  related_adr_id: string | null;
+  validation_method: string | null;
+  validation_evidence: string | null;
+  validated_at: string | null;
+  build_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RiskCategory =
+  | 'technical'
+  | 'schedule'
+  | 'security'
+  | 'operational'
+  | 'compliance'
+  | 'financial'
+  | 'vendor';
+export type RiskStatus = 'open' | 'mitigating' | 'accepted' | 'closed' | 'realized';
+
+/**
+ * Table: risks — the risk register. `severity_score` is `probability * impact` (both 1-5),
+ * computed at write time so the register can be sorted/filtered without recomputing per read.
+ */
+export interface Risk {
+  id: string;
+  project_name: string;
+  project_path: string;
+  title: string;
+  description: string;
+  category: RiskCategory;
+  /** 1 (rare) - 5 (near-certain). */
+  probability: number;
+  /** 1 (negligible) - 5 (severe). */
+  impact: number;
+  /** probability * impact, 1-25. */
+  severity_score: number;
+  status: RiskStatus;
+  mitigation_plan: string | null;
+  owner: string | null;
+  related_adr_id: string | null;
+  related_assumption_id: string | null;
+  build_run_id: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TechDebtCategory =
+  | 'code_quality'
+  | 'architecture'
+  | 'test_coverage'
+  | 'security'
+  | 'performance'
+  | 'documentation'
+  | 'dependency'
+  | 'dead_code'
+  | 'schema_drift';
+export type TechDebtSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type TechDebtEffort = 'trivial' | 'small' | 'medium' | 'large' | 'unknown';
+export type TechDebtStatus = 'open' | 'in_progress' | 'resolved' | 'wont_fix';
+/** Where a tech-debt item's evidence came from — `'manual'`, or a real findings table it was seeded from. */
+export type TechDebtSource =
+  | 'manual'
+  | 'dead_code_findings'
+  | 'schema_drift_findings'
+  | 'dependency_audit_findings'
+  | 'adversary_findings';
+
+/**
+ * Table: tech_debt_items — the tech-debt ledger. Entries are either recorded manually or seeded
+ * from findings FORGE already persists (`dead_code_findings`, `schema_drift_findings`,
+ * `dependency_audit_findings`, `adversary_findings`); `source`/`source_finding_id` record which,
+ * with a unique index on the pair preventing duplicate seeding.
+ */
+export interface TechDebtItem {
+  id: string;
+  project_name: string;
+  project_path: string;
+  title: string;
+  description: string;
+  category: TechDebtCategory;
+  severity: TechDebtSeverity;
+  effort_estimate: TechDebtEffort;
+  status: TechDebtStatus;
+  file_path: string | null;
+  source: TechDebtSource;
+  /** id of the source findings row this was seeded from (null for manual entries). */
+  source_finding_id: string | null;
+  introduced_build_id: string | null;
+  resolved_build_id: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}

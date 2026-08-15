@@ -1,9 +1,27 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE
+## Current Session: Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Build State Machine + Change-Impact/Blast-Radius Analysis: `src/governance/build-state-machine.ts` (new — 13-value `ProjectState` + 10-value `TaskState` vocabularies, each with a real `*_STATE_TRANSITIONS` directed graph + `isValidTransition`, and `deriveProjectState`/`deriveTaskState`/`deriveTaskStates` pure inference functions grounded in `build_runs`/`gap_audit_runs`/`deployment_history`/`prompt_executions`), `src/governance/blast-radius.ts` (new — `analyzeBlastRadius`/`getGitChangedFiles`, reusing Architecture Guardian's `parseImports`/`buildDependencyGraph` inverted to a reverse-dependency BFS), `src/phases/phase3-executor.ts` (per-prompt task-state log + fire-and-forget blast-radius log, both observational), `src/phases/phase5-learner.ts` (step 15, always-on project-state derivation + summary-report section + `Phase5Result.projectState`), `src/cli/index.ts` (`forge state [project-path] [--tier]`, `forge blast-radius [project-path] [files...]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; both new CLI commands live-ran against this repo's own build/git state)
+## Last Updated: 2026-08-15 (Governance Provenance Ledgers: `src/learning/database.ts` (`GOVERNANCE_LEDGERS_SCHEMA_SQL` — new `adr_records`/`assumptions`/`risks`/`tech_debt_items` tables, schema bump `3.1.0` → `3.2.0`, `ALL_FORGE_TABLES` updated), `src/types/index.ts` (`AdrRecord`/`Assumption`/`Risk`/`TechDebtItem` + status/category enums), `src/memory/adr.ts`, `src/memory/assumptions.ts`, `src/memory/risks.ts`, `src/memory/tech-debt.ts` (new CRUD modules, wired into `src/memory/index.ts` › `BuildMemory`), `src/governance/provenance-ledgers.ts` (new — `recordAdr`/supersede-chain, `recordAssumption`/`validateAssumption`/`flagStaleAssumptions`, `recordRisk`/`computeSeverityScore`/`updateRiskStatus`, `recordTechDebtItem`/`resolveTechDebtItem`/`seedTechDebtFromFindings`), `src/cli/index.ts` (`forge adr add|list`, `forge assumption add|list|validate`, `forge risk add|list|status`, `forge techdebt add|list|resolve|seed`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; all four CLI command groups live-ran end-to-end against this repo's own `~/.forge/forge_memory.db`, including a real ADR supersede chain and an idempotent tech-debt seed from a real `dead_code_findings` row — scratch data cleaned up after verification)
+
+---
+
+## Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger (2026-08-15) — COMPLETE
+
+**Objective:** see `STATE_OF_THE_BUILD.md` § "Governance Provenance Ledgers — ADR log, assumption
+registry, risk register, tech-debt ledger" for the full grounding detail — four new Build Memory
+tables plus a domain layer, following the exact CRUD/degrade-honestly pattern every sibling
+`src/governance/`+`src/memory/*` module pair already establishes. Tech-debt entries can be entered
+manually or seeded (idempotently, via a dedup key) from findings FORGE already persists
+(`dead_code_findings`/`schema_drift_findings`/`dependency_audit_findings`/`adversary_findings`).
+
+**Verification:** `pnpm run build` — exit 0, 0 errors, run via Bash this session. `pnpm test` —
+35/35 pass. `forge adr add`/`list`, `forge assumption add`/`list`/`validate`, `forge risk
+add`/`list`/`status`, and `forge techdebt add`/`list`/`resolve`/`seed` all run live against a
+scratch project and this repo's real Build Memory database this session, including verifying the
+ADR supersede chain flips the prior ADR's status and that re-running `seed` against the same
+findings row is a no-op the second time.
 
 ---
 
@@ -1476,5 +1494,5 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T05:13:40.381Z
+- **Last changeset date:** 2026-08-15T05:30:34.232Z
 
