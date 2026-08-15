@@ -1,13 +1,121 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + **Governance Provenance Ledgers COMPLETE — four new Build Memory tables (`adr_records`, `assumptions`, `risks`, `tech_debt_items`) plus a `src/governance/provenance-ledgers.ts` domain layer (sequential ADR numbering + supersede chains, severity-score/staleness derivation, and tech-debt seeding from findings FORGE already persists — `dead_code_findings`/`schema_drift_findings`/`dependency_audit_findings`/`adversary_findings` — with a dedup key so re-seeding is idempotent) and four new `forge adr`/`forge assumption`/`forge risk`/`forge techdebt` CLI command groups**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + **Governance Provenance Ledgers (ALL COMPLETE)**
-**Schema version:** **3.2.0** — bumped from `3.1.0` by the Governance Provenance Ledgers' `adr_records`/`assumptions`/`risks`/`tech_debt_items` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.2.0'` this session; `GOVERNANCE_LEDGERS_SCHEMA_SQL` added to the migration guard and all four table names added to `ALL_FORGE_TABLES`).
+**Last Updated:** 2026-08-15 (Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + **Dead-Loop / Stagnation Detection (ALL COMPLETE)**
+**Schema version:** unchanged at **3.2.0** — Dead-Loop / Stagnation Detection adds no new table; both modules read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Dead-Loop / Stagnation Detection (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/ENGINEERING_COMPLETENESS.md` §§ 38-39 and `upgrades/SYSTEMS-5-9-GAP-MATRIX.md`
+row 29 ("Dead-loop / stagnation detection — MISSING — No match") named two related but distinct
+gaps: (38) FORGE can get trapped repeatedly retrying variations of the same unsuccessful approach
+("same error family detected 4 times... same remediation class attempted 3 times... STOP
+RETRYING"), and (39) FORGE can keep technically passing prompts while making almost no net
+progress ("12 hours elapsed, 317 tasks attempted, but only 3% reduction in remaining critical
+work... trigger replanning"). Both are now built, grounded entirely in Build Memory rows FORGE
+already writes — no new table, no fabricated signal, matching every sibling `src/governance/`
+module's posture.
+
+**New modules:**
+1. `src/governance/dead-loop-detection.ts` — `detectDeadLoop(errorText)` normalizes the failure
+   text with the exact same `normalizeErrorSignature` hash `recordFailureObserved`
+   (`src/engine/learning-writeback.ts`) already keys `error_patterns` on, then reads that pattern's
+   `occurrence_count` ("same error family detected N times") and its linked `resolutions` row's
+   `times_applied` ("same remediation class attempted N times" — `recordRecoveryOutcome` upserts
+   exactly ONE `resolutions` row per `error_pattern_id`, so `times_applied` already IS that count,
+   no extra bookkeeping needed). Trips at the spec's own thresholds, used verbatim:
+   `DEAD_LOOP_ERROR_FAMILY_THRESHOLD = 4`, `DEAD_LOOP_REMEDIATION_CLASS_THRESHOLD = 3` (either one
+   tripping is sufficient — the spec presents them as two independent example triggers, not a
+   conjunction). Returns the three spec-named recommended actions verbatim
+   (`multi_llm_consensus`/`architecture_review`/`alternative_strategy_generation`) as data for the
+   caller to act on — this module observes and recommends, it does not itself invoke a consensus
+   engine or architecture review. `listDeadLoopCandidates()` scans every `error_patterns` row
+   (project-agnostic, the same scope `findMatchingPattern` already looks up in) for `forge
+   deadloop`'s standalone diagnostic report.
+2. `src/governance/stagnation-detection.ts` — `detectStagnation(buildRunId)` reads
+   `build_runs.started_at` (set at build creation, live from the first prompt — confirmed
+   `phase3-executor.ts` passes `started_at: generatedAt` to `createBuild`, NOT only at
+   finalization) for elapsed hours, and `prompt_executions` rows for that build (live-inserted
+   per-prompt, confirmed via the same observation `build-state-machine.ts` already documented) for
+   completed-count and an attempts-made proxy (row count plus every row carrying a real
+   retry/rewrite signal — `resolution_applied !== null` or `was_rewritten`). Explicitly does NOT
+   read `build_runs.completed_prompts`/`failed_prompts`/`sentinel_interventions` — confirmed those
+   three columns are only written once, at build finalization (the same
+   `updateBuild(buildRunId, { completed_prompts, ... })` call site Governance Provenance Ledgers'
+   sibling sessions already relied on elsewhere), so mid-build they would silently read `0` masking
+   a real in-progress build as having made zero progress. Trips when a build is still `running` AND
+   elapsed ≥ `STAGNATION_ELAPSED_HOURS_THRESHOLD` (12h) AND attempts ≥
+   `STAGNATION_MIN_ATTEMPTS_THRESHOLD` (20, to avoid flagging a young/small build) AND progress
+   ratio < `STAGNATION_PROGRESS_RATIO_THRESHOLD` (5%) — tuned so the spec's own worked example
+   (12h/317 attempts/3% progress) trips all three. Recommends `trigger_replanning` — again, data for
+   the caller/human, never an auto-invoked replan.
+
+**Wiring (`src/phases/phase3-executor.ts`):**
+- Dead-loop: evaluated in the existing h1 failure-handling block immediately after
+  `recordFailureObserved` seeds/updates `error_patterns` for the current failure. When tripped,
+  BOTH the Build Brain targeted-fix attempt (`brainDiagnosis && ... && !deadLoopVerdict.isDeadLoop`)
+  and the Contract 14 autonomous-recovery re-run (`ctx.autonomousRecoveryMode &&
+  !deadLoopVerdict.isDeadLoop`) are skipped for that prompt — the spec's literal "STOP RETRYING" —
+  and a new `else if (deadLoopVerdict?.isDeadLoop)` branch escalates immediately with a disposition
+  note carrying the reason and recommended actions, plus a real BLOCKER entry appended to
+  STATE_OF_THE_BUILD.md (`appendDeadLoopBlocker`, mirroring `appendMigrationBlocker`'s existing
+  precedent).
+- Stagnation: evaluated once per prompt (observational, non-fatal — never touches `disposition`,
+  matching the State Machine/Blast Radius blocks' established log-only posture immediately
+  alongside it) via `ctx.buildRunId`. Appends exactly one WARNING (not a BLOCKER — individual
+  prompts may still be passing) to STATE_OF_THE_BUILD.md the FIRST time a build is judged stalled
+  (`ctx.stagnationWarned`, a new mutable `LoopContext` field, prevents re-appending on every
+  remaining prompt once tripped).
+
+**New CLI commands (`src/cli/index.ts`):** `forge deadloop` (no arguments — lists every currently
+tripped error signature, project-agnostic) and `forge stagnation [project-path] [--build <id>]`
+(evaluates an explicit build, or the project's most recent build via
+`BuildMemory.builds.getBuildsByProject`).
+
+**Architecture Guardian note:** the enforced-standards block appended to this session's task brief
+(auth middleware / zod request validation / rate limiting / structured `{error:{code,message}}`
+responses) targets HTTP API route handlers. FORGE is a CLI + library — this feature adds two
+`src/governance/` modules (same shape as `traceability.ts`/`invariants.ts`/`blast-radius.ts`/
+`build-state-machine.ts`, none of which implement those web-specific concerns either) plus CLI
+commands, with no HTTP boundary to guard, matching the identical note the Governance Provenance
+Ledgers session recorded immediately above. What does apply — no hardcoded/mock data standing in
+for a real call — is honored: every number either module reports comes from a live Build Memory
+read against `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`; nothing is fabricated.
+
+**Verification:** `pnpm run build` (`tsc`) — exit code 0, zero diagnostics, run via Bash this
+session. `pnpm test` — 35/35 tests pass (unaffected; no existing test file covers any sibling
+`src/governance/` module, matching that established precedent). Live-ran both new CLI commands
+against this repo's own real `~/.forge/forge_memory.db` this session: `forge deadloop` returned 8
+real dead-loop candidates already present in this repo's own accumulated Build Memory history
+(including the exact `error_patterns` rows corresponding to failure patterns already listed in this
+project's own "known failure patterns" governance data — e.g. a 25x-occurrence Sentinel diagnostic
+signature and a 12x-occurrence `typescript` failure, both also crossing the remediation-class
+threshold); `forge stagnation .` resolved this project's own most recent (still-`running`) build
+and correctly reported `not stagnant` (1.2h elapsed, 6 attempts, 45.5% progress — below the 12h/20
+attempts/95%-still-remaining thresholds).
+
+**NOT done this session, flagged not silently skipped:** no dedicated test file exists for either
+new `src/governance/` module (matching the same gap every sibling governance module in this file
+already carries); the in-build dead-loop escalation branch (skipping Build Brain/autonomous
+recovery and appending the BLOCKER) has not been observed firing on a live failing prompt this
+session — verified via a direct CLI query against real historical rows instead, since reliably
+reproducing a fresh 4x-occurrence failure inside one session's build would require running the same
+failing prompt four separate times; the stagnation WARNING append path is likewise unverified
+against a real stalled build (this repo's own build is healthy and far from either threshold).
+
+**Next action:** add `__tests__/dead-loop-detection.test.ts` and
+`__tests__/stagnation-detection.test.ts` covering the threshold math against synthetic
+`error_patterns`/`resolutions`/`build_runs`/`prompt_executions` rows; consider whether
+`listDeadLoopCandidates()` should accept an optional project filter once cross-project Build Memory
+sharing is exercised more heavily (today it is intentionally global, matching
+`findMatchingPattern`'s existing scope).
 
 ---
 
@@ -2459,3 +2567,5 @@ forge build ./my-project --start-at 5 --dry-run
 > 2026-08-15T05:16:24.558Z [FORGE Phase 3] prompt 3 'stage4-traceability-invariants' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T05:34:08.449Z [FORGE Phase 3] prompt 4 'stage4-state-machine-blast-radius' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T05:55:33.646Z [FORGE Phase 3] prompt 5 'stage4-adr-risk-debt' (feature): COMPLETED â€" Sentinel PASS.

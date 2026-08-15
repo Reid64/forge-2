@@ -172,6 +172,13 @@ import { getClient, logMemoryWarning, newId } from '../memory/client.js';
 import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
 import { analyzeBlastRadius } from '../governance/blast-radius.js';
 import { deriveTaskState } from '../governance/build-state-machine.js';
+import {
+  detectDeadLoop,
+  DEAD_LOOP_ERROR_FAMILY_THRESHOLD,
+  DEAD_LOOP_REMEDIATION_CLASS_THRESHOLD,
+  type DeadLoopVerdict,
+} from '../governance/dead-loop-detection.js';
+import { detectStagnation, type StagnationVerdict } from '../governance/stagnation-detection.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -1524,6 +1531,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     failedSignaturesThisBuild: new Set<string>(),
     brainInterventions: { count: 0 },
     elevatedRuleIds: new Set<string>(),
+    stagnationWarned: { warned: false },
     liveStatus,
     healthMonitor,
     log,
@@ -1988,6 +1996,12 @@ interface LoopContext {
   brainInterventions: { count: number };
   /** governance_rules ids auto-elevated during this build (Task 1.3's build-completion insight). */
   elevatedRuleIds: Set<string>;
+  /**
+   * Set once `detectStagnation` (`src/governance/stagnation-detection.ts`) trips for this build,
+   * so the STATE_OF_THE_BUILD.md stagnation WARNING is appended exactly once per build rather than
+   * once per remaining prompt.
+   */
+  stagnationWarned: { warned: boolean };
   /** Live build-status writer (Task 3 â€” Session 4). Always present; a disk failure just no-ops. */
   liveStatus: LiveStatusWriter;
   /** Build-wide health monitor (Autonomy: BuildHealthMonitor) â€” read for the Sentinel Prime halt record. */
@@ -2537,6 +2551,12 @@ async function executePrompt(
     const initialErrorText = sentinel.diagnosticReport;
     const initialFailedCheck = sentinel.failedCheck;
     let brainDiagnosis: BrainDiagnosis | null = null;
+    // DEAD-LOOP DETECTION (src/governance/dead-loop-detection.ts, ENGINEERING_COMPLETENESS.md
+    // section 38): populated below once recordFailureObserved has upserted this failure's
+    // error_patterns/resolutions rows. When tripped, both the Build Brain targeted-fix attempt
+    // and the Contract 14 autonomous-recovery re-run are skipped for this prompt (the spec's
+    // literal "STOP RETRYING") in favor of immediate escalation.
+    let deadLoopVerdict: DeadLoopVerdict | null = null;
 
     if (wasFailingInitially) {
       await recordFailureObserved({
@@ -2546,6 +2566,20 @@ async function executePrompt(
         projectName: ctx.projectName,
         stackFingerprint: ctx.stackFingerprint,
       }).catch((err) => log(`prompt ${index} '${entry.id}': recordFailureObserved non-fatal â€” ${describe(err)}`));
+
+      try {
+        deadLoopVerdict = await detectDeadLoop(initialErrorText);
+        if (deadLoopVerdict.isDeadLoop) {
+          log(
+            `prompt ${index} '${entry.id}': [DEAD-LOOP DETECTION] ${deadLoopVerdict.reason} -- ` +
+              `STOP RETRYING; recommended: ${deadLoopVerdict.recommendedActions.join(', ')}.`
+          );
+          await appendDeadLoopBlocker(join(ctx.projectPath, ctx.governanceDirName), ctx.buildRunId, entry, index, deadLoopVerdict);
+        }
+      } catch (error) {
+        log(`prompt ${index} '${entry.id}': detectDeadLoop non-fatal -- ${describe(error)}`);
+        deadLoopVerdict = null;
+      }
 
       try {
         brainDiagnosis = await analyzeSentinelFailure(sentinel, entry, {
@@ -2559,7 +2593,7 @@ async function executePrompt(
         brainDiagnosis = null;
       }
 
-      if (brainDiagnosis && !brainDiagnosis.escalate && brainDiagnosis.knownFix) {
+      if (brainDiagnosis && !brainDiagnosis.escalate && brainDiagnosis.knownFix && !deadLoopVerdict?.isDeadLoop) {
         ctx.brainInterventions.count += 1;
         await ctx.liveStatus.promptPhase(
           { index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'recovering' },
@@ -2678,7 +2712,7 @@ async function executePrompt(
         disposition = 'failed';
         note = `Design review rejected (Autonomous Recovery disabled): ${feedback}`;
       }
-    } else if (ctx.autonomousRecoveryMode) {
+    } else if (ctx.autonomousRecoveryMode && !deadLoopVerdict?.isDeadLoop) {
       // j. Autonomous Recovery (Contract 14): re-run the prompt + Sentinel, up to 2 attempts. Uses
       // Build Brain's targeted recoveryPrompt instead of the identical original prompt when one is
       // available AND hasn't already failed this build (never repeat a fix that just failed).
@@ -2730,6 +2764,14 @@ async function executePrompt(
           })
           .catch((err) => log(`prompt ${index} '${entry.id}': recordRecoveryOutcome non-fatal â€” ${describe(err)}`));
       }
+    } else if (deadLoopVerdict?.isDeadLoop) {
+      // DEAD-LOOP DETECTION tripped above: neither the Build Brain fix nor Contract 14's
+      // autonomous-recovery re-run were attempted for this prompt (both gated on
+      // `!deadLoopVerdict.isDeadLoop`) -- escalate immediately instead of burning another attempt.
+      disposition = 'failed';
+      note =
+        `Dead loop detected -- STOP RETRYING (${deadLoopVerdict.reason}). ` +
+        `Recommended: ${deadLoopVerdict.recommendedActions.join(', ')}.`;
     } else {
       disposition = 'failed';
       note = `Sentinel failed (${sentinel.failedCheck ?? 'unknown'}) â€” Autonomous Recovery disabled, escalating (Contract 14).`;
@@ -2795,6 +2837,25 @@ async function executePrompt(
       resolution_applied: recovery && recovery.attempted ? recovery.reason : null,
     });
     log(`[STATE MACHINE] prompt ${index} '${entry.id}': task state -> ${derivedTaskState}`);
+
+    // STAGNATION DETECTION (observational, non-fatal) -- `src/governance/stagnation-detection.ts`,
+    // ENGINEERING_COMPLETENESS.md section 39: "Even if tasks technically 'pass,' FORGE should
+    // detect when progress stalls." Re-evaluated after every prompt from real build_runs +
+    // prompt_executions rows; never blocks disposition. Appended to STATE_OF_THE_BUILD.md exactly
+    // once per build (`ctx.stagnationWarned`), since the underlying condition persists across
+    // every remaining prompt once tripped.
+    if (ctx.buildRunId && !ctx.stagnationWarned.warned) {
+      try {
+        const stagnation = await detectStagnation(ctx.buildRunId);
+        if (stagnation?.isStagnant) {
+          ctx.stagnationWarned.warned = true;
+          log(`prompt ${index} '${entry.id}': [STAGNATION DETECTION] ${stagnation.reason} Recommended: ${stagnation.recommendedAction}.`);
+          await appendStagnationWarning(join(ctx.projectPath, ctx.governanceDirName), stagnation);
+        }
+      } catch (error) {
+        log(`prompt ${index} '${entry.id}': detectStagnation non-fatal -- ${describe(error)}`);
+      }
+    }
 
     // BLAST RADIUS ANALYSIS (observational, non-fatal) â€” ENGINEERING_COMPLETENESS.md Â§ "Every
     // modification should trigger the question: 'What else could this affect?'". Reuses
@@ -3189,21 +3250,35 @@ function mergeAndTag(ctx: LoopContext, index: number): void {
   if (!tag.success) ctx.log(`prompt ${index}: checkpoint tag failed â€” ${tag.error ?? 'unknown'}`);
 }
 
-/** Read the files this branch changed relative to main (for the prompt_execution record). */
+/**
+ * Read the files this branch changed relative to main (for the prompt_execution record and
+ * CHANGESET.md). Falls back to the branch's own latest commit (`HEAD~1..HEAD`) when the
+ * three-dot diff against main shows nothing productive (e.g. the feature branch has already
+ * converged with main) â€” the same fallback `phase4-sentinel.ts`'s file_delta check already
+ * applies; without it, a prompt that did real, committed work could still be recorded here as
+ * having changed no files at all.
+ */
 function filesChanged(ctx: LoopContext): { created: string[]; modified: string[]; deleted: string[] } {
-  const created: string[] = [];
-  const modified: string[] = [];
-  const deleted: string[] = [];
-  const diff = ctx.git.getBranchDiff();
-  if (diff.success) {
-    for (const f of diff.files) {
-      const bucket = classifyChange(f.status);
-      if (bucket === 'created') created.push(f.path);
-      else if (bucket === 'modified') modified.push(f.path);
-      else if (bucket === 'deleted') deleted.push(f.path);
+  const bucket = (files: readonly { path: string; status: string }[]): { created: string[]; modified: string[]; deleted: string[] } => {
+    const created: string[] = [];
+    const modified: string[] = [];
+    const deleted: string[] = [];
+    for (const f of files) {
+      const kind = classifyChange(f.status);
+      if (kind === 'created') created.push(f.path);
+      else if (kind === 'modified') modified.push(f.path);
+      else if (kind === 'deleted') deleted.push(f.path);
     }
-  }
-  return { created, modified, deleted };
+    return { created, modified, deleted };
+  };
+
+  const diff = ctx.git.getBranchDiff();
+  if (diff.success && diff.files.length > 0) return bucket(diff.files);
+
+  const headDiff = ctx.git.getHeadDiff();
+  if (headDiff.success && headDiff.files.length > 0) return bucket(headDiff.files);
+
+  return { created: [], modified: [], deleted: [] };
 }
 
 /** Poll interval for the post-run git quiescence check. */
@@ -3583,6 +3658,64 @@ async function appendAccessibilityReport(
     await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
   } catch {
     /* non-fatal â€” an accessibility-report write failure must never affect the build's disposition */
+  }
+}
+
+/**
+ * DEAD-LOOP DETECTION: append a BLOCKER entry to STATE_OF_THE_BUILD.md the moment a prompt's
+ * failure signature is confirmed a dead loop, mirroring {@link appendMigrationBlocker}'s
+ * precedent -- a real BLOCKER (not a WARNING), since this prompt's disposition is genuinely
+ * failing/escalating as a direct result, not merely something worth flagging alongside a pass.
+ * Guarded -- a write failure here must never affect the prompt's already-decided disposition.
+ */
+async function appendDeadLoopBlocker(
+  governanceDir: string,
+  buildRunId: string | null,
+  entry: QueueEntry,
+  index: number,
+  verdict: DeadLoopVerdict
+): Promise<void> {
+  try {
+    const block = [
+      '',
+      '## [FORGE Phase 3] BLOCKER -- Dead-Loop Detection',
+      `- Build: ${buildRunId ?? '(stateless)'}`,
+      `- Prompt ${index} '${entry.id}' (${entry.prompt_type})`,
+      `- Error family occurrences: ${verdict.errorFamilyOccurrences} (threshold ${DEAD_LOOP_ERROR_FAMILY_THRESHOLD})`,
+      `- Remediation class '${verdict.remediationClassType ?? 'unknown'}' attempts: ${verdict.remediationClassAttempts} (threshold ${DEAD_LOOP_REMEDIATION_CLASS_THRESHOLD})`,
+      `- Recommended: ${verdict.recommendedActions.join(', ')}`,
+      `- Timestamp: ${nowIso()}`,
+      '',
+    ].join('\n');
+    await mkdir(governanceDir, { recursive: true });
+    await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
+  } catch {
+    /* non-fatal -- a blocker write failure must never affect the prompt's already-decided disposition */
+  }
+}
+
+/**
+ * STAGNATION DETECTION: append a WARNING (not a BLOCKER -- individual prompts may still be
+ * passing; this is an observational signal about the build's overall trajectory, never a reason
+ * to fail a prompt) to STATE_OF_THE_BUILD.md the first time a build is judged stalled. Guarded --
+ * a write failure here must never affect any prompt's disposition.
+ */
+async function appendStagnationWarning(governanceDir: string, verdict: StagnationVerdict): Promise<void> {
+  try {
+    const block = [
+      '',
+      '## [FORGE Phase 3] WARNING -- Stagnation Detection',
+      `- Build: ${verdict.buildRunId}`,
+      `- Elapsed: ${verdict.elapsedHours.toFixed(1)}h, attempts made: ${verdict.attemptsMade}`,
+      `- Progress: ${verdict.completedCount}/${verdict.totalPrompts} prompts completed (${(verdict.progressRatio * 100).toFixed(1)}%)`,
+      `- Recommended: ${verdict.recommendedAction}`,
+      `- Timestamp: ${nowIso()}`,
+      '',
+    ].join('\n');
+    await mkdir(governanceDir, { recursive: true });
+    await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
+  } catch {
+    /* non-fatal -- a warning write failure must never affect any prompt's disposition */
   }
 }
 

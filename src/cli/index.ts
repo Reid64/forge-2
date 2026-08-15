@@ -1658,6 +1658,57 @@ async function cmdBlastRadius(pathArg: string, files: string[]): Promise<void> {
 }
 
 /**
+ * `forge deadloop` — Dead-Loop Detection (`src/governance/dead-loop-detection.ts`). Scans every
+ * `error_patterns` row (dead loops are a property of the error, not of one project — the same
+ * scope `findMatchingPattern` already looks up in) and prints the ones currently tripped.
+ */
+async function cmdDeadLoop(): Promise<void> {
+  const { listDeadLoopCandidates, formatDeadLoopVerdict } = await import('../governance/dead-loop-detection.js');
+  const candidates = await listDeadLoopCandidates();
+  console.log(chalk.bold('\nFORGE Dead-Loop Detection\n'));
+  if (candidates.length === 0) {
+    console.log(chalk.green('No error signature currently exceeds the dead-loop thresholds.'));
+    return;
+  }
+  console.log(chalk.red.bold(`${candidates.length} dead-loop candidate(s):\n`));
+  for (const v of candidates) {
+    console.log(formatDeadLoopVerdict(v));
+    console.log('');
+  }
+}
+
+/**
+ * `forge stagnation <path> [--build <id>]` — Stagnation Detection
+ * (`src/governance/stagnation-detection.ts`). Evaluates the given build, or the project's most
+ * recent build when `--build` is omitted.
+ */
+async function cmdStagnation(pathArg: string, opts: { build?: string }): Promise<void> {
+  const { detectStagnation, formatStagnationVerdict } = await import('../governance/stagnation-detection.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const projectName = basename(projectPath);
+
+  let buildId = opts.build;
+  if (!buildId) {
+    const builds = await BuildMemory.builds.getBuildsByProject(projectName);
+    if (!builds || builds.length === 0) {
+      fail(`No builds recorded for project "${projectName}" — pass --build <id> explicitly, or run a build first.`);
+      return;
+    }
+    buildId = builds[0]!.id;
+  }
+
+  const result = await detectStagnation(buildId);
+  if (!result) {
+    fail(`Could not evaluate build ${buildId} — unknown build id, or Build Memory is unreachable.`);
+    return;
+  }
+  console.log(chalk.bold(`\nFORGE Stagnation Detection — ${projectName}\n`));
+  console.log(formatStagnationVerdict(result));
+  console.log('');
+  console.log(result.isStagnant ? chalk.red.bold('STAGNANT — replanning recommended') : chalk.green.bold('not stagnant'));
+}
+
+/**
  * `forge adr` — the ADR (Architecture Decision Record) provenance log
  * (`src/governance/provenance-ledgers.ts`). `add` records a decision with automatic sequential
  * numbering and an optional supersede chain; `list` prints the full log for a project.
@@ -4297,6 +4348,18 @@ async function main(): Promise<void> {
     .argument('[project-path]', 'target project directory', '.')
     .argument('[files...]', 'explicit changed files (relative or absolute) — omit to auto-detect from git')
     .action((pathArg: string, files: string[]) => cmdBlastRadius(pathArg, files));
+
+  program
+    .command('deadloop')
+    .description('List error signatures currently past the dead-loop thresholds (same error family 4x, or one remediation class attempted 3x)')
+    .action(() => cmdDeadLoop());
+
+  program
+    .command('stagnation')
+    .description("Evaluate a build for stagnation (elapsed time vs. progress) and recommend replanning when stalled")
+    .argument('[project-path]', 'target project directory', '.')
+    .option('--build <id>', 'build_run id to evaluate — omit to use the project\'s most recent build')
+    .action((pathArg: string, opts: { build?: string }) => cmdStagnation(pathArg, opts));
 
   const adrCmd = program
     .command('adr')

@@ -2,59 +2,27 @@
   "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
   "project": "forge-2",
   "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T05:34:24.391Z",
+  "updatedAt": "2026-08-15T05:55:46.963Z",
   "currentPrompt": {
-    "index": 5,
-    "id": "stage4-adr-risk-debt",
-    "name": "Build ADR provenance log, assumption registry, risk register, tech-debt ledger",
+    "index": 6,
+    "id": "stage4-deadloop",
+    "name": "Build dead-loop and stagnation detection",
     "type": "feature",
     "phase": "executing"
   },
   "totals": {
-    "completed": 4,
+    "completed": 5,
     "failed": 0,
-    "remaining": 7,
-    "tokensEstimated": 7385,
-    "costEstimatedUsd": 0.289344,
-    "totalElapsedMs": 2311366
+    "remaining": 6,
+    "tokensEstimated": 9448,
+    "costEstimatedUsd": 0.362496,
+    "totalElapsedMs": 3596323
   },
   "lastSentinel": {
     "passed": false,
     "failedCheck": null
   },
   "recentEvents": [
-    {
-      "timestamp": "2026-08-15T05:02:23.929Z",
-      "message": "prompt 2 'stage2-readiness-dod' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T05:02:26.287Z",
-      "message": "prompt 3 'stage4-traceability-invariants' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T05:02:26.296Z",
-      "message": "prompt 3 'stage4-traceability-invariants' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T05:02:42.700Z",
-      "message": "prompt 3 'stage4-traceability-invariants' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T05:14:11.742Z",
-      "message": "prompt 3 'stage4-traceability-invariants' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T05:14:11.744Z",
-      "message": "Sentinel FAIL (unknown)"
-    },
-    {
-      "timestamp": "2026-08-15T05:14:12.677Z",
-      "message": "Build Brain: applying targeted fix (confidence 0.40)"
-    },
-    {
-      "timestamp": "2026-08-15T05:14:12.679Z",
-      "message": "prompt 3 'stage4-traceability-invariants': Build Brain targeted recovery (confidence 0.40)"
-    },
     {
       "timestamp": "2026-08-15T05:16:09.475Z",
       "message": "prompt 3 'stage4-traceability-invariants' (feature): merged"
@@ -102,7 +70,39 @@
     {
       "timestamp": "2026-08-15T05:34:24.391Z",
       "message": "prompt 5 'stage4-adr-risk-debt' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T05:47:12.382Z",
+      "message": "prompt 5 'stage4-adr-risk-debt' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T05:47:12.387Z",
+      "message": "Sentinel FAIL (unknown)"
+    },
+    {
+      "timestamp": "2026-08-15T05:47:13.602Z",
+      "message": "Build Brain: applying targeted fix (confidence 0.57)"
+    },
+    {
+      "timestamp": "2026-08-15T05:47:13.604Z",
+      "message": "prompt 5 'stage4-adr-risk-debt': Build Brain targeted recovery (confidence 0.57)"
+    },
+    {
+      "timestamp": "2026-08-15T05:55:26.200Z",
+      "message": "prompt 5 'stage4-adr-risk-debt' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T05:55:33.882Z",
+      "message": "prompt 6 'stage4-deadloop' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T05:55:33.894Z",
+      "message": "prompt 6 'stage4-deadloop' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T05:55:46.963Z",
+      "message": "prompt 6 'stage4-deadloop' (feature): executing"
     }
   ],
-  "brainInterventions": 3
+  "brainInterventions": 4
 }

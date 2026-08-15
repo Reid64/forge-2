@@ -1,9 +1,26 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE
+## Current Session: Dead-Loop / Stagnation Detection — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Governance Provenance Ledgers: `src/learning/database.ts` (`GOVERNANCE_LEDGERS_SCHEMA_SQL` — new `adr_records`/`assumptions`/`risks`/`tech_debt_items` tables, schema bump `3.1.0` → `3.2.0`, `ALL_FORGE_TABLES` updated), `src/types/index.ts` (`AdrRecord`/`Assumption`/`Risk`/`TechDebtItem` + status/category enums), `src/memory/adr.ts`, `src/memory/assumptions.ts`, `src/memory/risks.ts`, `src/memory/tech-debt.ts` (new CRUD modules, wired into `src/memory/index.ts` › `BuildMemory`), `src/governance/provenance-ledgers.ts` (new — `recordAdr`/supersede-chain, `recordAssumption`/`validateAssumption`/`flagStaleAssumptions`, `recordRisk`/`computeSeverityScore`/`updateRiskStatus`, `recordTechDebtItem`/`resolveTechDebtItem`/`seedTechDebtFromFindings`), `src/cli/index.ts` (`forge adr add|list`, `forge assumption add|list|validate`, `forge risk add|list|status`, `forge techdebt add|list|resolve|seed`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; all four CLI command groups live-ran end-to-end against this repo's own `~/.forge/forge_memory.db`, including a real ADR supersede chain and an idempotent tech-debt seed from a real `dead_code_findings` row — scratch data cleaned up after verification)
+## Last Updated: 2026-08-15 (Dead-Loop / Stagnation Detection: `src/governance/dead-loop-detection.ts` (new — `detectDeadLoop`/`detectDeadLoopBySignature`/`listDeadLoopCandidates` against the existing `error_patterns`/`resolutions` tables, thresholds `DEAD_LOOP_ERROR_FAMILY_THRESHOLD=4`/`DEAD_LOOP_REMEDIATION_CLASS_THRESHOLD=3` taken verbatim from the spec example), `src/governance/stagnation-detection.ts` (new — `detectStagnation` against the existing `build_runs`/`prompt_executions` tables, thresholds `STAGNATION_ELAPSED_HOURS_THRESHOLD=12`/`STAGNATION_MIN_ATTEMPTS_THRESHOLD=20`/`STAGNATION_PROGRESS_RATIO_THRESHOLD=0.05`), `src/phases/phase3-executor.ts` (dead-loop check wired into the h1 failure-handling block — skips Build Brain fix + Contract 14 autonomous recovery and escalates immediately once tripped, plus a new `appendDeadLoopBlocker` STATE_OF_THE_BUILD.md writer; stagnation check wired in as a per-prompt observational block alongside State Machine/Blast Radius, plus a new `appendStagnationWarning` writer and a new `stagnationWarned` `LoopContext` field), `src/cli/index.ts` (`forge deadloop`, `forge stagnation [path] [--build <id>]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; both new CLI commands live-ran against this repo's own real `~/.forge/forge_memory.db` — `forge deadloop` found 8 real tripped candidates already in this project's own accumulated failure history, `forge stagnation .` correctly reported `not stagnant` for this repo's own live build)
+
+---
+
+## Dead-Loop / Stagnation Detection (2026-08-15) — COMPLETE
+
+**Objective:** see `STATE_OF_THE_BUILD.md` § "Dead-Loop / Stagnation Detection" for the full
+grounding detail — `upgrades/ENGINEERING_COMPLETENESS.md` §§ 38-39, both built against data FORGE
+already records (`error_patterns`/`resolutions` for dead-loop; `build_runs`/`prompt_executions` for
+stagnation), no new table, no invented signal, thresholds taken verbatim from the spec's own worked
+examples.
+
+**Verification:** `pnpm run build` — exit 0, 0 errors, run via Bash this session. `pnpm test` —
+35/35 pass. `forge deadloop` and `forge stagnation .` both run live against this repo's own real
+Build Memory database this session — `forge deadloop` surfaced 8 genuine dead-loop candidates
+already present in this project's own accumulated failure history (no synthetic data needed, since
+this project's own multi-session build history already crossed the thresholds); `forge stagnation .`
+correctly evaluated this repo's own live build as not stagnant.
 
 ---
 
@@ -1494,5 +1511,5 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T05:30:34.232Z
+- **Last changeset date:** 2026-08-15T05:46:46.801Z
 
