@@ -864,7 +864,8 @@ async function runDesignPipelineCheck(
       modifiedFiles,
       // Phase 3 is fully autonomous (BLUEPRINT "AUTONOMOUS OPERATION RULES" — never wait for
       // human approval mid-build), so the review gate always runs non-interactively here.
-      true
+      true,
+      ctx.queueEntries?.map((e) => ({ id: e.id, name: e.name, description: e.description, prompt_type: e.prompt_type }))
     );
     ctx.log(
       `[DESIGN PIPELINE] Screenshots: ${result.screenshotPaths.length} viewports and ` +
@@ -1589,6 +1590,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     costTracker,
     guardian: architectureGuardian,
     designPipeline,
+    queueEntries: schedule.order,
   };
 
   const outcomes: PromptOutcome[] = [];
@@ -2100,6 +2102,13 @@ interface LoopContext {
   guardian: ArchitectureGuardian;
   /** Design Pipeline (screenshot capture + optional Penpot push + visual review gate). */
   designPipeline: DesignPipeline;
+  /**
+   * The full ordered queue (`schedule.order`) â€” threaded through to `designPipeline.run()` so
+   * `app-profiler.ts` profiles the WHOLE project's corpus rather than one prompt at a time.
+   * Optional so a test/caller constructing a `LoopContext` by hand (without a full schedule)
+   * still compiles; `runDesignPipelineCheck` falls back to a single-entry corpus when absent.
+   */
+  queueEntries?: QueueEntry[];
 }
 
 /** Build the Sentinel options for this build (shared by the main run + recovery re-runs). */

@@ -1,13 +1,79 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)** + **Deferred Concurrent Execution COMPLETE — `src/phases/phase3-executor.ts`'s `runPromptsConcurrently` (the `maxConcurrency > 1` counterpart to the sequential prompt loop, driving `src/engine/parallel-scheduler.ts`'s pre-existing `executeSchedule` to fan each dependency-satisfied wave out onto its own linked git worktree via `src/engine/git-manager.ts`'s `createWorktree`/`mergeDelegate`, plus a new `tagDelegate` option so a linked worktree's checkpoint tag lands on the primary's real merge commit instead of the worktree's own stale HEAD)**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + **Deferred Concurrent Execution (ALL COMPLETE)**
-**Schema version:** unchanged at **3.2.0** — the Consensus Engine Upgrade and Dead-Loop / Stagnation Detection add no new tables; the upgrade reuses `production_telemetry` (event kind `consensus_proposal`, alongside the existing `consensus_validator`) and Dead-Loop/Stagnation read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
-**Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
+**Last Updated:** 2026-08-15 (Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory — COMPLETE, on top of Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)** + **Deferred Concurrent Execution COMPLETE — `src/phases/phase3-executor.ts`'s `runPromptsConcurrently` (the `maxConcurrency > 1` counterpart to the sequential prompt loop, driving `src/engine/parallel-scheduler.ts`'s pre-existing `executeSchedule` to fan each dependency-satisfied wave out onto its own linked git worktree via `src/engine/git-manager.ts`'s `createWorktree`/`mergeDelegate`, plus a new `tagDelegate` option so a linked worktree's checkpoint tag lands on the primary's real merge commit instead of the worktree's own stale HEAD)** + **Design Intelligence COMPLETE — `src/design-pipeline/app-profiler.ts` (App Profiler: deterministic `AppDesignProfile` derivation from queue corpus + `package.json`), `design-router.ts` (Design Capability Registry + Design Tool Router: spec-formula weighted scoring across `taste_skill`/`impeccable`/`awesome_design`/`img2threejs`, `playwright` always validation-only), `design-memory.ts` (cross-project prefer/reject tag ledger fed by real rejection feedback + tournament outcomes), `design-tournament.ts` (Design Tournament Engine: 2-4 structurally-distinct variants through the real `UIComponentGenerator`, scored on the 2/9 rubric dimensions with a real automated evaluator, never auto-selects a winner) — App Profiler + Design Router wired as a non-blocking step 0a into `design-pipeline/index.ts`'s `DesignPipeline.run()`; Design Tournament is complete, tested, standalone infrastructure not yet wired into the default per-prompt pipeline (opt-in, not called on every component)**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + Deferred Concurrent Execution + **Design Intelligence (ALL COMPLETE)**
+**Schema version:** **3.3.0** — bumped from 3.2.0 by Design Intelligence: `app_design_profiles`, `design_router_decisions`, `design_preferences`, `design_tournament_runs`, `design_tournament_variants` (all added to `ALL_FORGE_TABLES` in `src/learning/database.ts`).
+**Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8) + prompt 10/11 Design Intelligence (this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/DESIGN_INTELLIGENCE.md` components #01 (App Profiler), #05/#06 (Design
+Capability Registry / Design Tool Router), #09/#10 (Design Variance Controller / Design Tournament
+Engine), and #22 (Design Memory) — all four confirmed zero prior implementation by
+`upgrades/SYSTEMS-5-9-GAP-MATRIX.md`.
+
+**What shipped** (`src/design-pipeline/{app-profiler,design-router,design-memory,design-tournament}.ts`,
+2187 lines total):
+- **App Profiler** — a real `AppDesignProfile` (application type, interface types, brand tone/avoid,
+  visual complexity, motion/3D requirement, per-interface data density, target users) derived by
+  deterministic keyword scoring against a project's real queue-entry corpus + `package.json` —
+  never an LLM call, never a fabricated per-project claim. Persisted to `app_design_profiles`.
+- **Design Router** (+ Design Capability Registry) — scores `taste_skill`/`impeccable`/
+  `awesome_design`/`img2threejs` against a profile using the spec's own weighted formula verbatim,
+  every dimension grounded in a real signal (capability registry, brand-tag overlap, real
+  `design_router_decisions.outcome` win-rate, Design Memory preference score, real `package.json`
+  presence, the spec's own audit-score column) — `historical_success`/`user_preference` degrade to
+  a neutral 0.5 when unobserved, never a fabricated lean. `playwright` is always the validation
+  tool, never a routing candidate. Advisory: produces an explainable, persisted decision but does
+  not itself switch generators — none of `taste-skill`/`impeccable`/`awesome-design`/`img2threejs`
+  are installed in this codebase yet.
+- **Design Memory** — a cross-project `prefer`/`reject` tag ledger (`design_preferences`, upserted
+  by `(tag, polarity)`) fed by real human rejection-feedback text and real Design Tournament
+  winning/losing variant structural tags — never inferred sentiment from silence.
+- **Design Tournament Engine** (+ Design Variance Controller) — generates 2-4 structurally distinct
+  variants (four fixed directions, real generation parameters folded into the spec so variance is
+  enforced by construction, never a `color_only_variant`) through the real `UIComponentGenerator`,
+  captured through the real `PlaywrightScreenshotter`, scored on the 2 of 9 spec rubric dimensions
+  this codebase has a genuine automated evaluator for (`accessibility`, `responsive_quality`) — the
+  other 7 are explicitly disclosed as unscored, never faked to a fake /100. Never auto-selects a
+  winner (`applyTournamentChoice` requires an explicit human choice).
+
+**Wiring:** App Profiler + Design Router run as a new non-blocking step 0a inside
+`design-pipeline/index.ts`'s `DesignPipeline.run()` (`runDesignIntelligence`), fed the full
+project queue corpus via `phase3-executor.ts`'s `LoopContext.queueEntries` (`schedule.order`).
+The review-gate outcome feeds back into `recordRoutingOutcome` (historical_success) and, for a
+genuine interactive human rejection only, into Design Memory. Design Tournament is complete and
+tested but NOT wired into the default per-prompt pipeline — it is opt-in, standalone
+infrastructure for a future explicit caller (a multi-variant tournament on every single component
+is not what the spec calls for).
+
+**Schema:** bump 3.2.0 -> 3.3.0, `DESIGN_INTELLIGENCE_SCHEMA_SQL` in `src/learning/database.ts`:
+`app_design_profiles`, `design_router_decisions`, `design_preferences`,
+`design_tournament_runs`/`design_tournament_variants`.
+
+**Tests:** `tests/design-intelligence.test.ts` (new, 23 tests) — pure-function coverage for all
+four modules plus real round-trip coverage against the live local Build Memory SQLite db and an
+injected-fake `DesignTournamentEngine.run`. `pnpm run build` / `npx tsc --noEmit` — 0 errors.
+`pnpm run test` — 35/35 pass, no regression.
+
+**A real bug found and fixed this pass:** the prior write of `design-router.ts` left a `tsc`
+compile error (`TS2322`/`TS2362`/`TS2532`) — a tuple-array literal lost its contextual `[string,
+number]` typing across a chained `.sort()` call, widening to `(string|number)[][]`. Fixed by
+casting the literal to `Array<[string, number]>` before `.sort()` (`design-router.ts:372`). See
+CHANGESET.md's correction note on this entry for the full detail.
+
+**NOT done, flagged not silently skipped:** no live end-to-end run of the Design Pipeline against a
+real target Next.js project with `queueEntries` populated through an actual Phase 3 build (this
+repo has no target application to run one against, and non-interactive `pnpm`/build-tool
+invocation is separately tracked as blocked — Build Memory's `forge2-headless-permission-blocker`).
+Design Tournament's preview-route write/cleanup and dev-server capture paths are real code with
+only injected-fake unit coverage, no live-server integration test.
 
 ---
 
@@ -2736,3 +2802,7 @@ Memory: "exec is INTERMITTENT"), not a regression from this change; none of the 
 routing tables, or the consensus engine.
 
 > 2026-08-15T06:54:35.470Z [FORGE Phase 3] prompt 8 'stage6-consensus-upgrade' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T07:34:52.211Z [FORGE Phase 3] prompt 9 'stage7-queue-concurrency' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T07:50:17.167Z [FORGE Phase 3] prompt 10 'Build App Profiler, Design Router, Design Tournament, Design Memory' (feature): COMPLETED â€" build fixed (design-router.ts tsc error), 23 new tests added, tsc/build/test all pass.

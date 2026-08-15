@@ -2,55 +2,27 @@
   "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
   "project": "forge-2",
   "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T07:10:15.774Z",
+  "updatedAt": "2026-08-15T07:50:48.997Z",
   "currentPrompt": {
-    "index": 9,
-    "id": "stage7-queue-concurrency",
-    "name": "Enable deferred concurrent execution in parallel-scheduler",
+    "index": 10,
+    "id": "stage8-design-intelligence",
+    "name": "Build App Profiler, Design Router, Design Tournament, Design Memory",
     "type": "feature",
     "phase": "recovering"
   },
   "totals": {
-    "completed": 8,
+    "completed": 9,
     "failed": 0,
-    "remaining": 3,
-    "tokensEstimated": 15221,
-    "costEstimatedUsd": 0.582432,
-    "totalElapsedMs": 7137132
+    "remaining": 2,
+    "tokensEstimated": 17223,
+    "costEstimatedUsd": 0.657168,
+    "totalElapsedMs": 9553590
   },
   "lastSentinel": {
     "passed": true,
     "failedCheck": null
   },
   "recentEvents": [
-    {
-      "timestamp": "2026-08-15T06:18:08.325Z",
-      "message": "prompt 6 'stage4-deadloop' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T06:18:19.473Z",
-      "message": "prompt 7 'stage5-observability' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T06:18:19.486Z",
-      "message": "prompt 7 'stage5-observability' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T06:18:34.431Z",
-      "message": "prompt 7 'stage5-observability' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T06:23:44.515Z",
-      "message": "prompt 7 'stage5-observability' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T06:23:44.517Z",
-      "message": "Sentinel FAIL (unknown)"
-    },
-    {
-      "timestamp": "2026-08-15T06:23:45.678Z",
-      "message": "Build Brain: applying targeted fix (confidence 0.67)"
-    },
     {
       "timestamp": "2026-08-15T06:23:45.680Z",
       "message": "prompt 7 'stage5-observability': Build Brain targeted recovery (confidence 0.67)"
@@ -101,6 +73,34 @@
     },
     {
       "timestamp": "2026-08-15T07:10:15.774Z",
+      "message": "Timeout retry: re-running with 2x budget (1800s)"
+    },
+    {
+      "timestamp": "2026-08-15T07:34:36.539Z",
+      "message": "prompt 9 'stage7-queue-concurrency' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T07:34:36.551Z",
+      "message": "Sentinel PASS"
+    },
+    {
+      "timestamp": "2026-08-15T07:34:39.327Z",
+      "message": "prompt 9 'stage7-queue-concurrency' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T07:34:52.478Z",
+      "message": "prompt 10 'stage8-design-intelligence' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T07:34:52.487Z",
+      "message": "prompt 10 'stage8-design-intelligence' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T07:35:10.309Z",
+      "message": "prompt 10 'stage8-design-intelligence' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T07:50:48.997Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
     }
   ],

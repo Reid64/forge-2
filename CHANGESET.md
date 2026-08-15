@@ -324,3 +324,92 @@ modified here; flagged again because this session produced a concrete, reproduci
 against a real project, not just a theoretical concern.
 
 ---
+## 2026-08-15T07:50:17.167Z â€” Build App Profiler, Design Router, Design Tournament, Design Memory (prompt 10/11)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- (none)
+
+### Files Deleted
+
+- (none)
+
+### Correction note
+
+The original auto-generated entry above recorded zero files because the prompt run it describes
+left `src/design-pipeline/design-router.ts` failing `tsc` (`TS2322`/`TS2362`/`TS2532` on the
+`topDimensions` tuple-array literal losing its contextual tuple type across a chained `.sort()`
+call) â€” the prior run exited with the four target modules fully written but the build actually
+broken, not merely undocumented (same failure shape as the prompt-9 correction note above). This
+pass fixed the compile error for real (cast the literal to `Array<[string, number]>` before
+`.sort()`, `src/design-pipeline/design-router.ts:372`) and verified/completed the rest:
+
+- `src/design-pipeline/app-profiler.ts` (new, 514 lines) â€” component #01 App Profiler: derives an
+  `AppDesignProfile` (application type, interface types, brand tone/avoid, visual complexity,
+  motion/3D requirement, per-interface data density, target users) from a project's real
+  queue-entry corpus + `package.json`, via deterministic keyword scoring (never an LLM call).
+  Persists to the new `app_design_profiles` table, upserted by `project_name`.
+- `src/design-pipeline/design-router.ts` (new, 469 lines) â€” components #05/#06 Design Capability
+  Registry + Design Tool Router: scores `taste_skill`/`impeccable`/`awesome_design`/`img2threejs`
+  against an `AppDesignProfile` using the spec's own weighted formula
+  (`capability_match*0.30 + interface_match*0.20 + brand_match*0.15 + historical_success*0.10 +
+  user_preference*0.10 + project_stack_match*0.05 + accessibility_quality*0.05 +
+  performance_quality*0.05`), persists the explainable decision to `design_router_decisions`.
+  `playwright` is always `validationTool`, never a routing candidate. Advisory only â€” no alternate
+  generator is actually invoked yet; a future integration reads its tool choice off
+  `DesignRoutingDecision.primaryTool`.
+- `src/design-pipeline/design-memory.ts` (new, 233 lines) â€” component #22 Design Memory: a
+  cross-project `prefer`/`reject` tag ledger (`design_preferences`, upserted by `(tag, polarity)`)
+  fed by real human rejection-feedback text (keyword-matched against a fixed vocabulary) and real
+  Design Tournament winning/losing variant structural tags. `getPreferenceScore` is the
+  `user_preference` signal `design-router.ts` reads, neutral (0.5) for any unobserved tag.
+- `src/design-pipeline/design-tournament.ts` (new, 608 lines) â€” component #10 Design Tournament
+  Engine (+ #09 Design Variance Controller, folded in as `computeTokenJaccardSimilarity`):
+  generates 2-4 structurally distinct variants (four fixed directions, each carrying real
+  `designVariance`/`motionIntensity`/`density`/`structuralTags` folded into the spec before
+  generation â€” never a `color_only_variant`) through the real `UIComponentGenerator`, captures
+  through the real `PlaywrightScreenshotter`, scores the 2 of 9 spec rubric dimensions
+  (`accessibility`, `responsive_quality`) this codebase has a real automated evaluator for, and
+  never auto-selects a winner â€” `applyTournamentChoice` requires an explicit human choice, same
+  posture as `review-gate.ts`. Persists to `design_tournament_runs`/`design_tournament_variants`.
+- `src/learning/database.ts` â€” schema bump 3.2.0 -> 3.3.0: `app_design_profiles`,
+  `design_router_decisions`, `design_preferences`, `design_tournament_runs`,
+  `design_tournament_variants` (all added to `ALL_FORGE_TABLES`).
+- `src/design-pipeline/index.ts` â€” wires App Profiler + Design Router into
+  `DesignPipeline.run()` as a new, non-blocking step 0a (`runDesignIntelligence`): refreshes the
+  project's `AppDesignProfile` from the full queue corpus (`schedule.order`, threaded through from
+  `phase3-executor.ts`) + `package.json`, routes the top-scoring interface type, logs the spec's
+  `DESIGN ROUTING:` explainability block, and feeds the eventual review-gate outcome back into
+  `recordRoutingOutcome` (historical_success) and, for a genuine interactive human rejection only,
+  into Design Memory. Design Tournament is NOT wired into the default per-prompt pipeline (a
+  multi-variant tournament is an opt-in, expensive operation the spec does not call for on every
+  single component) â€” it is complete, tested, standalone infrastructure for a future explicit
+  caller.
+- `src/phases/phase3-executor.ts` â€” threads `schedule.order` through `LoopContext.queueEntries`
+  into `designPipeline.run()`'s new optional parameter.
+- `tests/design-intelligence.test.ts` (new) â€” 23 tests: pure-function coverage for all four
+  modules' deterministic pieces (classification, scoring math, spec construction, tag extraction,
+  Jaccard similarity) plus real round-trip coverage against the live local Build Memory SQLite db
+  (`app_design_profiles`/`design_preferences`/`design_router_decisions` insert+read+upsert) and an
+  injected-`ComponentGeneratorLike` run of `DesignTournamentEngine` (per-variant failure isolation,
+  no screenshotter configured). This makes `design-tournament.ts`'s own header claim of being
+  "unit-tested ... matching tests/design-system-generator.test.ts's injected-runner style" true â€”
+  it was not, before this pass.
+
+**Verification:** `npx tsc --noEmit` / `pnpm run build` â€” 0 errors. `pnpm run test` (the 4 wired
+learning-engine suites) â€” 35/35 pass, no regression. `node --import tsx --test
+tests/design-intelligence.test.ts` â€” 23/23 pass.
+
+**NOT done, flagged not silently skipped:** no live end-to-end run of the Design Pipeline against a
+real target Next.js project with `queueEntries` actually populated end-to-end through Phase 3 (this
+repo â€” the FORGE tool itself â€” has no target application to run one against, and `pnpm`/build-tool
+invocation from a non-interactive session is separately tracked as blocked â€” see Build Memory's
+`forge2-headless-permission-blocker`). Design Tournament's preview-route write/cleanup path and
+dev-server capture integration are real code but have no live-server integration test in this pass,
+only the injected-fake unit coverage described above.
+
+---

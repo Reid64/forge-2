@@ -1653,7 +1653,7 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T07:09:57.693Z
+- **Last changeset date:** 2026-08-15T07:50:17.167Z
 
 ## Files Modified This Session (prompt 8 — stage6-consensus-upgrade: Consensus Engine Upgrade)
 
@@ -1670,4 +1670,29 @@ Changed files:
 `tests/provider-router.test.ts` → all Perplexity-related tests pass; 3 pre-existing unrelated tests
 fail in this sandbox due to the `anthropic` route shelling out to the real `claude` CLI (known
 environment quirk, not a regression — see FORGE Build Memory "exec is INTERMITTENT").
+
+## Files Modified This Session (prompt 10 — Build App Profiler, Design Router, Design Tournament, Design Memory)
+
+Arrived at the start of this session already written (untracked, prior run's work) but with the
+build broken — `src/design-pipeline/design-router.ts` failed `tsc` (a tuple-array literal losing
+its contextual `[string, number]` type across a chained `.sort()` call). Fixed that for real, then
+verified/completed the rest:
+
+- `src/design-pipeline/app-profiler.ts` (new, 514 lines) — App Profiler: deterministic `AppDesignProfile` derivation from queue corpus + `package.json`, persisted to `app_design_profiles`.
+- `src/design-pipeline/design-router.ts` (new, 469 lines; fixed this session) — Design Capability Registry + Design Tool Router, spec-formula weighted scoring, persisted to `design_router_decisions`.
+- `src/design-pipeline/design-memory.ts` (new, 233 lines) — cross-project prefer/reject tag ledger, `design_preferences`.
+- `src/design-pipeline/design-tournament.ts` (new, 608 lines) — Design Tournament Engine + Design Variance Controller, `design_tournament_runs`/`design_tournament_variants`.
+- `src/learning/database.ts` (modified) — schema bump 3.2.0 → 3.3.0, `DESIGN_INTELLIGENCE_SCHEMA_SQL` (5 new tables).
+- `src/design-pipeline/index.ts` (modified) — wires App Profiler + Design Router into `DesignPipeline.run()` as non-blocking step 0a; Design Tournament left standalone/opt-in (not called on every component).
+- `src/phases/phase3-executor.ts` (modified) — threads `schedule.order` into `LoopContext.queueEntries` → `designPipeline.run()`.
+- `tests/design-intelligence.test.ts` (new) — 23 tests: pure-function coverage for all four modules + real Build Memory round-trips + injected-fake `DesignTournamentEngine.run`.
+- `CHANGESET.md`, `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md` (this file) — updated from actual codebase audit, with a correction note explaining the prior run's broken-build gap.
+
+**Verified:** `npx tsc --noEmit` / `pnpm run build` → 0 errors. `pnpm run test` (4 wired learning-engine
+suites) → 35/35 pass, no regression. `node --import tsx --test tests/design-intelligence.test.ts` →
+23/23 pass (real DB round-trips included, against the live local `~/.forge/forge_memory.db`).
+
+**NOT done:** no live end-to-end Design Pipeline run against a real target Next.js project (this repo
+has no target app to run one against); Design Tournament's dev-server capture path has only
+injected-fake unit coverage, no live-server integration test.
 

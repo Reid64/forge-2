@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '3.2.0';
+export const CURRENT_SCHEMA_VERSION = '3.3.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -821,6 +821,113 @@ const GOVERNANCE_LEDGERS_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_tech_debt_severity ON tech_debt_items(severity);
 `;
 
+/**
+ * Design Intelligence tables (schema bump 3.2.0 -> 3.3.0): App Profiler, Design Router, Design
+ * Tournament, and Design Memory — the four `upgrades/DESIGN_INTELLIGENCE.md` components this
+ * session builds on top of the existing capture/audit/approve pipeline
+ * (`design_reviews`/`design_screenshots`, schema 3.1.0). Same posture as every other
+ * `src/design-pipeline/` table: real rows written by real callers (`app-profiler.ts`/
+ * `design-router.ts`/`design-tournament.ts`/`design-memory.ts`), never fabricated.
+ *
+ * `app_design_profiles` — one row per project (upserted), the {@link AppDesignProfile} App
+ * Profiler derives from a project's queue-entry corpus + `package.json`.
+ * `design_router_decisions` — one row per routing decision, carrying every tool's computed
+ * weighted score for explainability, plus an `outcome` column the design-pipeline review result
+ * updates after the fact so `historical_success` has real data to read on the next decision.
+ * `design_preferences` — Design Memory's cross-project prefer/reject tag ledger, upserted by
+ * `(tag, polarity)` so repeated signals accumulate weight instead of duplicating rows.
+ * `design_tournament_runs`/`design_tournament_variants` — one run + N variant rows per Design
+ * Tournament invocation, carrying each variant's structural direction parameters and whatever
+ * automated-evaluator scores were actually computed (never a fabricated number for a dimension
+ * with no evaluator — see `design-tournament.ts`'s `dimensions_scored` column).
+ */
+const DESIGN_INTELLIGENCE_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS app_design_profiles (
+      id                         TEXT PRIMARY KEY,
+      project_name               TEXT NOT NULL,
+      application_type_primary   TEXT NOT NULL,
+      application_type_secondary TEXT NOT NULL DEFAULT '[]',
+      interface_types            TEXT NOT NULL DEFAULT '[]',
+      brand_tone                 TEXT NOT NULL DEFAULT '[]',
+      brand_avoid                TEXT NOT NULL DEFAULT '[]',
+      visual_complexity          TEXT NOT NULL CHECK(visual_complexity IN ('low','medium','high')),
+      motion_requirement         TEXT NOT NULL CHECK(motion_requirement IN ('none','minimal','moderate','high')),
+      three_d_requirement        TEXT NOT NULL CHECK(three_d_requirement IN ('none','low','medium','high')),
+      data_density                TEXT NOT NULL DEFAULT '{}',
+      target_users                TEXT NOT NULL DEFAULT '[]',
+      source_summary              TEXT NOT NULL DEFAULT '',
+      created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_app_design_profiles_project ON app_design_profiles(project_name);
+
+    CREATE TABLE IF NOT EXISTS design_router_decisions (
+      id                TEXT PRIMARY KEY,
+      project_name      TEXT NOT NULL,
+      build_run_id      TEXT,
+      prompt_id         TEXT,
+      interface_type    TEXT NOT NULL,
+      tool_scores       TEXT NOT NULL DEFAULT '{}',
+      primary_tool      TEXT NOT NULL,
+      secondary_tool    TEXT,
+      validation_tool   TEXT NOT NULL DEFAULT 'playwright',
+      not_selected      TEXT NOT NULL DEFAULT '[]',
+      reasons           TEXT NOT NULL DEFAULT '[]',
+      confidence        REAL NOT NULL DEFAULT 0,
+      outcome           TEXT CHECK(outcome IN ('approved','rejected') OR outcome IS NULL),
+      created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_router_decisions_project ON design_router_decisions(project_name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_design_router_decisions_tool ON design_router_decisions(primary_tool, outcome);
+
+    CREATE TABLE IF NOT EXISTS design_preferences (
+      id             TEXT PRIMARY KEY,
+      tag            TEXT NOT NULL,
+      polarity       TEXT NOT NULL CHECK(polarity IN ('prefer','reject')),
+      weight         REAL NOT NULL DEFAULT 1,
+      occurrences    INTEGER NOT NULL DEFAULT 1,
+      last_project   TEXT,
+      last_source    TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_design_preferences_tag_polarity ON design_preferences(tag, polarity);
+    CREATE INDEX IF NOT EXISTS idx_design_preferences_weight ON design_preferences(polarity, weight DESC);
+
+    CREATE TABLE IF NOT EXISTS design_tournament_runs (
+      id                 TEXT PRIMARY KEY,
+      project_name       TEXT NOT NULL,
+      build_run_id       TEXT,
+      prompt_id          TEXT,
+      component_name     TEXT NOT NULL,
+      variant_count      INTEGER NOT NULL,
+      status             TEXT NOT NULL DEFAULT 'awaiting_approval' CHECK(status IN ('awaiting_approval','approved','rejected')),
+      winning_variant_id TEXT,
+      recommendation     TEXT,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      decided_at         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_tournament_runs_project ON design_tournament_runs(project_name, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS design_tournament_variants (
+      id                 TEXT PRIMARY KEY,
+      run_id             TEXT NOT NULL REFERENCES design_tournament_runs(id),
+      direction_id       TEXT NOT NULL,
+      direction_name     TEXT NOT NULL,
+      design_variance    REAL NOT NULL,
+      motion_intensity   REAL NOT NULL,
+      density            TEXT NOT NULL,
+      structural_tags    TEXT NOT NULL DEFAULT '[]',
+      file_path          TEXT,
+      screenshot_paths   TEXT NOT NULL DEFAULT '[]',
+      scores             TEXT NOT NULL DEFAULT '{}',
+      total_score        REAL,
+      dimensions_scored  INTEGER NOT NULL DEFAULT 0,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_tournament_variants_run ON design_tournament_variants(run_id);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -869,6 +976,12 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'assumptions',
   'risks',
   'tech_debt_items',
+  // Design Intelligence: App Profiler, Design Router, Design Tournament, Design Memory (schema 3.3.0)
+  'app_design_profiles',
+  'design_router_decisions',
+  'design_preferences',
+  'design_tournament_runs',
+  'design_tournament_variants',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -1192,6 +1305,9 @@ export function initializeForgeMemory(dbPath?: string): void {
   // 3.1.0 -> 3.2.0 (Governance Provenance Ledgers): adr_records, assumptions, risks,
   // tech_debt_items.
   db.exec(GOVERNANCE_LEDGERS_SCHEMA_SQL);
+  // 3.2.0 -> 3.3.0 (Design Intelligence): app_design_profiles, design_router_decisions,
+  // design_preferences, design_tournament_runs, design_tournament_variants.
+  db.exec(DESIGN_INTELLIGENCE_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);
