@@ -1,83 +1,36 @@
 {
-  "buildRunId": "41fbf52a-d000-4c2f-8d74-a12ced71f608",
+  "buildRunId": "c47ae905-713a-4ccf-b2eb-8f348e467e5d",
   "project": "forge-2",
-  "startedAt": "2026-08-15T18:43:56.858Z",
-  "updatedAt": "2026-08-15T19:42:40.358Z",
+  "startedAt": "2026-08-15T21:58:10.560Z",
+  "updatedAt": "2026-08-15T21:58:40.218Z",
   "currentPrompt": {
-    "index": 2,
-    "id": "scratch-promote-gate-and-locks",
-    "name": "promote_scratch gate type and concurrent-session lock mechanism",
+    "index": 1,
+    "id": "wire-real-design-tool-detection",
+    "name": "Detect installed img2threejs skill and impeccable marketplace, remove stale NOT_INSTALLED comment",
     "type": "feature",
-    "phase": "merged"
+    "phase": "executing"
   },
   "totals": {
-    "completed": 2,
+    "completed": 0,
     "failed": 0,
-    "remaining": 0,
-    "tokensEstimated": 3721,
-    "costEstimatedUsd": 0.146256,
-    "totalElapsedMs": 3522040
+    "remaining": 22,
+    "tokensEstimated": 0,
+    "costEstimatedUsd": 0,
+    "totalElapsedMs": 0
   },
-  "lastSentinel": {
-    "passed": true,
-    "failedCheck": null
-  },
+  "lastSentinel": null,
   "recentEvents": [
     {
-      "timestamp": "2026-08-15T18:43:57.081Z",
-      "message": "prompt 1 'scratch-promote-classification' (feature): start"
+      "timestamp": "2026-08-15T21:58:10.753Z",
+      "message": "prompt 1 'wire-real-design-tool-detection' (feature): start"
     },
     {
-      "timestamp": "2026-08-15T18:43:57.094Z",
-      "message": "prompt 1 'scratch-promote-classification' (feature): assembled"
+      "timestamp": "2026-08-15T21:58:10.769Z",
+      "message": "prompt 1 'wire-real-design-tool-detection' (feature): assembled"
     },
     {
-      "timestamp": "2026-08-15T18:44:42.253Z",
-      "message": "prompt 1 'scratch-promote-classification' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T19:00:20.786Z",
-      "message": "Timeout retry: re-running with 2x budget (1800s)"
-    },
-    {
-      "timestamp": "2026-08-15T19:21:52.920Z",
-      "message": "prompt 1 'scratch-promote-classification' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T19:21:52.924Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T19:21:55.702Z",
-      "message": "prompt 1 'scratch-promote-classification' (feature): merged"
-    },
-    {
-      "timestamp": "2026-08-15T19:22:07.899Z",
-      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T19:22:07.917Z",
-      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T19:22:41.265Z",
-      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T19:38:14.797Z",
-      "message": "Timeout retry: re-running with 2x budget (1800s)"
-    },
-    {
-      "timestamp": "2026-08-15T19:42:27.185Z",
-      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T19:42:27.189Z",
-      "message": "Sentinel PASS"
-    },
-    {
-      "timestamp": "2026-08-15T19:42:30.210Z",
-      "message": "prompt 2 'scratch-promote-gate-and-locks' (feature): merged"
+      "timestamp": "2026-08-15T21:58:40.218Z",
+      "message": "prompt 1 'wire-real-design-tool-detection' (feature): executing"
     }
   ],
   "brainInterventions": 0

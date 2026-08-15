@@ -36,19 +36,31 @@
  * `playwright` is always the `validationTool` (every spec routing example lists it last,
  * unconditionally) and is never a candidate for `primaryTool`/`secondaryTool`.
  *
- * IMPORTANT SCOPE NOTE: none of `taste-skill`/`impeccable`/`awesome-design`/`img2threejs` are
- * installed or invoked by this codebase (`upgrades/SYSTEMS-5-9-GAP-MATRIX.md` rows 07/12/16
- * confirm all three remain MISSING). `routeDesign()` therefore produces a real, explainable,
- * persisted DECISION — which tool a prompt SHOULD use and why — but does not itself switch which
- * generator actually runs `ui-engine/component-generator.ts` remains the only real generator this
- * codebase invokes. A caller wiring an actual taste-skill/Impeccable/img2threejs integration in
- * the future reads its own tool name off {@link DesignRoutingDecision.primaryTool} instead of
- * hardcoding a choice.
+ * INSTALL DETECTION: each {@link ToolScoreBreakdown.installed} flag is a real, live filesystem
+ * check against this machine's Claude Code user directory (`~/.claude`), computed fresh by
+ * {@link detectInstalledDesignTools} on every `routeDesign()` call — never a cached or hardcoded
+ * assumption. `img2threejs` is installed when `~/.claude/skills/img2threejs/SKILL.md` exists;
+ * `impeccable` is installed when `~/.claude/plugins/known_marketplaces.json` registers an
+ * `impeccable` marketplace (key `impeccable` or a `pbakaus/impeccable` source repo). `taste_skill`
+ * and `awesome_design` have no known skill/marketplace name to check against yet, so they report
+ * `installed: false` until one is identified — never guessed. `installed` is informational only:
+ * it is not one of the eight weighted scoring dimensions above and never changes `total`, since
+ * routing scores a tool's fitness for the interface, not this machine's local setup. Even when a
+ * tool is installed, `routeDesign()` still only produces a persisted DECISION — which tool a
+ * prompt SHOULD use and why — `ui-engine/component-generator.ts` remains the only generator this
+ * codebase actually invokes. A caller wiring a real taste-skill/Impeccable/img2threejs/
+ * Awesome-Design integration reads its own tool name off {@link DesignRoutingDecision.primaryTool}
+ * (and its install state off `scores[tool].installed`) instead of hardcoding a choice.
  *
  * House style, matching every sibling `src/design-pipeline/` module: `routeDesign()` never
  * throws — a Build Memory failure degrades `historical_success`/`user_preference` to their
- * neutral defaults rather than blocking a decision.
+ * neutral defaults rather than blocking a decision, and an install-detection failure (unreadable
+ * `~/.claude` directory) degrades every tool's `installed` to `false` rather than throwing.
  */
+
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { newId, nowIso, runQuery, toJsonText } from '../memory/client.js';
 import { logLine } from '../tools/forge-logger.js';
@@ -76,6 +88,8 @@ export interface ToolScoreBreakdown {
   accessibilityQuality: number;
   performanceQuality: number;
   total: number;
+  /** Real, live-detected install state on this machine (see {@link detectInstalledDesignTools}). Not part of `total`. */
+  installed: boolean;
 }
 
 export interface DesignRoutingDecision {
@@ -220,6 +234,59 @@ const INTERFACE_TYPE_TO_CAPABILITY_KEYS: Readonly<Record<string, readonly string
 };
 
 // ---------------------------------------------------------------------------
+// Real install detection — live filesystem checks against ~/.claude, never hardcoded/cached
+// ---------------------------------------------------------------------------
+
+const CLAUDE_USER_HOME = join(homedir(), '.claude');
+
+/** `true` when `~/.claude/skills/img2threejs/SKILL.md` exists on this machine. */
+function isImg2ThreejsSkillInstalled(): boolean {
+  try {
+    return existsSync(join(CLAUDE_USER_HOME, 'skills', 'img2threejs', 'SKILL.md'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `true` when `~/.claude/plugins/known_marketplaces.json` registers an `impeccable` marketplace
+ * (matched by key or by its `pbakaus/impeccable` GitHub source repo — the marketplace's own
+ * identity, not any particular plugin published from it).
+ */
+function isImpeccableMarketplaceRegistered(): boolean {
+  try {
+    const path = join(CLAUDE_USER_HOME, 'plugins', 'known_marketplaces.json');
+    if (!existsSync(path)) return false;
+    const marketplaces = JSON.parse(readFileSync(path, 'utf8')) as Record<
+      string,
+      { source?: { source?: string; repo?: string } } | undefined
+    >;
+    return Object.entries(marketplaces).some(([key, value]) => {
+      if (key.toLowerCase() === 'impeccable') return true;
+      const repo = value?.source?.repo;
+      return typeof repo === 'string' && repo.toLowerCase() === 'pbakaus/impeccable';
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Live install/registration state for every {@link DESIGN_TOOLS} candidate on this machine.
+ * `taste_skill`/`awesome_design` have no known Claude Code skill or marketplace name to check
+ * against yet, so they report `false` until one is identified (never guessed). Never throws — an
+ * unreadable `~/.claude` directory degrades every flag to `false`.
+ */
+export function detectInstalledDesignTools(): Readonly<Record<DesignTool, boolean>> {
+  return {
+    taste_skill: false,
+    impeccable: isImpeccableMarketplaceRegistered(),
+    awesome_design: false,
+    img2threejs: isImg2ThreejsSkillInstalled(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Scoring weights (spec formula, verbatim — sums to 1.00)
 // ---------------------------------------------------------------------------
 
@@ -288,7 +355,8 @@ function scoreTool(
   profile: AppDesignProfile,
   historicalSuccess: number,
   userPreference: number,
-  packageJson: RouteDesignOptions['packageJson']
+  packageJson: RouteDesignOptions['packageJson'],
+  installed: boolean
 ): ToolScoreBreakdown {
   const capabilityMatch = capabilityMatchFor(entry, interfaceType);
   const interfaceMatch = interfaceMatchFor(entry, profile);
@@ -317,6 +385,7 @@ function scoreTool(
     accessibilityQuality,
     performanceQuality,
     total,
+    installed,
   };
 }
 
@@ -348,6 +417,7 @@ export async function routeDesign(
   interfaceType: string,
   options: RouteDesignOptions = {}
 ): Promise<DesignRoutingDecision> {
+  const installedTools = detectInstalledDesignTools();
   const scores = {} as Record<DesignTool, ToolScoreBreakdown>;
   for (const tool of DESIGN_TOOLS) {
     const entry = DESIGN_CAPABILITY_REGISTRY[tool];
@@ -355,7 +425,15 @@ export async function routeDesign(
       historicalSuccessFor(tool),
       getPreferenceScore(entry.preferenceTags),
     ]);
-    scores[tool] = scoreTool(entry, interfaceType, profile, historicalSuccess, userPreference, options.packageJson);
+    scores[tool] = scoreTool(
+      entry,
+      interfaceType,
+      profile,
+      historicalSuccess,
+      userPreference,
+      options.packageJson,
+      installedTools[tool]
+    );
   }
 
   const ranked = DESIGN_TOOLS.slice().sort((a, b) => scores[b]!.total - scores[a]!.total);
@@ -446,16 +524,17 @@ export async function recordRoutingOutcome(decisionId: string, outcome: 'approve
 /** Render a {@link DesignRoutingDecision} in the spec's own `DESIGN ROUTING:` explainability format. */
 export function formatRoutingDecision(decision: DesignRoutingDecision): string {
   const lines: string[] = [];
+  const installedTag = (tool: DesignTool): string => (decision.scores[tool].installed ? ' [installed]' : ' [not installed]');
   lines.push(`DESIGN ROUTER DECISION — ${decision.projectName} / ${decision.interfaceType}`);
-  lines.push(`PRIMARY TOOL: ${decision.primaryTool.toUpperCase()}`);
+  lines.push(`PRIMARY TOOL: ${decision.primaryTool.toUpperCase()}${installedTag(decision.primaryTool)}`);
   lines.push(`CONFIDENCE: ${decision.confidencePercent}%`);
   lines.push('REASONS:');
   for (const r of decision.reasons) lines.push(`  ${r}`);
-  if (decision.secondaryTool) lines.push(`SECONDARY: ${decision.secondaryTool.toUpperCase()}`);
+  if (decision.secondaryTool) lines.push(`SECONDARY: ${decision.secondaryTool.toUpperCase()}${installedTag(decision.secondaryTool)}`);
   lines.push(`VALIDATION: ${decision.validationTool.toUpperCase()}`);
   if (decision.notSelected.length > 0) {
     lines.push('NOT SELECTED:');
-    for (const n of decision.notSelected) lines.push(`  ${n.tool.toUpperCase()} — ${n.reason}`);
+    for (const n of decision.notSelected) lines.push(`  ${n.tool.toUpperCase()}${installedTag(n.tool)} — ${n.reason}`);
   }
   return lines.join('\n');
 }
