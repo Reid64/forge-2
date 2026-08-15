@@ -86,6 +86,7 @@ import { evaluateDoD, appendDoDFailureBlocker, type DoDResult } from '../governa
 import type { ReadinessTierId } from '../governance/readiness-levels.js';
 import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
 import { deriveProjectState, type ProjectStateResult } from '../governance/build-state-machine.js';
+import { RunRecorder } from '../telemetry/run-recorder.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
 import type {
   BuildRun,
@@ -1057,6 +1058,17 @@ export async function runPhase5Learner(
     warnings,
     generatedAt
   );
+
+  // Control Plane run telemetry (upgrades/CAPABILITIES_MEMO.md observability section): write this
+  // same summary report, verbatim, to .forge/runs/<build-run-id>/final-report.md â€” the SAME
+  // directory Phase 3 mirrored this build's console output into (RunRecorder resolves the
+  // directory from buildRunId alone, so no ambient state needs to survive across the Phase 3/5
+  // boundary). Best-effort; never blocks Phase 5.
+  try {
+    new RunRecorder(buildRunId, projectPath).writeFinalReport(summaryReport);
+  } catch (error) {
+    log(`WARNING: could not write run telemetry final-report.md (${describe(error)})`);
+  }
 
   let reportPath: string | null = null;
   if (options.writeReport) {

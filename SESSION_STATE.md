@@ -1,9 +1,69 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Dead-Loop / Stagnation Detection — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE
+## Current Session: Control Plane Run Telemetry (.forge/runs/*.jsonl) — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Dead-Loop / Stagnation Detection: `src/governance/dead-loop-detection.ts` (new — `detectDeadLoop`/`detectDeadLoopBySignature`/`listDeadLoopCandidates` against the existing `error_patterns`/`resolutions` tables, thresholds `DEAD_LOOP_ERROR_FAMILY_THRESHOLD=4`/`DEAD_LOOP_REMEDIATION_CLASS_THRESHOLD=3` taken verbatim from the spec example), `src/governance/stagnation-detection.ts` (new — `detectStagnation` against the existing `build_runs`/`prompt_executions` tables, thresholds `STAGNATION_ELAPSED_HOURS_THRESHOLD=12`/`STAGNATION_MIN_ATTEMPTS_THRESHOLD=20`/`STAGNATION_PROGRESS_RATIO_THRESHOLD=0.05`), `src/phases/phase3-executor.ts` (dead-loop check wired into the h1 failure-handling block — skips Build Brain fix + Contract 14 autonomous recovery and escalates immediately once tripped, plus a new `appendDeadLoopBlocker` STATE_OF_THE_BUILD.md writer; stagnation check wired in as a per-prompt observational block alongside State Machine/Blast Radius, plus a new `appendStagnationWarning` writer and a new `stagnationWarned` `LoopContext` field), `src/cli/index.ts` (`forge deadloop`, `forge stagnation [path] [--build <id>]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; both new CLI commands live-ran against this repo's own real `~/.forge/forge_memory.db` — `forge deadloop` found 8 real tripped candidates already in this project's own accumulated failure history, `forge stagnation .` correctly reported `not stagnant` for this repo's own live build)
+## Last Updated: 2026-08-15 (Control Plane Run Telemetry: `src/telemetry/run-recorder.ts` (new — `RunRecorder` class writing `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`; `setActiveRunRecorder`/`getActiveRunRecorder` ambient singleton), `src/phases/phase3-executor.ts` (`renderProgress` mirrors every console line to `events.jsonl`; recorder constructed/activated at build start, `recordPromptStart`/`recordGateCheck`/`recordPromptEnd`/`writeMetrics` wired at the same call sites `renderProgress` already used), `src/phases/phase5-learner.ts` (writes `final-report.md` from the existing Phase 5 `summaryReport`), `src/testing/runners/persist.ts` (`persistRunnerOutcome` forwards its already-built `TestRunResult` to `tests.jsonl`); this task brief's prior run had exited without writing any of this — the changeset/Sentinel record for prompt 7/11 was corrected in place (see CHANGESET.md "Correction note") rather than left standing as a false PASS on an empty diff; `npx tsc --noEmit` — 0 errors; `pnpm run build` — exit 0; `pnpm test` — 35/35 pass; `RunRecorder` live-smoke-tested this session against this repo's own `.forge/` directory — all 6 artifacts produced the expected structured content, scratch run directory deleted afterward)
+
+---
+
+## Control Plane Run Telemetry (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/CAPABILITIES_MEMO.md`'s observability section ("Live Build Observability" /
+"FORGE Observability and Run Telemetry") — a structured, file-backed record of a build alongside
+the live terminal output, so a closed terminal no longer means the only record of what happened is
+gone. `upgrades/SYSTEMS-5-9-GAP-MATRIX.md` row "`.forge/runs/<ts>/*.jsonl` structured telemetry"
+confirmed no match existed anywhere in the codebase before this session — this session's own
+targeted-recovery pass found the prior attempt at this exact prompt had exited without writing any
+of it (Sentinel PASSed against a zero-file diff), so the feature was built for real this pass.
+
+**New file:** `src/telemetry/run-recorder.ts` — `RunRecorder` class, one `.forge/runs/<run-id>/`
+directory per build (`run-id` = `buildRunId`, falling back to the run timestamp in stateless mode):
+`events.jsonl` (mirrors every `renderProgress` console line verbatim), `prompts.jsonl` (per-prompt
+start/gate/end, built from data already computed at that call site — never a `prompt_executions`
+re-query), `tests.jsonl` (forwarded from `persistRunnerOutcome`, the one `test_run_results` write
+point), `failures.jsonl` (one line per non-`completed` prompt disposition), `metrics.json`
+(overwritten once at build end, not appended), `final-report.md` (Phase 5's own summary report,
+reused verbatim). Best-effort throughout (Contract 4 posture) — a telemetry write failure never
+affects the build. `setActiveRunRecorder`/`getActiveRunRecorder` is an ambient singleton (the same
+shape `forge-logger.ts`'s `setLogContext` already uses) so `renderProgress` (a bare function with no
+`ctx` parameter) and `persistRunnerOutcome` (called from deep inside Sentinel/TestOrchestrator,
+several frames from the executor's loop) can both reach the current build's recorder without a new
+parameter threaded through every intervening signature.
+
+**Modified files:**
+- `src/phases/phase3-executor.ts` — `renderProgress` mirrors every line to `events.jsonl`;
+  `RunRecorder` constructed and set active immediately before the "FORGE PIPELINE STARTING" line,
+  cleared in the top-level `finally` (after `releaseStdoutQuietMode()`, so no build's recorder
+  leaks into a later one in the same process); `recordPromptStart` at prompt start,
+  `recordGateCheck` per Sentinel check, `recordPromptEnd` at prompt end, `writeMetrics` alongside
+  the existing Phase 3 completion `renderProgress` line.
+- `src/phases/phase5-learner.ts` — writes `final-report.md` via a fresh
+  `RunRecorder(buildRunId, projectPath)` immediately after the existing `summaryReport` is built
+  (re-opens the same run directory Phase 3 wrote into; `RunRecorder` resolves its directory from
+  `buildRunId` alone, so no ambient state needs to survive the Phase 3 → Phase 5 boundary).
+- `src/testing/runners/persist.ts` — `persistRunnerOutcome` forwards its already-built
+  `TestRunResult` to `tests.jsonl` right after `printResultLine` (per the task brief's explicit
+  "stream not duplicate" instruction).
+
+**Verification:** `npx tsc --noEmit` — 0 errors, run via Bash this session. `pnpm run build` —
+exit 0. `pnpm test` — 35/35 pass. `RunRecorder` live-smoke-tested this session (not just
+static-read) against this repo's own real `.forge/` directory: a real instance was constructed and
+every method called once — `events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`metrics.json`/
+`final-report.md` all produced the expected structured JSON/Markdown content, `failures.jsonl`
+correctly did NOT appear for a `completed` disposition; the scratch run directory was deleted
+afterward, not committed. `CHANGESET.md`'s false-empty entry for this exact prompt (prompt 7/11,
+timestamp `2026-08-15T06:23:19.445Z`) was corrected in place with a "Correction note" (same pattern
+the immediately-preceding Dead-Loop/Stagnation session established for its own false-empty entry).
+
+**NOT done this session, flagged not silently skipped:** no dedicated test file exists for
+`src/telemetry/run-recorder.ts` (verified live via a manual smoke script instead, see above);
+`forge health` does not yet report a WIRED status for `RunRecorder`; no CLI surface (e.g. `forge
+runs list/show`) exists yet to read a run's own telemetry back — `.forge/runs/<run-id>/` is
+written but nothing yet consumes it programmatically.
+
+**Next action:** add `__tests__/run-recorder.test.ts`; consider a `forge runs` CLI subcommand to
+list/inspect past run telemetry directories; wire `forge health` to report `RunRecorder`'s status.
 
 ---
 
@@ -1511,5 +1571,5 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T05:46:46.801Z
+- **Last changeset date:** 2026-08-15T06:23:19.445Z
 

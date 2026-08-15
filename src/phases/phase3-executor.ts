@@ -147,6 +147,7 @@ import {
   ModelCostTracker,
 } from '../engine/model-router.js';
 import { runSmokeTests, shouldRunTests } from '../tools/incremental-tester.js';
+import { RunRecorder, setActiveRunRecorder, getActiveRunRecorder } from '../telemetry/run-recorder.js';
 import { scanDeadCode } from '../tools/dead-code-scanner.js';
 import { onRunStart, onPromptComplete, onRunEnd } from '../learning/integration.js';
 import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
@@ -1112,6 +1113,9 @@ function renderProgress(level: ProgressLevel, message: string): void {
   const ts = `${now.getFullYear()}-${twoDigit(now.getMonth()+1)}-${twoDigit(now.getDate())} ${twoDigit(now.getHours())}:${twoDigit(now.getMinutes())}:${twoDigit(now.getSeconds())}`;
   const color = ANSI_COLOR[level];
   process.stdout.write(`${color}[${ts}] [${level}] ${message}${ANSI_RESET}\n`);
+  // Control Plane run telemetry: mirror this same line to .forge/runs/<run-id>/events.jsonl,
+  // never replacing the console output above â€” a no-op outside a live (non-dry-run) Phase 3 build.
+  getActiveRunRecorder()?.recordEvent(level, message);
 }
 
 /**
@@ -1388,6 +1392,19 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     log(`WARNING: createBuild degraded (${describe(error)}) â€” running stateless`);
   }
   if (buildRunId === null) warnings.push('Build Memory unreachable â€” running in stateless mode (Contract 4).');
+
+  // Control Plane run telemetry (upgrades/CAPABILITIES_MEMO.md observability section): one
+  // .forge/runs/<run-id>/ directory for this build, mirroring the console output below into
+  // structured JSONL/JSON alongside it. buildRunId falls back to the timestamp when Build Memory
+  // is unreachable (stateless mode) so telemetry never depends on a live database. Cleared in the
+  // top-level `finally` below so it never leaks into a later, unrelated build in this process.
+  if (!dryRun) {
+    try {
+      setActiveRunRecorder(new RunRecorder(buildRunId ?? generatedAt.replace(/[:.]/g, '-'), projectPath));
+    } catch (error) {
+      log(`WARNING: RunRecorder init degraded (${describe(error)}) â€” continuing without run telemetry`);
+    }
+  }
 
   if (!dryRun) {
     renderProgress(
@@ -1855,6 +1872,17 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         `${failedPrompts} failed, ${skippedPrompts} skipped; ~${totalTokens} tokens.` +
         (halted ? ` HALTED at prompt ${haltedAt?.index} '${haltedAt?.id}'.` : '')
     );
+    getActiveRunRecorder()?.writeMetrics({
+      totalPrompts: schedule.order.length,
+      completedPrompts,
+      failedPrompts,
+      skippedPrompts,
+      totalTokens,
+      status,
+      halted,
+      durationMs: Date.now() - Date.parse(generatedAt),
+      generatedAt,
+    });
   }
 
   if (!dryRun && costTracker.entries.length > 0) {
@@ -1916,6 +1944,9 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     // Restore stdout LAST â€” handleSessionEnd (above) still has more [SESSION]/[FORGE Learning]
     // console output to emit, and it must land in the log file too, not on stdout.
     releaseStdoutQuietMode();
+    // Clear the ambient run-telemetry recorder so it never leaks into a later, unrelated build
+    // running in this same process (e.g. a test harness driving multiple builds sequentially).
+    setActiveRunRecorder(null);
   }
 }
 
@@ -2053,6 +2084,7 @@ async function executePrompt(
   const promptStartedAt = Date.now();
   log(`prompt ${index} '${entry.id}' (${entry.prompt_type}) â€” start`);
   renderProgress('INFO', `PROMPT ${index}/${ctx.totalPrompts} : ${entry.id}`);
+  getActiveRunRecorder()?.recordPromptStart({ index, id: entry.id, name: entry.name, promptType: entry.prompt_type });
   await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'start' });
 
   // Sentinel Prime (System 5): start the ExecutionMonitor singleton for this prompt BEFORE any
@@ -2406,6 +2438,14 @@ async function executePrompt(
         check.skipped ? 'WARN' : check.passed ? 'PASS' : 'FAIL',
         `  ${check.name} â€” ${verdict}${verdict === 'FAIL' ? ` (${check.detail})` : ''}`
       );
+      getActiveRunRecorder()?.recordGateCheck({
+        index,
+        id: entry.id,
+        checkName: check.name,
+        passed: check.passed,
+        skipped: check.skipped,
+        detail: check.skipped || !check.passed ? check.detail : null,
+      });
     }
 
     // Session 5.2 Task 3: project-boundary guard â€” best-effort scan of claude's own stdout for
@@ -2965,6 +3005,15 @@ async function executePrompt(
         `Prompt ${index}/${ctx.totalPrompts} '${entry.name}' â€” FAIL (${sentinel.failedCheck ?? 'unknown check'}) â€” ${humanDuration(durationMs)}`
       );
     }
+    getActiveRunRecorder()?.recordPromptEnd({
+      index,
+      id: entry.id,
+      name: entry.name,
+      disposition,
+      durationMs,
+      commitHash,
+      failedCheck: disposition === 'completed' ? null : (sentinel.failedCheck ?? 'unknown check'),
+    });
     return {
       index,
       id: entry.id,

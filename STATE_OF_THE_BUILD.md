@@ -1,13 +1,67 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands**
+**Last Updated:** 2026-08-15 (Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)**
 **Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + **Dead-Loop / Stagnation Detection (ALL COMPLETE)**
 **Schema version:** unchanged at **3.2.0** — Dead-Loop / Stagnation Detection adds no new table; both modules read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Control Plane Run Telemetry (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/CAPABILITIES_MEMO.md` observability section — structured, file-backed
+`.forge/runs/<run-id>/*.jsonl` telemetry mirroring the live console output, per
+`upgrades/SYSTEMS-5-9-GAP-MATRIX.md`'s confirmed-missing "`.forge/runs/<ts>/*.jsonl` structured
+telemetry" gap. This session's own targeted-recovery pass found the immediately-prior attempt at
+this exact prompt had exited without writing any of it (Sentinel PASSed on a zero-file diff); the
+feature was built for real this pass, and `CHANGESET.md`'s false-empty entry was corrected in place
+rather than left standing.
+
+**New file:** `src/telemetry/run-recorder.ts` — `RunRecorder` class, one `.forge/runs/<run-id>/`
+directory per build. `events.jsonl` mirrors every `renderProgress` console line verbatim.
+`prompts.jsonl` carries per-prompt `start`/`gate`/`end` events built from data already computed at
+each existing `renderProgress` call site (never a `prompt_executions` re-query). `tests.jsonl` is
+forwarded from `persistRunnerOutcome` (`src/testing/runners/persist.ts`), the single
+`test_run_results` write point. `failures.jsonl` gets one line per non-`completed` prompt
+disposition. `metrics.json` is overwritten (not appended) once at build end. `final-report.md` is
+Phase 5's own summary report, reused verbatim. All writes are best-effort (Contract 4 posture) — a
+telemetry failure never affects the build. `setActiveRunRecorder`/`getActiveRunRecorder` is an
+ambient singleton (same shape as `forge-logger.ts`'s `setLogContext`) so `renderProgress` (a bare
+function, no `ctx` parameter) and `persistRunnerOutcome` (called from deep inside
+Sentinel/TestOrchestrator) can both reach the current build's recorder without threading a new
+parameter through every intervening signature.
+
+**Modified files:**
+- `src/phases/phase3-executor.ts` — `renderProgress` mirrors every line to `events.jsonl`;
+  `RunRecorder` constructed/activated right before "FORGE PIPELINE STARTING", cleared in the
+  top-level `finally`; `recordPromptStart`/`recordGateCheck`/`recordPromptEnd`/`writeMetrics` wired
+  at the exact call sites `renderProgress` already used for the same information.
+- `src/phases/phase5-learner.ts` — writes `final-report.md` via a fresh
+  `RunRecorder(buildRunId, projectPath)` right after `summaryReport` is built (re-opens the same
+  run directory Phase 3 wrote into — `RunRecorder` resolves its directory from `buildRunId` alone,
+  no ambient state needs to survive the Phase 3 → Phase 5 boundary).
+- `src/testing/runners/persist.ts` — `persistRunnerOutcome` forwards its already-built
+  `TestRunResult` to `tests.jsonl` (the task brief's explicit "stream not duplicate" instruction).
+
+**Schema version:** unchanged at **3.2.0** — no new Build Memory table; `RunRecorder` writes only
+to the filesystem (`.forge/runs/`).
+
+**Verification:** `npx tsc --noEmit` — 0 errors, run via Bash this session. `pnpm run build` —
+exit 0. `pnpm test` — 35/35 pass. `RunRecorder` live-smoke-tested this session against this repo's
+own real `.forge/` directory (not just static read-through): a real instance was constructed and
+every method called once — all six artifacts produced the expected structured content,
+`failures.jsonl` correctly absent for a `completed` disposition; the scratch run directory was
+deleted afterward, not committed.
+
+**NOT done this session, flagged not silently skipped:** no dedicated `__tests__/run-recorder.test.ts`
+exists (verified live via a manual smoke script instead); no CLI surface (e.g. `forge runs
+list/show`) exists yet to read a run's own telemetry back — `.forge/runs/<run-id>/` is written but
+nothing yet consumes it programmatically; `forge health` does not yet report a WIRED status for
+`RunRecorder`, the same gap already flagged for several other recent systems in this file.
 
 ---
 
@@ -2322,6 +2376,7 @@ rebuild plan: Foundation & Memory → Design Intelligence → … → Verify).
 | Phase 4 — Sentinel Quality Pipeline | COMPLETE | `src/phases/phase4-sentinel.ts` (163820B) |
 | Phase 5 — Recursive Learner | COMPLETE | `src/phases/phase5-learner.ts` (32404B) |
 | Deploy Pipeline (`src/monitoring/deploy-agent.ts`) | PARTIAL | 13196B; monitoring snippet injection and telemetry wired; canary deployment / production rollback NOT implemented |
+| Control Plane Run Telemetry (`src/telemetry/run-recorder.ts`) | COMPLETE | `RunRecorder` writes `.forge/runs/<run-id>/{events,prompts,tests,failures}.jsonl` + `metrics.json` + `final-report.md`; wired into `phase3-executor.ts` (renderProgress mirror + per-prompt/gate/metrics) + `phase5-learner.ts` (final-report.md) + `src/testing/runners/persist.ts` (tests.jsonl); no CLI reader yet |
 | Engine modules (`src/engine/`) | COMPLETE | 12 files: claude-runner.ts, failure-predictor.ts, free-tier-manager.ts, git-manager.ts, governance-gate.ts, hook-manager.ts, model-router.ts, parallel-scheduler.ts, prompt-assembler.ts, prompt-decomposer.ts, prompt-rewriter.ts, provider-router.ts, queue-generator.ts (`QueueEntry.skills` field added) |
 | Analysis modules (`src/analysis/`) | COMPLETE | 8 files: adversarial-review, agent-creator, cost-estimator, instinct-extractor, pass-at-k, pattern-extractor, six-laws-verifier, template-evolver |
 | Build Memory (`src/memory/`) | COMPLETE | 16 files in src/ and dist/ |
@@ -2569,3 +2624,5 @@ forge build ./my-project --start-at 5 --dry-run
 > 2026-08-15T05:34:08.449Z [FORGE Phase 3] prompt 4 'stage4-state-machine-blast-radius' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T05:55:33.646Z [FORGE Phase 3] prompt 5 'stage4-adr-risk-debt' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T06:18:19.217Z [FORGE Phase 3] prompt 6 'stage4-deadloop' (feature): COMPLETED â€" Sentinel PASS.

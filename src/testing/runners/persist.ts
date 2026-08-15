@@ -17,6 +17,7 @@ import {
 } from '../../memory/test-results.js';
 import { RunnerType, type TestRunResult } from '../types.js';
 import type { RunnerOutcome } from './types.js';
+import { getActiveRunRecorder } from '../../telemetry/run-recorder.js';
 
 const COVERAGE_THRESHOLD_DEFAULT = 0.8;
 const COVERAGE_THRESHOLD_BRANCH = 0.7;
@@ -191,5 +192,18 @@ export async function persistRunnerOutcome(input: PersistRunnerOutcomeInput): Pr
     exitCode: input.outcome.exitCode,
   };
   printResultLine(result);
+  // Control Plane run telemetry: forward this same, already-built row to the active build's
+  // .forge/runs/<run-id>/tests.jsonl — a no-op outside a live Phase 3 build (see run-recorder.ts).
+  getActiveRunRecorder()?.recordTestResult({
+    id: result.id,
+    runnerType: result.runnerType,
+    testSuite: result.testSuite,
+    status: result.status,
+    passed: result.passed,
+    failed: result.failed,
+    skipped: result.skipped,
+    durationMs: result.durationMs,
+    promptId: result.promptId,
+  });
   return result;
 }
