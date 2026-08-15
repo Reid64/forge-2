@@ -2,23 +2,26 @@
   "buildRunId": "c47ae905-713a-4ccf-b2eb-8f348e467e5d",
   "project": "forge-2",
   "startedAt": "2026-08-15T21:58:10.560Z",
-  "updatedAt": "2026-08-15T21:58:40.218Z",
+  "updatedAt": "2026-08-15T22:05:49.905Z",
   "currentPrompt": {
     "index": 1,
     "id": "wire-real-design-tool-detection",
     "name": "Detect installed img2threejs skill and impeccable marketplace, remove stale NOT_INSTALLED comment",
     "type": "feature",
-    "phase": "executing"
+    "phase": "failed"
   },
   "totals": {
     "completed": 0,
-    "failed": 0,
-    "remaining": 22,
-    "tokensEstimated": 0,
-    "costEstimatedUsd": 0,
-    "totalElapsedMs": 0
+    "failed": 1,
+    "remaining": 21,
+    "tokensEstimated": 1802,
+    "costEstimatedUsd": 0.071856,
+    "totalElapsedMs": 458833
   },
-  "lastSentinel": null,
+  "lastSentinel": {
+    "passed": false,
+    "failedCheck": null
+  },
   "recentEvents": [
     {
       "timestamp": "2026-08-15T21:58:10.753Z",
@@ -31,6 +34,18 @@
     {
       "timestamp": "2026-08-15T21:58:40.218Z",
       "message": "prompt 1 'wire-real-design-tool-detection' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T22:05:48.469Z",
+      "message": "prompt 1 'wire-real-design-tool-detection' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T22:05:48.473Z",
+      "message": "Sentinel FAIL (unknown)"
+    },
+    {
+      "timestamp": "2026-08-15T22:05:49.570Z",
+      "message": "prompt 1 'wire-real-design-tool-detection' (feature): failed"
     }
   ],
   "brainInterventions": 0

@@ -473,3 +473,18 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T22:05:10.488Z â€” Detect installed img2threejs skill and impeccable marketplace, remove stale NOT_INSTALLED comment (prompt 1/22)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---

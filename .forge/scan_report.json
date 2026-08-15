@@ -1,12 +1,12 @@
 {
   "projectName": "forge-2",
   "projectPath": "C:\\Users\\manag\\Documents\\forge-2",
-  "scanTimestamp": "2026-08-15T04:33:29.499Z",
+  "scanTimestamp": "2026-08-15T22:06:10.253Z",
   "scanScope": "A",
   "supabaseAvailable": false,
   "vercelAvailable": false,
   "fileTree": {
-    "totalFiles": 573,
+    "totalFiles": 612,
     "byExtension": {
       ".csv": {
         "count": 24,
@@ -21,8 +21,8 @@
         "totalSizeKB": 80.16015625
       },
       ".md": {
-        "count": 143,
-        "totalSizeKB": 2643.330078125
+        "count": 145,
+        "totalSizeKB": 2752.7646484375
       },
       "(none)": {
         "count": 1,
@@ -37,20 +37,24 @@
         "totalSizeKB": 0.1484375
       },
       ".json": {
-        "count": 12,
-        "totalSizeKB": 142.7421875
+        "count": 14,
+        "totalSizeKB": 164.91015625
+      },
+      ".jsonl": {
+        "count": 7,
+        "totalSizeKB": 23.87890625
       },
       ".yaml": {
         "count": 13,
-        "totalSizeKB": 356.4140625
+        "totalSizeKB": 367.1640625
       },
       ".txt": {
         "count": 26,
         "totalSizeKB": 1163.9248046875
       },
       ".ts": {
-        "count": 257,
-        "totalSizeKB": 4141.3037109375
+        "count": 281,
+        "totalSizeKB": 4587.5537109375
       },
       ".css": {
         "count": 1,
@@ -73,8 +77,8 @@
         "totalSizeKB": 11.9296875
       },
       ".cjs": {
-        "count": 13,
-        "totalSizeKB": 9.82421875
+        "count": 17,
+        "totalSizeKB": 11.583984375
       },
       ".sql": {
         "count": 20,
@@ -316,7 +320,7 @@
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\forge_running.lock",
         "extension": ".lock",
         "sizeBytes": 152,
-        "lastModified": "2026-08-15T04:12:02.739Z"
+        "lastModified": "2026-08-15T21:58:10.564Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\gap_audit_report.md",
@@ -339,8 +343,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\live-status.json",
         "extension": ".json",
-        "sizeBytes": 2898,
-        "lastModified": "2026-08-15T04:33:05.903Z"
+        "sizeBytes": 1513,
+        "lastModified": "2026-08-15T22:05:49.907Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\RUN5-HANDOFF.md",
@@ -355,22 +359,88 @@
         "lastModified": "2026-06-24T22:21:03.257Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889\\events.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 1870,
+        "lastModified": "2026-08-15T15:26:07.217Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889\\final-report.md",
+        "extension": ".md",
+        "sizeBytes": 3257,
+        "lastModified": "2026-08-15T15:26:08.286Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889\\metrics.json",
+        "extension": ".json",
+        "sizeBytes": 230,
+        "lastModified": "2026-08-15T15:26:07.218Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889\\prompts.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 2331,
+        "lastModified": "2026-08-15T15:26:06.340Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\41fbf52a-d000-4c2f-8d74-a12ced71f608\\events.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 8201,
+        "lastModified": "2026-08-15T19:42:40.706Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\41fbf52a-d000-4c2f-8d74-a12ced71f608\\final-report.md",
+        "extension": ".md",
+        "sizeBytes": 3497,
+        "lastModified": "2026-08-15T19:42:41.532Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\41fbf52a-d000-4c2f-8d74-a12ced71f608\\metrics.json",
+        "extension": ".json",
+        "sizeBytes": 230,
+        "lastModified": "2026-08-15T19:42:40.707Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\41fbf52a-d000-4c2f-8d74-a12ced71f608\\prompts.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 4860,
+        "lastModified": "2026-08-15T19:42:39.835Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\c47ae905-713a-4ccf-b2eb-8f348e467e5d\\events.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 4367,
+        "lastModified": "2026-08-15T22:05:49.584Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\c47ae905-713a-4ccf-b2eb-8f348e467e5d\\failures.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 319,
+        "lastModified": "2026-08-15T22:05:49.585Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\c47ae905-713a-4ccf-b2eb-8f348e467e5d\\prompts.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 2504,
+        "lastModified": "2026-08-15T22:05:49.584Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\scan_report.json",
         "extension": ".json",
-        "sizeBytes": 117655,
-        "lastModified": "2026-07-21T23:27:56.676Z"
+        "sizeBytes": 141274,
+        "lastModified": "2026-08-15T04:33:29.502Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\SESSION_HANDOFF.md",
         "extension": ".md",
-        "sizeBytes": 2037,
-        "lastModified": "2026-07-21T23:28:21.777Z"
+        "sizeBytes": 1001,
+        "lastModified": "2026-08-15T19:42:41.317Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\session_state.json",
         "extension": ".json",
-        "sizeBytes": 637,
-        "lastModified": "2026-07-21T23:28:14.951Z"
+        "sizeBytes": 643,
+        "lastModified": "2026-08-15T19:42:40.885Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\uipro\\design-system\\forge-2\\MASTER.md",
@@ -519,8 +589,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\CHANGESET.md",
         "extension": ".md",
-        "sizeBytes": 991,
-        "lastModified": "2026-08-15T04:32:16.508Z"
+        "sizeBytes": 19768,
+        "lastModified": "2026-08-15T22:05:10.490Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\claude-runner-backup.txt",
@@ -754,13 +824,13 @@
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\COMPLIANCE_REQUIREMENTS.md",
         "extension": ".md",
         "sizeBytes": 4194,
-        "lastModified": "2026-08-15T04:11:43.836Z"
+        "lastModified": "2026-08-15T21:57:50.897Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\DESIGN_SYSTEM.md",
         "extension": ".md",
         "sizeBytes": 2598,
-        "lastModified": "2026-08-15T04:11:43.830Z"
+        "lastModified": "2026-08-15T21:57:50.893Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\FORGE_CANONICAL_INSTRUCTIONS.md",
@@ -851,6 +921,30 @@
         "extension": ".ts",
         "sizeBytes": 1319,
         "lastModified": "2026-07-17T00:37:13.913Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\list-agent-proposals.cjs",
+        "extension": ".cjs",
+        "sizeBytes": 669,
+        "lastModified": "2026-08-15T14:55:16.124Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\list-proposals.cjs",
+        "extension": ".cjs",
+        "sizeBytes": 351,
+        "lastModified": "2026-08-15T14:54:37.453Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\list-self-created-agents.cjs",
+        "extension": ".cjs",
+        "sizeBytes": 394,
+        "lastModified": "2026-08-15T14:55:45.730Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\list-tables.cjs",
+        "extension": ".cjs",
+        "sizeBytes": 388,
+        "lastModified": "2026-08-15T14:53:50.249Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\logs\\phase1b-agents-raw.txt",
@@ -1245,8 +1339,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\queue.yaml",
         "extension": ".yaml",
-        "sizeBytes": 13556,
-        "lastModified": "2026-08-15T04:16:02.462Z"
+        "sizeBytes": 24564,
+        "lastModified": "2026-08-15T21:57:30.869Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\README.md",
@@ -1401,8 +1495,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\SESSION_STATE.md",
         "extension": ".md",
-        "sizeBytes": 109372,
-        "lastModified": "2026-08-15T04:32:16.513Z"
+        "sizeBytes": 136853,
+        "lastModified": "2026-08-15T22:05:10.503Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\shield-err-tmp.txt",
@@ -1629,8 +1723,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\index.ts",
         "extension": ".ts",
-        "sizeBytes": 192202,
-        "lastModified": "2026-08-15T04:29:06.667Z"
+        "sizeBytes": 219133,
+        "lastModified": "2026-08-15T06:06:22.620Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\repair-command.ts",
@@ -1705,10 +1799,34 @@
         "lastModified": "2026-07-17T17:51:44.820Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\app-profiler.ts",
+        "extension": ".ts",
+        "sizeBytes": 23195,
+        "lastModified": "2026-08-15T07:42:28.902Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\design-memory.ts",
+        "extension": ".ts",
+        "sizeBytes": 11467,
+        "lastModified": "2026-08-15T07:43:26.996Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\design-router.ts",
+        "extension": ".ts",
+        "sizeBytes": 23711,
+        "lastModified": "2026-08-15T22:03:40.905Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\design-tournament.ts",
+        "extension": ".ts",
+        "sizeBytes": 27467,
+        "lastModified": "2026-08-15T07:47:28.501Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\index.ts",
         "extension": ".ts",
-        "sizeBytes": 13059,
-        "lastModified": "2026-07-22T22:21:18.980Z"
+        "sizeBytes": 17812,
+        "lastModified": "2026-08-15T07:49:38.572Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\design-pipeline\\penpot-integration.ts",
@@ -1755,14 +1873,14 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\free-tier-manager.ts",
         "extension": ".ts",
-        "sizeBytes": 39683,
-        "lastModified": "2026-06-12T01:50:47.829Z"
+        "sizeBytes": 39896,
+        "lastModified": "2026-08-15T06:45:04.661Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\git-manager.ts",
         "extension": ".ts",
-        "sizeBytes": 23881,
-        "lastModified": "2026-07-25T22:17:51.065Z"
+        "sizeBytes": 32103,
+        "lastModified": "2026-08-15T19:31:48.170Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\governance-gate.ts",
@@ -1797,8 +1915,14 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\parallel-scheduler.ts",
         "extension": ".ts",
-        "sizeBytes": 13951,
-        "lastModified": "2026-06-12T01:50:25.392Z"
+        "sizeBytes": 24356,
+        "lastModified": "2026-08-15T07:04:58.709Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\path-classifier.ts",
+        "extension": ".ts",
+        "sizeBytes": 8204,
+        "lastModified": "2026-08-15T19:39:13.826Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\prompt-assembler.ts",
@@ -1821,14 +1945,14 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\provider-router.ts",
         "extension": ".ts",
-        "sizeBytes": 41328,
-        "lastModified": "2026-07-17T02:17:11.993Z"
+        "sizeBytes": 42450,
+        "lastModified": "2026-08-15T06:44:43.354Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\queue-generator.ts",
         "extension": ".ts",
-        "sizeBytes": 55174,
-        "lastModified": "2026-07-06T19:26:15.263Z"
+        "sizeBytes": 57143,
+        "lastModified": "2026-08-15T19:34:06.715Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\scheduler.ts",
@@ -1837,10 +1961,34 @@
         "lastModified": "2026-07-17T16:54:39.554Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\scratch-lock.ts",
+        "extension": ".ts",
+        "sizeBytes": 10037,
+        "lastModified": "2026-08-15T19:37:17.084Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\scratch-promote.ts",
+        "extension": ".ts",
+        "sizeBytes": 13847,
+        "lastModified": "2026-08-15T19:33:58.968Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\shared-preamble.ts",
         "extension": ".ts",
         "sizeBytes": 4002,
         "lastModified": "2026-07-22T05:31:15.179Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\blast-radius.ts",
+        "extension": ".ts",
+        "sizeBytes": 10527,
+        "lastModified": "2026-08-15T05:23:33.721Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\dead-loop-detection.ts",
+        "extension": ".ts",
+        "sizeBytes": 8434,
+        "lastModified": "2026-08-15T06:02:55.530Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\definition-of-done.ts",
@@ -1849,10 +1997,34 @@
         "lastModified": "2026-08-15T04:27:08.534Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\invariants.ts",
+        "extension": ".ts",
+        "sizeBytes": 15004,
+        "lastModified": "2026-08-15T05:11:33.595Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\provenance-ledgers.ts",
+        "extension": ".ts",
+        "sizeBytes": 19718,
+        "lastModified": "2026-08-15T05:41:25.865Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\readiness-levels.ts",
         "extension": ".ts",
         "sizeBytes": 13831,
         "lastModified": "2026-08-15T04:26:23.562Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\stagnation-detection.ts",
+        "extension": ".ts",
+        "sizeBytes": 6575,
+        "lastModified": "2026-08-15T06:03:20.029Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\traceability.ts",
+        "extension": ".ts",
+        "sizeBytes": 11886,
+        "lastModified": "2026-08-15T05:08:06.985Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\integration\\bus.ts",
@@ -1869,8 +2041,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\database.ts",
         "extension": ".ts",
-        "sizeBytes": 58104,
-        "lastModified": "2026-07-22T21:52:40.907Z"
+        "sizeBytes": 71198,
+        "lastModified": "2026-08-15T07:48:59.466Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\evolution-promoter.ts",
@@ -1963,10 +2135,22 @@
         "lastModified": "2026-06-24T19:50:34.228Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\adr.ts",
+        "extension": ".ts",
+        "sizeBytes": 6327,
+        "lastModified": "2026-08-15T05:38:44.304Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\agents.ts",
         "extension": ".ts",
         "sizeBytes": 5391,
         "lastModified": "2026-07-06T00:00:11.535Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\assumptions.ts",
+        "extension": ".ts",
+        "sizeBytes": 5744,
+        "lastModified": "2026-08-15T05:39:00.521Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\brands.ts",
@@ -2001,8 +2185,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\index.ts",
         "extension": ".ts",
-        "sizeBytes": 2405,
-        "lastModified": "2026-07-06T00:02:14.278Z"
+        "sizeBytes": 2654,
+        "lastModified": "2026-08-15T05:39:46.099Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\insights.ts",
@@ -2035,6 +2219,12 @@
         "lastModified": "2026-07-05T23:59:54.366Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\risks.ts",
+        "extension": ".ts",
+        "sizeBytes": 5756,
+        "lastModified": "2026-08-15T05:39:17.398Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\scheduled-tasks.ts",
         "extension": ".ts",
         "sizeBytes": 8365,
@@ -2045,6 +2235,12 @@
         "extension": ".ts",
         "sizeBytes": 7841,
         "lastModified": "2026-07-06T00:01:53.757Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\tech-debt.ts",
+        "extension": ".ts",
+        "sizeBytes": 7870,
+        "lastModified": "2026-08-15T05:41:16.659Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\memory\\telemetry.ts",
@@ -2151,20 +2347,20 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\phases\\phase3-executor.ts",
         "extension": ".ts",
-        "sizeBytes": 178080,
-        "lastModified": "2026-07-25T00:52:53.735Z"
+        "sizeBytes": 239651,
+        "lastModified": "2026-08-15T19:36:54.368Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\phases\\phase4-sentinel.ts",
         "extension": ".ts",
-        "sizeBytes": 207249,
-        "lastModified": "2026-08-15T02:23:41.723Z"
+        "sizeBytes": 234677,
+        "lastModified": "2026-08-15T19:34:11.511Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\phases\\phase5-learner.ts",
         "extension": ".ts",
-        "sizeBytes": 44066,
-        "lastModified": "2026-08-15T04:28:25.809Z"
+        "sizeBytes": 48930,
+        "lastModified": "2026-08-15T06:29:43.896Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\resurrection\\artifact-scorer.ts",
@@ -2623,10 +2819,16 @@
         "lastModified": "2026-07-22T21:27:06.707Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\telemetry\\run-recorder.ts",
+        "extension": ".ts",
+        "sizeBytes": 7434,
+        "lastModified": "2026-08-15T06:27:51.909Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\orchestrator.ts",
         "extension": ".ts",
-        "sizeBytes": 4894,
-        "lastModified": "2026-08-15T02:25:39.539Z"
+        "sizeBytes": 5329,
+        "lastModified": "2026-08-15T08:11:43.689Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\accessibility-runner.ts",
@@ -2691,14 +2893,26 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\persist.ts",
         "extension": ".ts",
-        "sizeBytes": 8180,
-        "lastModified": "2026-08-15T02:23:57.615Z"
+        "sizeBytes": 9281,
+        "lastModified": "2026-08-15T08:11:43.689Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\schemathesis-runner.ts",
+        "extension": ".ts",
+        "sizeBytes": 1284,
+        "lastModified": "2026-08-15T08:09:33.829Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\security-runner.ts",
         "extension": ".ts",
         "sizeBytes": 1926,
         "lastModified": "2026-07-17T17:27:18.620Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\semgrep-runner.ts",
+        "extension": ".ts",
+        "sizeBytes": 1257,
+        "lastModified": "2026-08-15T08:09:22.561Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\sentinel-check.ts",
@@ -2743,10 +2957,16 @@
         "lastModified": "2026-07-17T17:26:35.893Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\runners\\zap-runner.ts",
+        "extension": ".ts",
+        "sizeBytes": 1243,
+        "lastModified": "2026-08-15T08:09:28.894Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\testing\\types.ts",
         "extension": ".ts",
-        "sizeBytes": 1954,
-        "lastModified": "2026-08-15T02:23:47.363Z"
+        "sizeBytes": 2111,
+        "lastModified": "2026-08-15T08:11:43.690Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\tools\\accessibility-auditor.ts",
@@ -2785,10 +3005,16 @@
         "lastModified": "2026-06-11T14:57:39.108Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\tools\\consensus-proposal.ts",
+        "extension": ".ts",
+        "sizeBytes": 26809,
+        "lastModified": "2026-08-15T06:44:12.758Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\tools\\consensus-validator.ts",
         "extension": ".ts",
-        "sizeBytes": 48321,
-        "lastModified": "2026-06-12T01:51:02.496Z"
+        "sizeBytes": 49429,
+        "lastModified": "2026-08-15T06:45:32.929Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\tools\\dead-code-scanner.ts",
@@ -2967,8 +3193,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\types\\index.ts",
         "extension": ".ts",
-        "sizeBytes": 21440,
-        "lastModified": "2026-07-21T19:20:35.050Z"
+        "sizeBytes": 26724,
+        "lastModified": "2026-08-15T05:38:23.840Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\types\\patterns.ts",
@@ -3033,8 +3259,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\STATE_OF_THE_BUILD.md",
         "extension": ".md",
-        "sizeBytes": 234300,
-        "lastModified": "2026-08-15T04:33:05.548Z"
+        "sizeBytes": 294385,
+        "lastModified": "2026-08-15T22:05:49.581Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\supabase\\migrations\\001_create_gap_audit_runs.sql",
@@ -3169,6 +3395,18 @@
         "lastModified": "2026-06-11T21:00:39.224Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\consensus-proposal.test.ts",
+        "extension": ".ts",
+        "sizeBytes": 10308,
+        "lastModified": "2026-08-15T06:48:15.165Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\design-intelligence.test.ts",
+        "extension": ".ts",
+        "sizeBytes": 17195,
+        "lastModified": "2026-08-15T07:55:20.187Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\design-system-generator.test.ts",
         "extension": ".ts",
         "sizeBytes": 7094,
@@ -3267,8 +3505,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\provider-router.test.ts",
         "extension": ".ts",
-        "sizeBytes": 11403,
-        "lastModified": "2026-06-12T00:06:11.274Z"
+        "sizeBytes": 13707,
+        "lastModified": "2026-08-15T06:47:27.221Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\queue-generator.test.ts",
@@ -3297,8 +3535,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\sentinel.test.ts",
         "extension": ".ts",
-        "sizeBytes": 22709,
-        "lastModified": "2026-06-11T17:13:52.660Z"
+        "sizeBytes": 27160,
+        "lastModified": "2026-08-15T08:11:43.690Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\tests\\seo-validator.test.ts",
@@ -3541,7 +3779,7 @@
         "lastModified": "2026-08-14T04:36:55.220Z"
       }
     ],
-    "projectSizeKB": 10524.3427734375
+    "projectSizeKB": 11138.583984375
   },
   "brokenImports": [
     {
@@ -3717,10 +3955,14 @@
     "src\\composer\\recomposer.ts",
     "src\\deploy\\pre-deploy-gate.ts",
     "src\\deploy\\verify-runner.ts",
+    "src\\design-pipeline\\design-tournament.ts",
     "src\\engine\\auto-resume.ts",
     "src\\engine\\free-tier-manager.ts",
     "src\\engine\\prompt-decomposer.ts",
     "src\\engine\\scheduler.ts",
+    "src\\governance\\dead-loop-detection.ts",
+    "src\\governance\\provenance-ledgers.ts",
+    "src\\governance\\traceability.ts",
     "src\\learning\\handoff-generator.ts",
     "src\\learning\\precompact.ts",
     "src\\learning\\session-hooks.ts",
@@ -3734,6 +3976,7 @@
     "src\\sentinel-prime\\governance-enforcer.ts",
     "src\\skills\\__tests__\\skills.test.ts",
     "src\\tools\\architecture-guard.ts",
+    "src\\tools\\consensus-proposal.ts",
     "src\\tools\\consensus-validator.ts",
     "src\\tools\\death-forensics.ts",
     "src\\tools\\env-auditor.ts",
@@ -3745,13 +3988,14 @@
     "src\\types\\better-sqlite3.d.ts",
     "src\\types\\governance.ts",
     "src\\types\\patterns.ts",
-    "src\\ui-engine\\component-generator.ts",
     "src\\ui-engine\\index.ts",
     "tests\\accessibility-auditor.test.ts",
     "tests\\analysis.test.ts",
     "tests\\architecture-guard.test.ts",
     "tests\\autopsy.test.ts",
     "tests\\codebase-rag.test.ts",
+    "tests\\consensus-proposal.test.ts",
+    "tests\\design-intelligence.test.ts",
     "tests\\design-system-generator.test.ts",
     "tests\\doc-generator.test.ts",
     "tests\\engine.test.ts",
@@ -3982,10 +4226,10 @@
     }
   ],
   "gitAudit": {
-    "lastCommitHash": "7fac63418d8895294ea382c052143ca2eb4b0dff",
-    "lastCommitDate": "2026-08-14 23:31:59 -0500",
+    "lastCommitHash": "754c2fe1742b81a0d7b1def8007dde160e989ed3",
+    "lastCommitDate": "2026-08-15 17:04:50 -0500",
     "daysSinceCommit": 0,
-    "uncommittedChanges": 4,
+    "uncommittedChanges": 7,
     "branches": [
       "main",
       "worktree-agent-a361b3f8478fc38cb",
@@ -4012,7 +4256,7 @@
     {
       "filename": "BLUEPRINT.md",
       "exists": true,
-      "lastModifiedDays": 65,
+      "lastModifiedDays": 66,
       "staleness": "STALE"
     },
     {
@@ -4024,7 +4268,7 @@
     {
       "filename": "SCHEMA_REGISTRY.md",
       "exists": true,
-      "lastModifiedDays": 50,
+      "lastModifiedDays": 51,
       "staleness": "STALE"
     },
     {
@@ -4042,7 +4286,7 @@
     {
       "filename": "PRD.md",
       "exists": true,
-      "lastModifiedDays": 65,
+      "lastModifiedDays": 66,
       "staleness": "STALE"
     }
   ],
