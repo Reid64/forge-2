@@ -358,8 +358,25 @@ export class GitManager {
   commitAll(message: string): CommitResult {
     const add = this.run(['add', '-A']);
     if (!add.success) return { ...add, nothingToCommit: false };
+    return this.commitStaged(message);
+  }
 
-    // Write the message AFTER `add -A` so the temp file itself is never staged; clean up always.
+  /**
+   * Stage exactly ONE path (`git add -- <path>`, never `-A`) and commit it with `message` — the
+   * `promote_scratch` gate's (`src/engine/scratch-promote.ts`) targeted commit of a single
+   * canonical path, per this project's standing rule against sweeping unrelated dirty files into
+   * a commit via `add -A`. Same temp `-F` message file / `nothingToCommit` contract as
+   * {@link commitAll}.
+   */
+  commitPath(path: string, message: string): CommitResult {
+    const add = this.run(['add', '--', path]);
+    if (!add.success) return { ...add, nothingToCommit: false };
+    return this.commitStaged(message);
+  }
+
+  /** Shared commit step (message-file + `git commit -F`) once the caller has already staged what it wants committed. */
+  private commitStaged(message: string): CommitResult {
+    // Write the message AFTER staging so the temp file itself is never staged; clean up always.
     const messagePath = join(this.cwd, COMMIT_MESSAGE_FILE);
     try {
       writeFileSync(messagePath, message, 'utf8');
@@ -390,6 +407,20 @@ export class GitManager {
     } finally {
       rmSync(messagePath, { force: true });
     }
+  }
+
+  /**
+   * `git pull` on the current branch — the `promote_scratch` gate's pre-flight (`src/engine/
+   * scratch-promote.ts` runs this immediately before comparing/writing the canonical path, so the
+   * comparison sees the latest remote state rather than a possibly-stale local `main`).
+   */
+  pull(): GitResult {
+    return this.run(['pull']);
+  }
+
+  /** `git push` on the current branch — the `promote_scratch` gate pushes immediately after each successful canonical-path commit. */
+  push(): GitResult {
+    return this.run(['push']);
   }
 
   /**

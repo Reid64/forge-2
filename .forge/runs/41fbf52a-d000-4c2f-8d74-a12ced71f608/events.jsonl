@@ -37,3 +37,38 @@
 {"ts":"2026-08-15T19:00:20.639Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
 {"ts":"2026-08-15T19:00:20.642Z","level":"FAIL","message":"FAILED at 2026-08-15 14:00:20 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
 {"ts":"2026-08-15T19:00:20.785Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T19:22:07.181Z","level":"PASS","message":"PASSED at 2026-08-15 14:22:07"}
+{"ts":"2026-08-15T19:22:07.181Z","level":"PASS","message":"PROMPT scratch-promote-classification : ALL GATES PASSED"}
+{"ts":"2026-08-15T19:22:07.182Z","level":"INFO","message":"Prompt 1/2 'Path classification and scratch-write enforcement for shared_canonical paths' â€” PASS (0e14e51) â€” 38m10s"}
+{"ts":"2026-08-15T19:22:07.895Z","level":"INFO","message":"=== FORGE-2 ==="}
+{"ts":"2026-08-15T19:22:07.895Z","level":"INFO","message":"PROMPT 2 OF 2"}
+{"ts":"2026-08-15T19:22:07.896Z","level":"INFO","message":"PROMPT ID: scratch-promote-gate-and-locks"}
+{"ts":"2026-08-15T19:22:07.897Z","level":"INFO","message":"PROMPT NAME: promote_scratch gate type and concurrent-session lock mechanism"}
+{"ts":"2026-08-15T19:22:07.897Z","level":"INFO","message":"PHASE: feature"}
+{"ts":"2026-08-15T19:22:07.898Z","level":"INFO","message":"STARTED at 2026-08-15 14:22:07"}
+{"ts":"2026-08-15T19:22:41.682Z","level":"INFO","message":"Executing Build Agent..."}
+{"ts":"2026-08-15T19:22:41.683Z","level":"INFO","message":"[timeout 900s]"}
+{"ts":"2026-08-15T19:37:41.801Z","level":"INFO","message":"Claude exit null (TIMEOUT) â€” 900.1s"}
+{"ts":"2026-08-15T19:38:14.647Z","level":"GATE","message":"Sentinel â€” 10 check(s)"}
+{"ts":"2026-08-15T19:38:14.648Z","level":"GATE","message":"Running gate: typescript"}
+{"ts":"2026-08-15T19:38:14.649Z","level":"PASS","message":"Gate TYPESCRIPT: PASS"}
+{"ts":"2026-08-15T19:38:14.651Z","level":"GATE","message":"Running gate: eslint"}
+{"ts":"2026-08-15T19:38:14.651Z","level":"PASS","message":"Gate ESLINT: PASS"}
+{"ts":"2026-08-15T19:38:14.652Z","level":"GATE","message":"Running gate: build"}
+{"ts":"2026-08-15T19:38:14.652Z","level":"PASS","message":"Gate BUILD: PASS"}
+{"ts":"2026-08-15T19:38:14.653Z","level":"GATE","message":"Running gate: file_integrity"}
+{"ts":"2026-08-15T19:38:14.654Z","level":"PASS","message":"Gate FILE_INTEGRITY: PASS"}
+{"ts":"2026-08-15T19:38:14.654Z","level":"GATE","message":"Running gate: file_delta"}
+{"ts":"2026-08-15T19:38:14.655Z","level":"PASS","message":"Gate FILE_DELTA: PASS"}
+{"ts":"2026-08-15T19:38:14.655Z","level":"GATE","message":"Running gate: schema_drift"}
+{"ts":"2026-08-15T19:38:14.656Z","level":"WARN","message":"Gate SCHEMA_DRIFT: SKIP"}
+{"ts":"2026-08-15T19:38:14.656Z","level":"GATE","message":"Running gate: dependencies"}
+{"ts":"2026-08-15T19:38:14.657Z","level":"WARN","message":"Gate DEPENDENCIES: SKIP"}
+{"ts":"2026-08-15T19:38:14.657Z","level":"GATE","message":"Running gate: lint"}
+{"ts":"2026-08-15T19:38:14.658Z","level":"WARN","message":"Gate LINT: SKIP"}
+{"ts":"2026-08-15T19:38:14.658Z","level":"GATE","message":"Running gate: format"}
+{"ts":"2026-08-15T19:38:14.659Z","level":"WARN","message":"Gate FORMAT: SKIP"}
+{"ts":"2026-08-15T19:38:14.659Z","level":"GATE","message":"Running gate: bundle_size"}
+{"ts":"2026-08-15T19:38:14.660Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
+{"ts":"2026-08-15T19:38:14.661Z","level":"FAIL","message":"FAILED at 2026-08-15 14:38:14 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
+{"ts":"2026-08-15T19:38:14.796Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}

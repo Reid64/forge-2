@@ -113,8 +113,22 @@ export interface SimpleGate {
   type: 'compile' | 'build' | 'governance';
 }
 
+/**
+ * A `promote_scratch` gate: reconciles `shared_canonical` scratch writes (see {@link FileExistsGate}'s
+ * `path_class`, and `src/engine/path-classifier.ts`) back onto their real canonical paths —
+ * `src/engine/scratch-promote.ts` does the actual work. Usable as the final gate on a queue (to
+ * sweep up every scratch write the build produced) or as its own dedicated queue entry.
+ */
+export interface PromoteScratchGate {
+  type: 'promote_scratch';
+  /** Glob (relative to the project root, `**`/`*` dialect) restricting which scratch files this gate may promote. */
+  scratch_glob: string;
+  /** Explicit scratch-path → canonical-path mapping, required for any canonical path with directory structure a scratch filename alone can't reconstruct. */
+  canonical_mapping?: Record<string, string>;
+}
+
 /** One entry of a queue prompt's `gates:` list. */
-export type QueueGate = FileExistsGate | SimpleGate;
+export type QueueGate = FileExistsGate | SimpleGate | PromoteScratchGate;
 
 /** A single dependency-ordered build prompt in the generated queue. */
 export interface QueueEntry {

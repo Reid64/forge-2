@@ -77,13 +77,15 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { load as parseYaml } from 'js-yaml';
 
-import type { ContextInjection, PromptType, QueueEntry, FileExistsGate, QueueGate } from '../engine/queue-generator.js';
+import type { ContextInjection, PromptType, QueueEntry, FileExistsGate, PromoteScratchGate, QueueGate } from '../engine/queue-generator.js';
 import {
   computeScratchRedirects,
   DEFAULT_SHARED_CANONICAL_GLOBS,
   type ScratchRedirect,
   type PathClass,
 } from '../engine/path-classifier.js';
+import { acquireScratchLock, releaseScratchLock, DEFAULT_LOCK_STALE_MS, DEFAULT_LOCK_MAX_WAIT_MS, DEFAULT_LOCK_POLL_INTERVAL_MS } from '../engine/scratch-lock.js';
+import { promoteScratchFiles } from '../engine/scratch-promote.js';
 import { analyzeSchedule, executeSchedule, type ScheduleAnalysis } from '../engine/parallel-scheduler.js';
 import { queueShortHash } from '../tools/queue-versioning.js';
 import { predictFailure, REWRITE_THRESHOLD, type FailurePrediction } from '../engine/failure-predictor.js';
@@ -626,6 +628,45 @@ async function loadSharedCanonicalGlobsConfig(projectPath: string): Promise<stri
   }
 }
 
+/** Resolved `forge_config.json`'s `pathClassification.scratchLock` block — see {@link loadScratchLockConfig}. */
+interface ScratchLockConfig {
+  staleMs: number;
+  maxWaitMs: number;
+  pollIntervalMs: number;
+}
+
+const DEFAULT_SCRATCH_LOCK_CONFIG: ScratchLockConfig = {
+  staleMs: DEFAULT_LOCK_STALE_MS,
+  maxWaitMs: DEFAULT_LOCK_MAX_WAIT_MS,
+  pollIntervalMs: DEFAULT_LOCK_POLL_INTERVAL_MS,
+};
+
+/**
+ * Read `<projectPath>/forge_config.json`'s `pathClassification.scratchLock` (operator overrides for
+ * the concurrent-session lock — `src/engine/scratch-lock.ts` — that guards every `shared_canonical`-
+ * path prompt's execution). All fields are minutes except `pollIntervalSeconds`. Falls back to the
+ * module's own defaults (30-minute staleness) for a missing file/field — never throws.
+ */
+async function loadScratchLockConfig(projectPath: string): Promise<ScratchLockConfig> {
+  try {
+    const raw = await readFile(join(projectPath, 'forge_config.json'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      pathClassification?: { scratchLock?: { staleMinutes?: unknown; maxWaitMinutes?: unknown; pollIntervalSeconds?: unknown } };
+    };
+    const cfg = parsed.pathClassification?.scratchLock;
+    const staleMinutes = typeof cfg?.staleMinutes === 'number' && cfg.staleMinutes > 0 ? cfg.staleMinutes : null;
+    const maxWaitMinutes = typeof cfg?.maxWaitMinutes === 'number' && cfg.maxWaitMinutes > 0 ? cfg.maxWaitMinutes : null;
+    const pollIntervalSeconds = typeof cfg?.pollIntervalSeconds === 'number' && cfg.pollIntervalSeconds > 0 ? cfg.pollIntervalSeconds : null;
+    return {
+      staleMs: staleMinutes !== null ? staleMinutes * 60_000 : DEFAULT_SCRATCH_LOCK_CONFIG.staleMs,
+      maxWaitMs: maxWaitMinutes !== null ? maxWaitMinutes * 60_000 : DEFAULT_SCRATCH_LOCK_CONFIG.maxWaitMs,
+      pollIntervalMs: pollIntervalSeconds !== null ? pollIntervalSeconds * 1_000 : DEFAULT_SCRATCH_LOCK_CONFIG.pollIntervalMs,
+    };
+  } catch {
+    return DEFAULT_SCRATCH_LOCK_CONFIG;
+  }
+}
+
 /** Build a `promptType -> timeout budget (ms)` resolver bound to one build's config. */
 function makeTimeoutBudgetResolver(config: TimeoutBudgetConfig): (promptType: PromptType) => number {
   return (promptType) =>
@@ -754,6 +795,58 @@ function forceFailOnMissingGateFiles(
     failedCheck: 'file_exists',
     diagnosticReport: `${note}\n\n${sentinel.diagnosticReport}`,
   };
+}
+
+/**
+ * `promote_scratch` gate enforcement (`src/engine/scratch-promote.ts`). Runs ONLY once this
+ * prompt's own Sentinel gate has already passed and BEFORE it merges to main â€” promotion writes
+ * directly onto the canonical path (its own `git pull` / commit / push, never through the
+ * branch-merge flow), so a conflict here must stop this prompt from merging at all rather than
+ * merging first and un-merging after. A no-op (`proceed: true`, unchanged `sentinel`) when the
+ * entry declares no `promote_scratch` gate.
+ */
+async function applyPromoteScratchGate(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  sentinel: SentinelResult,
+  log: (message: string) => void
+): Promise<{ proceed: boolean; sentinel: SentinelResult; noteSuffix: string }> {
+  const gate = entry.gates?.find((g): g is PromoteScratchGate => g.type === 'promote_scratch');
+  if (!gate) return { proceed: true, sentinel, noteSuffix: '' };
+
+  const result = await promoteScratchFiles({
+    projectPath: ctx.projectPath,
+    git: ctx.git,
+    scratchGlob: gate.scratch_glob,
+    canonicalMapping: gate.canonical_mapping,
+    queueId: buildIdOf(ctx),
+    promptId: entry.id,
+    log,
+  });
+
+  if (!result.success) {
+    const detail = result.haltMessage ?? 'promote_scratch gate halted the queue.';
+    log(`prompt ${index} '${entry.id}': ${detail}`);
+    const check: CheckResult = { name: 'promote_scratch', passed: false, skipped: false, detail, output: '', durationMs: 0 };
+    return {
+      proceed: false,
+      sentinel: {
+        ...sentinel,
+        passed: false,
+        checks: [...sentinel.checks, check],
+        failedCheck: 'promote_scratch',
+        diagnosticReport: `${detail}\n\n${sentinel.diagnosticReport}`,
+      },
+      noteSuffix: ` ${detail}`,
+    };
+  }
+
+  const noteSuffix =
+    result.promoted.length > 0
+      ? ` promote_scratch: ${result.promoted.length} file(s) promoted (${result.promoted.map((p) => p.canonicalPath).join(', ')}).`
+      : '';
+  return { proceed: true, sentinel, noteSuffix };
 }
 
 /**
@@ -992,6 +1085,16 @@ function asPathClassMap(v: unknown): Record<string, PathClass> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Coerce a raw `promote_scratch` gate's `canonical_mapping` (`{ "scratch/path": "canonical/path" }`) into a typed record. */
+function asCanonicalMappingMap(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.trim() !== '') out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /**
  * Coerce a raw `gates:` list into {@link QueueGate}[]. Unrecognized gate shapes are dropped
  * silently (queue.yaml's `gates:` block is otherwise decorative today — Sentinel drives the real
@@ -1010,6 +1113,13 @@ function asQueueGates(v: unknown): QueueGate[] {
       const gate: FileExistsGate = { type: 'file_exists', files };
       const pathClass = asPathClassMap(o.path_class);
       if (pathClass) gate.path_class = pathClass;
+      gates.push(gate);
+    } else if (type === 'promote_scratch') {
+      const scratchGlob = asString(o.scratch_glob).trim();
+      if (scratchGlob === '') continue;
+      const gate: PromoteScratchGate = { type: 'promote_scratch', scratch_glob: scratchGlob };
+      const canonicalMapping = asCanonicalMappingMap(o.canonical_mapping);
+      if (canonicalMapping) gate.canonical_mapping = canonicalMapping;
       gates.push(gate);
     } else if (SIMPLE_GATE_TYPES.has(type)) {
       gates.push({ type: type as 'compile' | 'build' | 'governance' });
@@ -1540,6 +1650,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     }
   }
   const sharedCanonicalGlobs = await loadSharedCanonicalGlobsConfig(projectPath);
+  const scratchLockConfig = await loadScratchLockConfig(projectPath);
 
   // 1b. Dependency analysis (topological order + waves + parallel groups). Sequential = `order`.
   const schedule = analyzeSchedule(entries, { log: (m) => log(`scheduler: ${m}`) });
@@ -1775,6 +1886,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     governanceRefs: queueGovernanceRefs,
     sharedCanonicalGlobs,
     runTimestamp: generatedAt,
+    scratchLockConfig,
     git,
     mainBranch,
     rag,
@@ -2253,6 +2365,8 @@ interface LoopContext {
   sharedCanonicalGlobs: string[];
   /** Stable per-build timestamp token used in every scratch path this build redirects to. */
   runTimestamp: string;
+  /** Concurrent-session scratch lock tuning (`src/engine/scratch-lock.ts`) — staleness/wait/poll, operator-configurable via `forge_config.json`'s `pathClassification.scratchLock`. */
+  scratchLockConfig: ScratchLockConfig;
   git: GitManager;
   /** The configured main branch (Contract 10) â€” Claude must NEVER run while checked out on this. */
   mainBranch: string;
@@ -2394,6 +2508,10 @@ async function executePrompt(
   executionMonitorSingleton.set(buildIdOf(ctx), executionMonitor);
   executionMonitor.start(buildIdOf(ctx), entry.id, index, ctx.projectPath);
 
+  // Declared here (not inside the try below) so the catch's safety-net release can reach whatever
+  // this attempt acquired even if an unexpected error fires before the normal release point.
+  const acquiredLocks: string[] = [];
+
   try {
     // b. Failure prediction (Contract 8).
     const prediction = await ctx.predictImpl({
@@ -2463,6 +2581,39 @@ async function executePrompt(
           `redirected to scratch â€” ${scratchRedirect.redirects.map((r) => `${r.canonicalPath} -> ${r.scratchPath}`).join(', ')}`
       );
     }
+
+    // CONCURRENT-SESSION LOCK (`src/engine/scratch-lock.ts`): before this prompt begins execution,
+    // acquire a lock for every `shared_canonical` canonical path it is about to (redirected-)write.
+    // A lock held by another session/prompt that is still fresh makes this prompt wait/retry rather
+    // than proceed; a lock older than the configurable staleness threshold is reclaimed instead of
+    // deadlocking every future run against that canonical path. Locks are released the moment the
+    // scratch write completes below (`forceFailOnMissingGateFiles`), NOT when a later `promote_scratch`
+    // gate reconciles it â€” promotion may run on a different entry entirely and must never be blocked
+    // waiting on a lock this session already holds.
+    for (const redirect of scratchRedirect.redirects) {
+      const lockResult = await acquireScratchLock({
+        projectPath: ctx.projectPath,
+        canonicalPath: redirect.canonicalPath,
+        queueId: buildIdOf(ctx),
+        promptId: entry.id,
+        staleMs: ctx.scratchLockConfig.staleMs,
+        maxWaitMs: ctx.scratchLockConfig.maxWaitMs,
+        pollIntervalMs: ctx.scratchLockConfig.pollIntervalMs,
+        log,
+      });
+      if (!lockResult.acquired) {
+        // Release whatever this prompt already acquired before giving up â€” never hold a partial set
+        // of locks for a prompt that isn't going to execute.
+        for (const held of acquiredLocks) releaseScratchLock(ctx.projectPath, held, log);
+        log(`prompt ${index} '${entry.id}': ${lockResult.reason ?? 'scratch lock acquisition failed'} â€” skipping this attempt.`);
+        return skippedOutcome(entry, index, lockResult.reason ?? 'scratch lock acquisition timed out.');
+      }
+      if (lockResult.reclaimedStale) {
+        log(`prompt ${index} '${entry.id}': reclaimed a stale scratch lock for '${redirect.canonicalPath}'.`);
+      }
+      acquiredLocks.push(redirect.canonicalPath);
+    }
+
     let promptText = scratchRedirect.instructionBlock + assembled.prompt;
     let promptHash = scratchRedirect.instructionBlock ? hashPrompt(promptText) : assembled.hash;
     let wasRewritten = false;
@@ -2803,6 +2954,11 @@ async function executePrompt(
     // everything else â€” never the (deliberately untouched) canonical path for a redirected file.
     sentinel = forceFailOnMissingGateFiles(sentinel, entry, scratchRedirect.redirects, declaredGateFiles, ctx.projectPath, log, index);
 
+    // Release every scratch lock acquired above now that the scratch write itself has completed
+    // (this prompt's own attempt is done, pass or fail) â€” per the lock's contract, this is
+    // intentionally BEFORE any `promote_scratch` gate below, not after.
+    for (const canonicalPath of acquiredLocks) releaseScratchLock(ctx.projectPath, canonicalPath, log);
+
     // forge.ps1's per-attempt gate-failure transition: `Write-Transition -state "FAILED" -reason
     // $shortReason` (the failed gate's own output, truncated to 200 chars). Fires once the FINAL
     // Sentinel verdict for this attempt is known (after the force-fail overrides above), so a
@@ -3058,10 +3214,19 @@ async function executePrompt(
     // every point below where `sentinel` could feed a recovery call, so no future refactor of the
     // branches beneath it can accidentally route a green Sentinel into `runRecoveryImpl`.
     if (sentinel.passed === true && !designRejected) {
-      // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
-      mergeAndTag(ctx, index);
-      disposition = 'completed';
-      note = 'Sentinel passed â€” merged to main and checkpointed.';
+      // promote_scratch (if declared) must settle BEFORE the merge below â€” a conflict there stops
+      // this prompt from merging at all rather than merging first and un-merging after.
+      const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
+      sentinel = promotion.sentinel;
+      if (!promotion.proceed) {
+        disposition = 'failed';
+        note = promotion.noteSuffix.trim();
+      } else {
+        // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
+        mergeAndTag(ctx, index);
+        disposition = 'completed';
+        note = `Sentinel passed â€” merged to main and checkpointed.${promotion.noteSuffix}`;
+      }
     } else if (designRejected) {
       // Sentinel is green here (that is the only way `designRejected` can be true) â€” the sole
       // reason this prompt is not merging is the design review, so this does NOT go through
@@ -3102,9 +3267,16 @@ async function executePrompt(
           log(`prompt ${index} '${entry.id}': [DESIGN PIPELINE] feedback re-run claude call failed`);
         }
         if (designRecovered) {
-          mergeAndTag(ctx, index);
-          disposition = 'completed';
-          note = 'Design review rejected, then recovered after a feedback re-run â€” merged to main and checkpointed.';
+          const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
+          sentinel = promotion.sentinel;
+          if (!promotion.proceed) {
+            disposition = 'failed';
+            note = promotion.noteSuffix.trim();
+          } else {
+            mergeAndTag(ctx, index);
+            disposition = 'completed';
+            note = `Design review rejected, then recovered after a feedback re-run â€” merged to main and checkpointed.${promotion.noteSuffix}`;
+          }
         } else {
           disposition = 'failed';
           note = `Design review rejected; feedback re-run did not restore approval: ${feedback}`;
@@ -3157,11 +3329,16 @@ async function executePrompt(
       // Sentinel result can never be reported as a failed prompt, regardless of what any other
       // field on the recovery result says.
       if (sentinel.passed === true) {
-        mergeAndTag(ctx, index);
-        disposition = 'completed';
-        note = recovery.recovered
-          ? `Auto-recovered: ${recovery.reason}`
-          : 'Sentinel passed after recovery â€” merged to main and checkpointed.';
+        const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
+        sentinel = promotion.sentinel;
+        if (!promotion.proceed) {
+          disposition = 'failed';
+          note = promotion.noteSuffix.trim();
+        } else {
+          mergeAndTag(ctx, index);
+          disposition = 'completed';
+          note = (recovery.recovered ? `Auto-recovered: ${recovery.reason}` : 'Sentinel passed after recovery â€” merged to main and checkpointed.') + promotion.noteSuffix;
+        }
       } else {
         disposition = 'failed';
         note = `Sentinel failed; auto-recovery did not restore green: ${recovery.reason}`;
@@ -3426,6 +3603,10 @@ async function executePrompt(
   } catch (error) {
     // Defensive: the collaborators never throw, but if one does, fail this prompt (don't crash).
     // Not a claude-runner timeout (the error happened in FORGE's own orchestration) â€” timedOut: false.
+    // Safety net: release any scratch lock this attempt acquired but never reached its normal
+    // release point for (e.g. a thrown branch-creation error) â€” never leave it held until the
+    // staleness threshold when it can be freed immediately instead.
+    for (const canonicalPath of acquiredLocks) releaseScratchLock(ctx.projectPath, canonicalPath, ctx.log);
     const durationMs = Date.now() - promptStartedAt;
     const note = `Unexpected error executing prompt ${index} '${entry.id}': ${describe(error)}`;
     ctx.log(`ERROR: ${note}`);

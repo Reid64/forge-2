@@ -458,3 +458,18 @@ only the injected-fake unit coverage described above.
 - (none)
 
 ---
+## 2026-08-15T19:37:48.951Z â€” promote_scratch gate type and concurrent-session lock mechanism (prompt 2/2)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---

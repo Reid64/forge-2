@@ -1701,7 +1701,7 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T18:59:49.314Z
+- **Last changeset date:** 2026-08-15T19:37:48.951Z
 
 ## Files Modified This Session (prompt 8 — stage6-consensus-upgrade: Consensus Engine Upgrade)
 
@@ -1743,4 +1743,35 @@ suites) → 35/35 pass, no regression. `node --import tsx --test tests/design-in
 **NOT done:** no live end-to-end Design Pipeline run against a real target Next.js project (this repo
 has no target app to run one against); Design Tournament's dev-server capture path has only
 injected-fake unit coverage, no live-server integration test.
+
+## Files Modified This Session (prompt 2/2 — promote_scratch gate type and concurrent-session lock mechanism)
+
+Arrived at the start of this session already written (untracked, prior run's work) and functionally
+complete/wired, but `src/engine/path-classifier.ts` (the file this feature imports `matchesGlob`/
+`normalizePath` from) contained two literal NUL bytes embedded in `matchesGlob`'s glob-to-regex
+placeholder logic — a pre-existing defect from the immediately prior commit (993aac5), not introduced
+this session. That made git (and Grep) treat the file as binary, breaking `git diff`/blame/PR review
+for it. Fixed by replacing both raw `\x00` bytes with the proper `\0` escape-sequence source text
+(identical runtime string value, no raw NUL byte in the UTF-8 source). Everything else verified in
+place, no other gaps found:
+
+- `src/engine/scratch-lock.ts` (new, 219 lines) — concurrent-session lock keyed on `sha256(canonicalPath)`, atomic `wx`-flag file creation, time-based staleness reclaim (default 30 min), poll/retry with configurable max wait (default 5 min).
+- `src/engine/scratch-promote.ts` (new, 284 lines) — `promoteScratchFiles`: `git pull` first, then per matched scratch file either direct-copy+commit+push (canonical missing or byte-identical) or conflict (both versions written to `docs/_forge-scratch/_pending-review/` for manual reconciliation, queue halts).
+- `src/engine/path-classifier.ts` (fixed this session) — removed 2 embedded NUL bytes from `matchesGlob`'s `**`-placeholder logic; no behavior change, byte-identical runtime regex.
+- `src/engine/git-manager.ts` (modified) — added `commitPath` (single-path `git add -- <path>` + commit, never `-A`), `pull()`, `push()`; `commitAll` refactored onto a shared private `commitStaged` helper.
+- `src/engine/queue-generator.ts` (modified) — added `PromoteScratchGate` (`type: 'promote_scratch'`, `scratch_glob`, optional `canonical_mapping`) to the `QueueGate` union.
+- `src/phases/phase4-sentinel.ts` (modified) — added `'promote_scratch'` to `SentinelCheckName` (declared-gate check, same pattern as the pre-existing `'file_exists'` — neither is in the fixed `SENTINEL_CHECK_ORDER`).
+- `src/phases/phase3-executor.ts` (modified) — `loadScratchLockConfig` (reads `forge_config.json`'s `pathClassification.scratchLock` overrides); acquires one scratch lock per `shared_canonical` redirect before a prompt executes, releases immediately after its scratch write completes (before any `promote_scratch` gate, per the lock's documented contract) with a catch-block safety-net release; `applyPromoteScratchGate` runs after Sentinel passes and BEFORE `mergeAndTag` on all three merge paths (clean pass, design-review-recovered, auto-recovery-recovered) so a promotion conflict blocks the merge instead of un-merging after; `asQueueGates` gained `promote_scratch` parsing (`asCanonicalMappingMap`) mirroring the existing `file_exists`/`asPathClassMap` pattern.
+- `CHANGESET.md`, `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md` (this file) — updated from actual codebase audit.
+
+**Not applicable this session:** the Architecture Guardian boilerplate (auth middleware, zod request
+validation, rate limiting, structured `{error:{code,message}}` responses) targets HTTP route
+handlers; this feature is internal build-engine code (a queue gate type + a filesystem lock), with
+no HTTP endpoint added, so none of those apply. No hardcoded mock data was introduced — both new
+modules do real filesystem/git I/O (`GitManager.pull`/`push`/`commitPath`, real `fs` reads/writes).
+
+**Verified:** `pnpm run build` → 0 TypeScript errors. No test files exist for `path-classifier.ts`/
+`scratch-lock.ts`/`scratch-promote.ts` in `tests/` — consistent with the immediately prior commit
+(993aac5, which introduced `path-classifier.ts` and also shipped without tests and passed Sentinel),
+so none were added here either.
 

@@ -171,7 +171,8 @@ export type SentinelCheckName =
   | 'lighthouse'
   | 'owasp_zap'
   | 'schemathesis'
-  | 'file_exists';
+  | 'file_exists'
+  | 'promote_scratch';
 
 /** The fixed, ordered list of MANDATORY Sentinel checks (Contract 13). Visual regression is opt-in. */
 export const SENTINEL_CHECK_ORDER: readonly SentinelCheckName[] = [
