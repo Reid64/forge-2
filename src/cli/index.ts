@@ -61,6 +61,7 @@ import { estimateBuildCost, type FeatureSpec } from '../analysis/cost-estimator.
 import type { AdversaryResult } from '../analysis/adversarial-review.js';
 import type { DeepAnalysisReport } from '../retrofit/index.js';
 import { checkAdversaryBlockers as checkAdversaryBlockersCore, resolveAcceptBlockers } from './adversary-gate.js';
+import type { ReadinessTierId } from '../governance/readiness-levels.js';
 import { looksLikeProjectPath } from '../tools/path-heuristics.js';
 import { runRepairMode } from './repair-command.js';
 import { checkpointTagFor } from '../engine/git-manager.js';
@@ -1593,6 +1594,59 @@ async function cmdTrace(reqIdArg: string, pathArg: string | undefined): Promise<
   } else {
     console.log(chalk.green.bold(`${result.reqId} — stage: ${result.stage.toUpperCase()}`));
   }
+}
+
+/**
+ * `forge state <path> [--tier <id>]` — the formal Build State Machine
+ * (`src/governance/build-state-machine.ts`). Infers the project's current lifecycle state from
+ * real signals (governance files on disk, `build_runs`, `gap_audit_runs`, `deployment_history`,
+ * and — with `--tier` — the Definition of Done) and prints the legal next state(s).
+ */
+async function cmdState(pathArg: string, opts: { tier?: string }): Promise<void> {
+  const { deriveProjectState, formatProjectStateResult } = await import('../governance/build-state-machine.js');
+  const { parseReadinessTierId, READINESS_TIERS } = await import('../governance/readiness-levels.js');
+  const projectPath = resolveProjectPath(pathArg);
+
+  let targetTier: ReadinessTierId | undefined;
+  if (opts.tier) {
+    targetTier = parseReadinessTierId(opts.tier) ?? undefined;
+    if (!targetTier) {
+      fail(`Unknown --tier "${opts.tier}". Expected one of: ${READINESS_TIERS.map((t) => t.id).join(', ')}.`);
+      return;
+    }
+  }
+
+  const result = await deriveProjectState(projectPath, { targetTier });
+  console.log(chalk.bold(`\nFORGE Build State Machine — ${result.projectName}\n`));
+  console.log(formatProjectStateResult(result));
+  console.log('');
+  console.log(chalk.green.bold(`state: ${result.state}`));
+}
+
+/**
+ * `forge blast-radius <path> [files...]` — Change-Impact / Blast-Radius Analysis
+ * (`src/governance/blast-radius.ts`). With explicit files, analyzes exactly those; otherwise
+ * auto-detects changed files from real git state (`git diff` + untracked files).
+ */
+async function cmdBlastRadius(pathArg: string, files: string[]): Promise<void> {
+  const { analyzeBlastRadius, formatBlastRadiusResult, getGitChangedFiles } = await import('../governance/blast-radius.js');
+  const projectPath = resolveProjectPath(pathArg);
+  const changedFiles = files.length > 0 ? files : getGitChangedFiles(projectPath);
+
+  if (changedFiles.length === 0) {
+    console.log(chalk.dim(`No changed files given and none detected via git in ${projectPath}.`));
+    return;
+  }
+
+  console.log(chalk.bold(`\nFORGE Blast-Radius Analysis — ${basename(projectPath)}\n`));
+  const result = await analyzeBlastRadius(projectPath, changedFiles);
+  console.log(formatBlastRadiusResult(result));
+  console.log('');
+  console.log(
+    chalk.green.bold(
+      `minimum safe validation set: ${result.impactedTestFiles.length} test file(s), ${result.impactedApiRoutes.length} API route(s)`
+    )
+  );
 }
 
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
@@ -3958,6 +4012,20 @@ async function main(): Promise<void> {
     .argument('<req-id>', 'requirement id, e.g. REQ-042')
     .argument('[project-path]', 'target project directory', '.')
     .action((reqIdArg: string, pathArg: string) => cmdTrace(reqIdArg, pathArg));
+
+  program
+    .command('state')
+    .description('Infer the project\'s current formal build-lifecycle state (CONCEPT..OPTIMIZATION) from real signals')
+    .argument('[project-path]', 'target project directory', '.')
+    .option('--tier <id>', 'readiness tier to evaluate Definition of Done against, to resolve VALIDATION vs RELEASE_CANDIDATE')
+    .action((pathArg: string, opts: { tier?: string }) => cmdState(pathArg, opts));
+
+  program
+    .command('blast-radius')
+    .description('Compute the change-impact blast radius of changed files: what else could this affect?')
+    .argument('[project-path]', 'target project directory', '.')
+    .argument('[files...]', 'explicit changed files (relative or absolute) — omit to auto-detect from git')
+    .action((pathArg: string, files: string[]) => cmdBlastRadius(pathArg, files));
 
   program
     .command('compose')

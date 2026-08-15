@@ -85,6 +85,7 @@ import { logLine } from '../tools/forge-logger.js';
 import { evaluateDoD, appendDoDFailureBlocker, type DoDResult } from '../governance/definition-of-done.js';
 import type { ReadinessTierId } from '../governance/readiness-levels.js';
 import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
+import { deriveProjectState, type ProjectStateResult } from '../governance/build-state-machine.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
 import type {
   BuildRun,
@@ -171,6 +172,15 @@ export interface Phase5Result {
    * finished build. Always runs (read-only, non-blocking) — never opt-in like `dodResult`.
    */
   invariantResults: InvariantResult[];
+  /**
+   * Step 15 — the formal Build State Machine's (`src/governance/build-state-machine.ts`) inferred
+   * project-level lifecycle state for this build, evaluated against `options.targetTier` when
+   * supplied (otherwise VALIDATION-vs-RELEASE_CANDIDATE cannot be distinguished — see the module's
+   * documented gap). Always runs, read-only, non-blocking — same posture as `invariantResults`.
+   * `null` only if derivation errored despite `deriveProjectState`'s own never-throws design
+   * (defense in depth, matching `dodResult`'s nullability).
+   */
+  projectState: ProjectStateResult | null;
   /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
@@ -428,6 +438,7 @@ function buildSummaryReport(
   deployment: Phase5DeploymentResult,
   dodResult: DoDResult | null,
   invariantResults: InvariantResult[],
+  projectState: ProjectStateResult | null,
   warnings: string[],
   generatedAt: string
 ): string {
@@ -570,6 +581,15 @@ function buildSummaryReport(
     for (const inv of invariantResults) {
       lines.push(`  - [${inv.status.toUpperCase()}] ${inv.id} (${inv.contract}): ${inv.detail}`);
     }
+  }
+  lines.push('');
+
+  lines.push('## 15. Build State Machine');
+  if (!projectState) {
+    lines.push('- Skipped — state derivation failed (see Warnings).');
+  } else {
+    lines.push(`- Project state: **${projectState.state}**`);
+    lines.push(`  - evidence: ${projectState.evidence}`);
   }
   lines.push('');
 
@@ -999,6 +1019,21 @@ export async function runPhase5Learner(
     log(`WARNING: step 14 invariant check degraded (${describe(error)})`);
   }
 
+  // 15. Formal Build State Machine (ENGINEERING_COMPLETENESS.md § 4 — "FORGE should know exactly
+  //     what state a project is in"). Always runs, read-only, non-blocking — same posture as step
+  //     14. Evaluated against `options.targetTier` when supplied, so VALIDATION vs RELEASE_CANDIDATE
+  //     can be distinguished (build-state-machine.ts documents this as a gap otherwise). Wrapped in
+  //     try/catch for defense in depth even though `deriveProjectState` is itself designed to
+  //     never throw (same belt-and-suspenders posture step 13 already applies to `evaluateDoD`).
+  let projectState: ProjectStateResult | null = null;
+  try {
+    projectState = await deriveProjectState(projectPath, { buildId: buildRunId, targetTier: options.targetTier });
+    log(`step 15 (Build State Machine): project state -> ${projectState.state} (${projectState.evidence})`);
+  } catch (error) {
+    warnings.push(`Build State Machine derivation failed (${describe(error)}).`);
+    log(`WARNING: step 15 state derivation degraded (${describe(error)})`);
+  }
+
   // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
@@ -1018,6 +1053,7 @@ export async function runPhase5Learner(
     deployment,
     dodResult,
     invariantResults,
+    projectState,
     warnings,
     generatedAt
   );
@@ -1063,6 +1099,7 @@ export async function runPhase5Learner(
     deployment,
     dodResult,
     invariantResults,
+    projectState,
     summaryReport,
     reportPath,
     warnings,

@@ -1,9 +1,24 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Requirements Traceability + Invariant Engine — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE
+## Current Session: Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Requirements Traceability + Invariant Engine: `src/governance/traceability.ts` (new — `parseRequirementIds`/`extractRequirementIdsFromGovernance`/`traceRequirement`, following a `REQ-NNN` id through queue.yaml → git commits → `test_run_results` → `deployment_history`), `src/governance/invariants.ts` (new — 4 starter invariants, each a restatement of an existing BEHAVIORAL_CONTRACTS.md contract: Contract 3 `no-write-during-build`, Contract 13 `sentinel-mandatory-checks-passed`, Contract AUT-5 `critical-gaps-deferred-to-human`, Contract 10 `no-direct-commits-to-main-during-build`), `src/phases/phase3-executor.ts` (step b2.8, pre-write invariant check, observational-only), `src/phases/phase5-learner.ts` (step 14, always-on invariant check + summary-report section + `Phase5Result.invariantResults`), `src/cli/index.ts` (`forge trace <req-id> [project-path]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**)
+## Last Updated: 2026-08-15 (Build State Machine + Change-Impact/Blast-Radius Analysis: `src/governance/build-state-machine.ts` (new — 13-value `ProjectState` + 10-value `TaskState` vocabularies, each with a real `*_STATE_TRANSITIONS` directed graph + `isValidTransition`, and `deriveProjectState`/`deriveTaskState`/`deriveTaskStates` pure inference functions grounded in `build_runs`/`gap_audit_runs`/`deployment_history`/`prompt_executions`), `src/governance/blast-radius.ts` (new — `analyzeBlastRadius`/`getGitChangedFiles`, reusing Architecture Guardian's `parseImports`/`buildDependencyGraph` inverted to a reverse-dependency BFS), `src/phases/phase3-executor.ts` (per-prompt task-state log + fire-and-forget blast-radius log, both observational), `src/phases/phase5-learner.ts` (step 15, always-on project-state derivation + summary-report section + `Phase5Result.projectState`), `src/cli/index.ts` (`forge state [project-path] [--tier]`, `forge blast-radius [project-path] [files...]`), STATE_OF_THE_BUILD.md (new section), SESSION_STATE.md (this file) updated; `pnpm run build` run via Bash this session — **exit code 0, 0 TypeScript errors**; `pnpm test` — 35/35 pass; both new CLI commands live-ran against this repo's own build/git state)
+
+---
+
+## Build State Machine + Change-Impact/Blast-Radius Analysis (2026-08-15) — COMPLETE
+
+**Objective:** see `STATE_OF_THE_BUILD.md` § "Build State Machine + Change-Impact/Blast-Radius
+Analysis" for the full grounding detail — `upgrades/ENGINEERING_COMPLETENESS.md` §§ 4/6, both built
+against data FORGE already records or can compute from the project's own source tree (no new
+table, no invented signal), and the two states/one task-state deliberately never auto-inferred
+(CONSENSUS, OPTIMIZATION, READY), each with the reasoning recorded in the module's own doc comment.
+
+**Verification:** `pnpm run build` — exit 0, 0 errors, run via Bash this session. `pnpm test` —
+35/35 pass. `forge state .`, `forge state . --tier PROTOTYPE`, `forge blast-radius .
+src/governance/definition-of-done.ts`, and `forge blast-radius .` (git auto-detect) all run live
+against this repo this session.
 
 ---
 
@@ -1461,5 +1476,5 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T04:58:45.470Z
+- **Last changeset date:** 2026-08-15T05:13:40.381Z
 

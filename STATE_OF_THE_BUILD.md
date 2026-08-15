@@ -1,13 +1,88 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + **Requirements Traceability + Invariant Engine COMPLETE — a `REQ-NNN` id scheme traced through queue.yaml/git history/test_run_results to a real PLANNED→IMPLEMENTED→TESTED→DEPLOYED stage, plus a starter set of 4 machine-checked invariants each a direct restatement of an existing BEHAVIORAL_CONTRACTS.md contract, wired into Phase 3 pre-write and Phase 5 end**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + **Requirements Traceability + Invariant Engine (ALL COMPLETE)**
+**Last Updated:** 2026-08-15 (Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + **Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE — a formal 13-state project lifecycle (CONCEPT→…→OPTIMIZATION) and 10-state task lifecycle (PLANNED→…→SUPERSEDED), each a real directed transition graph plus a pure derivation function grounded in existing Build Memory signals, and a reverse-import-dependency blast-radius analyzer (reusing Architecture Guardian's own parser) that answers "what else could this change affect," both wired into Phase 3 (observational, per-prompt) and Phase 5 (end-of-build) plus two new `forge state`/`forge blast-radius` CLI commands**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + **Build State Machine + Blast-Radius Analysis (ALL COMPLETE)**
 **Schema version:** **3.1.0** — bumped from `3.0.0` by the Design Pipeline's `design_reviews`/`design_screenshots` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.1.0'` this session). Note: this session's task brief named schema version `2.9.0` for this addition — that value was already consumed by the Autonomy Upgrades tables bump (`2.8.0` → `2.9.0`) that landed before Design Artifacts (`2.9.0` → `3.0.0`) in an earlier session, so recording `2.9.0` here would be a downgrade that collides with and contradicts existing migration history already committed to this file. `3.1.0` is the actual next version in sequence and is what `CURRENT_SCHEMA_VERSION` and the code's own migration comment record — recording the brief's number over the code's actual constant would be a fabrication (Iron Law 3), per the identical precedent already set in the Enhanced Retrofit / UI Engine sections below.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Build State Machine + Change-Impact/Blast-Radius Analysis (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/ENGINEERING_COMPLETENESS.md` § "4. A formal state machine for the build"
+and § "6. Dependency graph intelligence" (blast radius) / `upgrades/SYSTEMS-5-9-GAP-MATRIX.md` rows
+4 and 6 both confirmed these had zero prior implementation — no named-vocabulary match for the
+CONCEPT→…→OPTIMIZATION/PLANNED→…→SUPERSEDED states, and `dead-code-scanner.ts` found unused
+exports but not forward change impact. This session built both, grounded entirely in data FORGE
+already records or can compute from the project's own source tree — no new table, no fabricated
+signal, matching the degrade-honestly posture already established by `traceability.ts`/
+`invariants.ts`/`definition-of-done.ts`.
+
+**New modules:**
+1. `src/governance/build-state-machine.ts` — `ProjectState` (13 values, the spec's exact
+   CONCEPT→DISCOVERY→ARCHITECTURE→CONSENSUS→PLANNING→IMPLEMENTATION→VALIDATION→HARDENING→
+   RELEASE_CANDIDATE→APPROVAL→DEPLOYMENT→OBSERVATION→OPTIMIZATION vocabulary) and `TaskState` (10
+   values, PLANNED→READY→RUNNING→BLOCKED→FAILED→RETRYING→VALIDATING→PASSED→ACCEPTED→SUPERSEDED),
+   each with a real directed transition graph (`PROJECT_STATE_TRANSITIONS`/
+   `TASK_STATE_TRANSITIONS`, including realistic loop-backs — e.g. a failed VALIDATION returns to
+   IMPLEMENTATION, OBSERVATION can re-enter HARDENING for the incident-response sequence
+   ENGINEERING_COMPLETENESS.md § 55 names directly) checkable via `isValidTransition`. Two
+   derivation functions INFER the current state from real signals rather than requiring a caller to
+   track it: `deriveProjectState(projectPath, {buildId?, targetTier?})` walks PRD.md/BLUEPRINT.md/
+   queue.yaml existence → `build_runs.status` → `gap_audit_runs` (including `halted_for_human` →
+   APPROVAL) → `deployment_history` (`'ready'` → OBSERVATION) → `evaluateDoD` (when `targetTier` is
+   supplied, to resolve VALIDATION vs RELEASE_CANDIDATE); `deriveTaskState`/`deriveTaskStates` map
+   `prompt_executions.status`/`sentinel_passed`/`resolution_applied` to the 10-value vocabulary,
+   with `deriveTaskStates` additionally deriving SUPERSEDED from build-wide same-`prompt_name`
+   recency. Two states are documented, not silently faked, as never auto-inferred: project-level
+   CONSENSUS (no table persists a consensus outcome tied to a BLUEPRINT.md revision) and
+   OPTIMIZATION (`pending_evolutions` is FORGE's own cross-project learning table, not this
+   project's post-deploy optimization — using it would conflate two distinct concepts, the same
+   distinction this file's own "Note on naming" paragraph already draws elsewhere); task-level READY
+   (prompt_executions rows are created already `RUNNING`) is likewise never inferred.
+2. `src/governance/blast-radius.ts` — `analyzeBlastRadius(projectPath, changedFiles)` builds the
+   project's forward import-dependency graph by reusing Architecture Guardian's own parser
+   (`src/tools/architecture-guard.ts`'s exported `parseImports`/`parseExports`/
+   `buildDependencyGraph`/`resolveSpecifier`/`DEFAULT_IGNORE_DIRS` — the same machinery its
+   circular-dependency detector already runs against every build), inverts it to "what imports
+   file X," and BFS-walks it from every changed file to find the full transitively-impacted set —
+   directly answering ENGINEERING_COMPLETENESS.md's worked example ("Changed: auth/session.ts →
+   Potential impact: login, logout, …, Playwright authentication fixtures"). Impacted files are
+   further classified into `impactedTestFiles`/`impactedApiRoutes` (regex heuristics over path
+   shape) to surface the "minimum safe validation set" the spec calls out. `getGitChangedFiles`
+   auto-detects "what changed" from real git state (`git diff --name-only HEAD` + untracked files)
+   when a caller has no explicit file list.
+3. Phase 3 wiring (`src/phases/phase3-executor.ts`) — right after `finalizePromptExecution`
+   persists a prompt's outcome: logs the prompt's `deriveTaskState` (observational), then fires
+   `analyzeBlastRadius` over that prompt's created/modified/deleted files fire-and-forget (matching
+   the existing dead-code-scan block's non-blocking style immediately below it), logging the
+   impacted/test/API-route counts. Both are log-only — never block or alter disposition (Contract
+   AUT-6 posture, same as the Invariant Engine's step b2.8).
+4. Phase 5 wiring (`src/phases/phase5-learner.ts`, new step 15, after step 14's Invariant Engine) —
+   `deriveProjectState(projectPath, {buildId, targetTier: options.targetTier})` always runs
+   (read-only, non-blocking); the summary report gained a "## 15. Build State Machine" section;
+   `Phase5Result.projectState: ProjectStateResult | null` is the new field (`null` only on an
+   internal error despite the module's own never-throws design, matching `dodResult`'s
+   nullability).
+5. `forge state [project-path] [--tier <id>]` and `forge blast-radius [project-path] [files...]`
+   CLI commands (`src/cli/index.ts`) — `state` prints the inferred `ProjectState` + evidence +
+   legal next transitions; `blast-radius` prints the impacted/test/API-route sets for explicit
+   files or (when none given) git-auto-detected changed files.
+
+**Verification:** `pnpm run build` (`tsc`) — exit code 0, zero diagnostics, run via Bash this
+session. `pnpm test` — 35/35 tests pass (unrelated `tests/learning-*.test.ts` suite, unaffected by
+these changes; no existing test file covers any sibling `src/governance/` module either, so no new
+test file was added — matching that established precedent). Live-ran against this repo's own build:
+`forge state .` correctly reported `IMPLEMENTATION` (evidence: this repo's own in-flight
+`build_runs` row); `forge blast-radius . src/governance/definition-of-done.ts` correctly found 11
+transitively-impacted files including `build-state-machine.ts` itself (which this session's own
+code now imports from it) and its one real test-file consumer; `forge blast-radius .` (no explicit
+files) correctly auto-detected this session's 5 actually-modified source files via git and
+correctly reported the 4 non-source governance docs among the changed set as unresolved.
 
 ---
 
@@ -2301,3 +2376,5 @@ forge build ./my-project --start-at 5 --dry-run
 > 2026-08-15T04:57:21.222Z [FORGE Phase 3] prompt 1 'stage3-testing-wiring' (feature): COMPLETED â€" Sentinel PASS.
 
 > 2026-08-15T05:02:25.936Z [FORGE Phase 3] prompt 2 'stage2-readiness-dod' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T05:16:24.558Z [FORGE Phase 3] prompt 3 'stage4-traceability-invariants' (feature): COMPLETED â€" Sentinel PASS.

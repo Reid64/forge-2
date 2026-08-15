@@ -170,6 +170,8 @@ import {
 import { DesignPipeline, createDesignPipeline, type DesignReviewResult } from '../design-pipeline/index.js';
 import { getClient, logMemoryWarning, newId } from '../memory/client.js';
 import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
+import { analyzeBlastRadius } from '../governance/blast-radius.js';
+import { deriveTaskState } from '../governance/build-state-machine.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -2783,6 +2785,37 @@ async function executePrompt(
       changed,
       recovery,
     });
+
+    // STATE MACHINE (observational) â€” log this prompt's derived TaskState
+    // (`src/governance/build-state-machine.ts`), a pure function over the same outcome just
+    // persisted above. Never blocks; matches the Invariant Engine's log-only posture (b2.8).
+    const derivedTaskState = deriveTaskState({
+      status: disposition === 'completed' ? 'completed' : 'failed',
+      sentinel_passed: sentinel.passed,
+      resolution_applied: recovery && recovery.attempted ? recovery.reason : null,
+    });
+    log(`[STATE MACHINE] prompt ${index} '${entry.id}': task state -> ${derivedTaskState}`);
+
+    // BLAST RADIUS ANALYSIS (observational, non-fatal) â€” ENGINEERING_COMPLETENESS.md Â§ "Every
+    // modification should trigger the question: 'What else could this affect?'". Reuses
+    // Architecture Guardian's own import-graph machinery (`src/tools/architecture-guard.ts`),
+    // inverted to reverse-dependency direction, to find every file that transitively imports a
+    // file this prompt touched. Fire-and-forget, matching the dead-code-scan block immediately
+    // below â€” a slow/failed analysis never delays or fails the prompt.
+    const blastRadiusPaths = [...changed.created, ...changed.modified, ...changed.deleted];
+    if (blastRadiusPaths.length > 0) {
+      analyzeBlastRadius(ctx.projectPath, blastRadiusPaths)
+        .then((radius) => {
+          if (radius.transitivelyImpacted.length > 0) {
+            log(
+              `[BLAST RADIUS] prompt ${index} '${entry.id}': ${blastRadiusPaths.length} file(s) changed -> ` +
+                `${radius.transitivelyImpacted.length} file(s) potentially impacted ` +
+                `(${radius.impactedTestFiles.length} test file(s), ${radius.impactedApiRoutes.length} API route(s)).`
+            );
+          }
+        })
+        .catch((error) => log(`[BLAST RADIUS] analysis non-fatal for prompt ${index} '${entry.id}' â€” ${describe(error)}`));
+    }
 
     // Post-finalization: dead code scan on changed files + every-10th smoke tests.
 
