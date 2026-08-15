@@ -2,23 +2,26 @@
   "buildRunId": "3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889",
   "project": "forge-2",
   "startedAt": "2026-08-15T15:06:18.901Z",
-  "updatedAt": "2026-08-15T15:22:28.142Z",
+  "updatedAt": "2026-08-15T15:26:06.877Z",
   "currentPrompt": {
     "index": 1,
     "id": "fix-output-format-parity",
     "name": "Match FORGE 1.0 console output format exactly in Phase 3",
     "type": "feature",
-    "phase": "recovering"
+    "phase": "merged"
   },
   "totals": {
-    "completed": 0,
+    "completed": 1,
     "failed": 0,
-    "remaining": 1,
-    "tokensEstimated": 0,
-    "costEstimatedUsd": 0,
-    "totalElapsedMs": 0
+    "remaining": 0,
+    "tokensEstimated": 1774,
+    "costEstimatedUsd": 0.071328,
+    "totalElapsedMs": 1187287
   },
-  "lastSentinel": null,
+  "lastSentinel": {
+    "passed": true,
+    "failedCheck": null
+  },
   "recentEvents": [
     {
       "timestamp": "2026-08-15T15:06:19.052Z",
@@ -35,6 +38,18 @@
     {
       "timestamp": "2026-08-15T15:22:28.142Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
+    },
+    {
+      "timestamp": "2026-08-15T15:25:57.182Z",
+      "message": "prompt 1 'fix-output-format-parity' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T15:25:57.186Z",
+      "message": "Sentinel PASS"
+    },
+    {
+      "timestamp": "2026-08-15T15:25:59.576Z",
+      "message": "prompt 1 'fix-output-format-parity' (feature): merged"
     }
   ],
   "brainInterventions": 0

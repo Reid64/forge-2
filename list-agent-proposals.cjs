@@ -1,0 +1,11 @@
+﻿const Database = require("better-sqlite3");
+const os = require("os");
+const path = require("path");
+const dbPath = path.join(os.homedir(), ".forge", "forge_memory.db");
+const db = new Database(dbPath);
+const agents = db.prepare("SELECT * FROM pending_evolutions WHERE evolution_type = ? AND created_at > ? ORDER BY created_at DESC").all("AGENT", "2026-08-15T02:00:00.000Z");
+console.log("=== AGENT PROPOSALS (tonight) ===");
+console.log(JSON.stringify(agents, null, 2));
+const gov = db.prepare("SELECT * FROM governance_versions ORDER BY created_at DESC LIMIT 3").all();
+console.log("=== RECENT GOVERNANCE VERSIONS ===");
+console.log(JSON.stringify(gov, null, 2));

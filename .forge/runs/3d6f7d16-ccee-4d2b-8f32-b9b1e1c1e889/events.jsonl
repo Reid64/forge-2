@@ -1,0 +1,18 @@
+{"ts":"2026-08-15T15:05:58.866Z","level":"GATE","message":"FORGE PIPELINE STARTING : project \"forge-2\" : build 3d6f7d16-ccee-4d2b-8f32-b9b1e1c1e889 : 1 prompt(s) : started 2026-08-15T15:05:58.843Z"}
+{"ts":"2026-08-15T15:06:19.051Z","level":"INFO","message":"PROMPT 1/1 : fix-output-format-parity"}
+{"ts":"2026-08-15T15:06:49.507Z","level":"INFO","message":"Claude exec start â€” timeout 900s"}
+{"ts":"2026-08-15T15:21:49.656Z","level":"INFO","message":"Claude exit null (TIMEOUT) â€” 900.1s"}
+{"ts":"2026-08-15T15:22:28.025Z","level":"GATE","message":"Sentinel â€” 10 check(s)"}
+{"ts":"2026-08-15T15:22:28.026Z","level":"PASS","message":"  typescript â€” PASS"}
+{"ts":"2026-08-15T15:22:28.027Z","level":"PASS","message":"  eslint â€” PASS"}
+{"ts":"2026-08-15T15:22:28.028Z","level":"PASS","message":"  build â€” PASS"}
+{"ts":"2026-08-15T15:22:28.029Z","level":"PASS","message":"  file_integrity â€” PASS"}
+{"ts":"2026-08-15T15:22:28.030Z","level":"PASS","message":"  file_delta â€” PASS"}
+{"ts":"2026-08-15T15:22:28.030Z","level":"WARN","message":"  schema_drift â€” SKIP"}
+{"ts":"2026-08-15T15:22:28.031Z","level":"WARN","message":"  dependencies â€” SKIP"}
+{"ts":"2026-08-15T15:22:28.032Z","level":"WARN","message":"  lint â€” SKIP"}
+{"ts":"2026-08-15T15:22:28.033Z","level":"WARN","message":"  format â€” SKIP"}
+{"ts":"2026-08-15T15:22:28.034Z","level":"PASS","message":"  bundle_size â€” PASS"}
+{"ts":"2026-08-15T15:22:28.141Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T15:26:06.339Z","level":"PASS","message":"Prompt 1/1 'Match FORGE 1.0 console output format exactly in Phase 3' â€” PASS (5973442) â€” 19m47s"}
+{"ts":"2026-08-15T15:26:07.217Z","level":"PASS","message":"Phase 3 COMPLETED â€” 1/1 completed, 0 failed, 0 skipped; ~1774 tokens."}
