@@ -2,55 +2,27 @@
   "buildRunId": "5082a219-8e12-4758-b9fc-6ff7702e86d5",
   "project": "forge-2",
   "startedAt": "2026-08-15T04:55:35.903Z",
-  "updatedAt": "2026-08-15T06:50:58.529Z",
+  "updatedAt": "2026-08-15T07:10:15.774Z",
   "currentPrompt": {
-    "index": 8,
-    "id": "stage6-consensus-upgrade",
-    "name": "Upgrade Consensus Engine to independent proposals plus critique round plus Perplexity",
+    "index": 9,
+    "id": "stage7-queue-concurrency",
+    "name": "Enable deferred concurrent execution in parallel-scheduler",
     "type": "feature",
     "phase": "recovering"
   },
   "totals": {
-    "completed": 7,
+    "completed": 8,
     "failed": 0,
-    "remaining": 4,
-    "tokensEstimated": 13422,
-    "costEstimatedUsd": 0.507744,
-    "totalElapsedMs": 5942070
+    "remaining": 3,
+    "tokensEstimated": 15221,
+    "costEstimatedUsd": 0.582432,
+    "totalElapsedMs": 7137132
   },
   "lastSentinel": {
-    "passed": false,
+    "passed": true,
     "failedCheck": null
   },
   "recentEvents": [
-    {
-      "timestamp": "2026-08-15T05:55:33.882Z",
-      "message": "prompt 6 'stage4-deadloop' (feature): start"
-    },
-    {
-      "timestamp": "2026-08-15T05:55:33.894Z",
-      "message": "prompt 6 'stage4-deadloop' (feature): assembled"
-    },
-    {
-      "timestamp": "2026-08-15T05:55:46.963Z",
-      "message": "prompt 6 'stage4-deadloop' (feature): executing"
-    },
-    {
-      "timestamp": "2026-08-15T06:09:53.267Z",
-      "message": "prompt 6 'stage4-deadloop' (feature): sentinel"
-    },
-    {
-      "timestamp": "2026-08-15T06:09:53.270Z",
-      "message": "Sentinel FAIL (unknown)"
-    },
-    {
-      "timestamp": "2026-08-15T06:09:54.353Z",
-      "message": "Build Brain: applying targeted fix (confidence 0.63)"
-    },
-    {
-      "timestamp": "2026-08-15T06:09:54.354Z",
-      "message": "prompt 6 'stage4-deadloop': Build Brain targeted recovery (confidence 0.63)"
-    },
     {
       "timestamp": "2026-08-15T06:18:08.325Z",
       "message": "prompt 6 'stage4-deadloop' (feature): merged"
@@ -101,6 +73,34 @@
     },
     {
       "timestamp": "2026-08-15T06:50:58.529Z",
+      "message": "Timeout retry: re-running with 2x budget (1800s)"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:20.554Z",
+      "message": "prompt 8 'stage6-consensus-upgrade' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:20.557Z",
+      "message": "Sentinel PASS"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:23.023Z",
+      "message": "prompt 8 'stage6-consensus-upgrade' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:35.755Z",
+      "message": "prompt 9 'stage7-queue-concurrency' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:35.768Z",
+      "message": "prompt 9 'stage7-queue-concurrency' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T06:54:50.427Z",
+      "message": "prompt 9 'stage7-queue-concurrency' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T07:10:15.774Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
     }
   ],

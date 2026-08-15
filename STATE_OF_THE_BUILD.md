@@ -1,13 +1,79 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + **Dead-Loop / Stagnation Detection (ALL COMPLETE)**
+**Last Updated:** 2026-08-15 (Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)** + **Deferred Concurrent Execution COMPLETE — `src/phases/phase3-executor.ts`'s `runPromptsConcurrently` (the `maxConcurrency > 1` counterpart to the sequential prompt loop, driving `src/engine/parallel-scheduler.ts`'s pre-existing `executeSchedule` to fan each dependency-satisfied wave out onto its own linked git worktree via `src/engine/git-manager.ts`'s `createWorktree`/`mergeDelegate`, plus a new `tagDelegate` option so a linked worktree's checkpoint tag lands on the primary's real merge commit instead of the worktree's own stale HEAD)**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + **Deferred Concurrent Execution (ALL COMPLETE)**
 **Schema version:** unchanged at **3.2.0** — the Consensus Engine Upgrade and Dead-Loop / Stagnation Detection add no new tables; the upgrade reuses `production_telemetry` (event kind `consensus_proposal`, alongside the existing `consensus_validator`) and Dead-Loop/Stagnation read exclusively from `error_patterns`/`resolutions`/`build_runs`/`prompt_executions`, all of which already existed.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts (2026-08-15) — COMPLETE
+
+**Objective:** `src/engine/parallel-scheduler.ts` has always documented concurrent execution as
+deferred ("Sequential execution is the default... For now, implement the dependency analysis and
+parallel group identification") while already containing a fully-built `executeSchedule` (wave-by-
+wave, intra-wave-bounded concurrency, halt-on-failure). This session's task was to enable it for real.
+
+**What was found at session start:** `src/engine/git-manager.ts`, `src/engine/parallel-scheduler.ts`,
+and `src/phases/phase3-executor.ts` were all already modified (uncommitted) from a prior session's
+attempt. `parallel-scheduler.ts`'s `executeSchedule` and `git-manager.ts`'s worktree/merge-delegate
+machinery (`createWorktree`/`mergeBranchToMain`/`mergeDelegate`) were already complete and correct —
+but `npx tsc --noEmit` failed immediately: `phase3-executor.ts` called `runPromptsConcurrently`, a
+function that did not exist anywhere in the codebase. The prior session had wired the call site
+(`Phase3Options.maxConcurrency`, `loadParallelismConfig`, the `maxConcurrency > 1` branch of the
+prompt loop) but never written the function itself — the build was genuinely broken.
+
+**What this session wrote:**
+- `src/phases/phase3-executor.ts` — `runPromptsConcurrently`: drives `executeSchedule` over the
+  same dependency waves the sequential path computes, fanning every dependency-satisfied entry within
+  a wave out onto its own linked git worktree (Contract 10 — one branch per prompt, isolated in its
+  own working directory) and running each through the unmodified `executePrompt` the sequential loop
+  uses. Reproduces the sequential loop's own bookkeeping for the concurrent case: replay-carry /
+  `--start-at` skip, skill injection, learning-engine hooks, live-status/health-monitor telemetry, and
+  the Contract-13 halt+rollback+report path. Three genuinely-ambiguous concurrency judgment calls are
+  documented in the function's own doc comment: what `previousSentinel`/`schemaPromptsHaveRun` mean
+  when several prompts run at once (snapshotted at wave start), which entry's Sentinel result "wins"
+  after a wave (highest queue index), and what "last checkpoint" means for rollback when entries can
+  complete out of order (the highest index THIS run has itself merged+checkpointed, generalizing the
+  sequential path's `index - 1` rule). Dry run intentionally stays sequential (nothing executes, so
+  concurrency is moot).
+- `src/engine/git-manager.ts` — new `tagDelegate` option (`GitManager`/`GitManagerOptions`), the
+  checkpoint-tag counterpart to the pre-existing `mergeDelegate`: `git tag` with no explicit ref always
+  tags the INVOKING worktree's own HEAD, which never moves onto the merge commit `mergeDelegate` just
+  created in the primary worktree — so an un-delegated `tagCheckpoint` from a linked worktree would
+  silently tag the wrong commit. Confirmed as a real bug via a live smoke test, confirmed fixed after.
+
+**Verification:** `npx tsc --noEmit` — 0 errors. `pnpm run build` — exit 0. `pnpm test` — 35/35 pass.
+A live smoke test of the new `git-manager.ts` mechanics against a scratch repo genuinely confirmed
+`createWorktree`/`createBranch` and the `mergeDelegate`/`tagDelegate` routing (via `[primary]`- vs
+`[wt1]`-prefixed logs, and the delegated tag landing on the primary's real post-merge HEAD) — but also
+surfaced a real, pre-existing environment hazard: this machine's PowerShell profile force-
+`Set-Location`s into a real project (`Tarritrix-Audit`) on every new `powershell.exe` process, and
+`GitManager` spawns git via `shell: 'powershell.exe'` with no `-NoProfile`, so the profile silently
+overrode the smoke test's intended `cwd` — its git commands ran against that real project's live
+checkout instead (which had an actively-running build on its own feature branch, this very prompt's
+branch, at the time). Caught immediately via `git reflog`/`git status`/`git worktree list` and fully
+reverted within the same session (orphaned worktree removed, stray branch/tag deleted, original branch
+re-checked out; the working tree was clean throughout, so no commits/resets/file content were ever at
+risk — only branch pointers moved and were moved back). Full incident detail in CHANGESET.md's
+"Correction note" for this prompt. Same root cause as the `forge2-exec-blocker`/
+`forge2-session52-vacuous-build-fix` history already in Build Memory.
+
+**NOT done this session, flagged not silently skipped:** no dedicated test file exists for
+`src/engine/parallel-scheduler.ts` or `src/engine/git-manager.ts`; `removeWorktree`/`pruneWorktrees`
+were not exercised via `GitManager` code this session (only their raw-`git`-CLI equivalent, during
+smoke-test incident cleanup); `runPromptsConcurrently`'s full fan-out was not run end-to-end against a
+real multi-wave queue with a real claude-runner; the PowerShell-profile git-command-redirection hazard
+is not fixed (out of scope for this task — an interactive-environment configuration issue, not a FORGE
+code defect).
+
+**Next action:** add `__tests__/parallel-scheduler.test.ts` and `__tests__/git-manager.test.ts`; run a
+real multi-wave `forge_config.json` `build.parallelism > 1` build end-to-end against a disposable
+project once a clean (non-profile-hijacked) shell is available.
 
 ---
 
@@ -2668,3 +2734,5 @@ chain-exhaustion, cost/token tracking, `callModelFor` adapter) fail in this sand
 intercepted by the test's mocked `fetchImpl` — a pre-existing environment quirk (see FORGE Build
 Memory: "exec is INTERMITTENT"), not a regression from this change; none of the 3 touch Perplexity,
 routing tables, or the consensus engine.
+
+> 2026-08-15T06:54:35.470Z [FORGE Phase 3] prompt 8 'stage6-consensus-upgrade' (feature): COMPLETED â€" Sentinel PASS.

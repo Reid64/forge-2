@@ -78,7 +78,7 @@ import { randomUUID } from 'node:crypto';
 import { load as parseYaml } from 'js-yaml';
 
 import type { ContextInjection, PromptType, QueueEntry } from '../engine/queue-generator.js';
-import { analyzeSchedule, type ScheduleAnalysis } from '../engine/parallel-scheduler.js';
+import { analyzeSchedule, executeSchedule, type ScheduleAnalysis } from '../engine/parallel-scheduler.js';
 import { queueShortHash } from '../tools/queue-versioning.js';
 import { predictFailure, REWRITE_THRESHOLD, type FailurePrediction } from '../engine/failure-predictor.js';
 import { rewritePrompt } from '../engine/prompt-rewriter.js';
@@ -410,6 +410,17 @@ export interface Phase3Options {
   /** The main branch merges target / rollback resets. Default `'main'`. */
   mainBranch?: string;
   /**
+   * Max prompts run concurrently WITHIN one dependency wave (parallel-scheduler.ts's deferred
+   * `executeSchedule` capability, now enabled). `1` (the default) preserves the exact classic
+   * SEQUENTIAL path (`schedule.order` walked one prompt at a time) with zero behavioural change.
+   * `> 1` fans a wave's dependency-satisfied prompts out onto isolated git worktrees (Contract 10:
+   * still one branch per prompt) and runs their claude-runner calls concurrently, merging each to
+   * `mainBranch` independently as soon as ITS Sentinel gate passes — never waiting on wave-mates.
+   * Default: `options.maxConcurrency`, else `forge_config.json`'s `build.parallelism`, else `1`.
+   * Ignored for a dry run (nothing executes) and for a Build Replay carry prefix (unaffected).
+   */
+  maxConcurrency?: number;
+  /**
    * Per-prompt claude timeout (ms). Default: per-prompt-type budget from `forge_config.json`'s
    * `build.timeoutMinutes` / `build.longTimeoutMinutes` (Session 5 finding #14) â€” `test`/`deploy`
    * prompts get the long budget, everything else gets the default. Setting this OVERRIDES the
@@ -595,6 +606,22 @@ async function loadTimeoutBudgetConfig(projectPath: string): Promise<TimeoutBudg
 function makeTimeoutBudgetResolver(config: TimeoutBudgetConfig): (promptType: PromptType) => number {
   return (promptType) =>
     (LONG_TIMEOUT_PROMPT_TYPES.has(promptType) ? config.longTimeoutMinutes : config.timeoutMinutes) * 60_000;
+}
+
+/**
+ * Read `<projectPath>/forge_config.json`'s `build.parallelism` (falling back to `1` — the
+ * classic sequential default — for a missing file/field/non-positive value; never throws).
+ * `Phase3Options.maxConcurrency` overrides this when explicitly supplied.
+ */
+async function loadParallelismConfig(projectPath: string): Promise<number> {
+  try {
+    const raw = await readFile(join(projectPath, 'forge_config.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { build?: { parallelism?: unknown } };
+    const parallelism = parsed.build?.parallelism;
+    return typeof parallelism === 'number' && Number.isFinite(parallelism) && parallelism >= 1 ? Math.floor(parallelism) : 1;
+  } catch {
+    return 1;
+  }
 }
 
 /**
@@ -1498,6 +1525,11 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       `test/deploy ${timeoutBudgetConfig.longTimeoutMinutes}m` +
       (options.claudeTimeoutMs !== undefined ? ` (overridden uniformly to ${Math.round(options.claudeTimeoutMs / 60_000)}m by claudeTimeoutMs)` : '')
   );
+  const maxConcurrency =
+    options.maxConcurrency !== undefined && options.maxConcurrency >= 1
+      ? Math.floor(options.maxConcurrency)
+      : await loadParallelismConfig(projectPath);
+  if (maxConcurrency > 1) log(`concurrency: up to ${maxConcurrency} prompt(s) per dependency wave (git-worktree fan-out).`);
   const liveStatus = new LiveStatusWriter(projectPath, projectName, buildRunId, schedule.order.length);
 
   // Build-wide health monitoring (Autonomy: BuildHealthMonitor â€” src/autonomy/health-monitor.ts):
@@ -1582,6 +1614,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     }
   }
 
+  if (maxConcurrency <= 1) {
   for (let i = 0; i < schedule.order.length; i++) {
     const entry = schedule.order[i];
     if (entry === undefined) continue;
@@ -1753,6 +1786,25 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       await rollbackAndReport(ctx, entry, index, outcome, haltReason);
       break;
     }
+  }
+  } else {
+    // Deferred concurrent execution (parallel-scheduler.ts's `executeSchedule`, now enabled):
+    // fan each dependency-satisfied wave out onto isolated git worktrees instead of walking
+    // `schedule.order` one prompt at a time. See `runPromptsConcurrently` for the full contract.
+    const concurrent = await runPromptsConcurrently(ctx, schedule, entries, {
+      replay,
+      startAt,
+      skillsDir,
+      maxConcurrency,
+      previousSentinel,
+      schemaPromptsHaveRun,
+    });
+    outcomes.push(...concurrent.outcomes);
+    halted = concurrent.halted;
+    haltedAt = concurrent.haltedAt;
+    haltReason = concurrent.haltReason;
+    schemaPromptsHaveRun = concurrent.schemaPromptsHaveRun;
+    previousSentinel = concurrent.previousSentinel;
   }
 
   // 4. Finalize the build_run.
@@ -3111,6 +3163,359 @@ async function dryRunPrompt(
     recovery: null,
     note: `Dry run â€” assembled + predicted (p=${probability === null ? 'n/a' : probability.toFixed(3)}), not executed.`,
   };
+}
+
+/**
+ * Deferred concurrent execution (parallel-scheduler.ts's `executeSchedule`, now enabled): the
+ * `maxConcurrency > 1` counterpart to the classic sequential `for` loop in {@link runPhase3Executor}.
+ * Walks the SAME dependency waves `executeSchedule` computes, but fans every dependency-satisfied
+ * entry within a wave out onto its own linked git worktree (Contract 10: still one branch per
+ * prompt, just isolated in its own working directory so N concurrent claude-runner calls never
+ * collide on file writes or branch checkouts) and runs each through the SAME `executePrompt` the
+ * sequential path uses, unmodified. Never starts wave N+1 until wave N has fully settled (a later
+ * wave's entries may depend on an earlier wave's) â€” the concurrency is strictly INTRA-wave.
+ *
+ * Design choices specific to concurrency (recorded here since they are genuine judgment calls
+ * about an inherently sequential-shaped contract, not bugs):
+ *   - Every entry in a wave reads `schemaPromptsHaveRun`/`previousSentinel` as they stood at the
+ *     START of the wave (intra-wave entries have, by construction, no dependency on one another,
+ *     so none of them could legitimately need a wave-mate's OWN output). Snapshotted synchronously
+ *     before the first `await` in each entry's execute callback so no sibling can race the read
+ *     (Node is single-threaded and `GitManager` is execSync-based, so the synchronous prefix of
+ *     every concurrently-kicked-off callback runs to completion, in order, before any of them
+ *     resumes past its first await â€” see `runWithConcurrency` in parallel-scheduler.ts).
+ *   - After a wave settles, `schemaPromptsHaveRun` becomes true if ANY entry the wave actually ran
+ *     (not carried/skipped) was prompt_type 'schema'; `previousSentinel` becomes the Sentinel
+ *     result of the highest-index entry the wave actually ran (a deterministic tie-break — "the
+ *     last one in queue order" — among several concurrent siblings with no other ordering).
+ *   - On a Sentinel failure, main is rolled back ONCE per halted wave (not once per failed entry,
+ *     since concurrent siblings can fail together) to the highest prompt index THIS run has itself
+ *     successfully merged + checkpointed (or the replay/--start-at carry boundary if nothing has
+ *     merged yet) â€” the concurrent generalisation of the sequential path's `rollbackAndReport`'s
+ *     `index - 1` rule, which only held because the immediately-preceding index was always the
+ *     last completed entry in a strictly sequential walk.
+ */
+async function runPromptsConcurrently(
+  ctx: LoopContext,
+  schedule: ScheduleAnalysis,
+  entries: readonly QueueEntry[],
+  opts: {
+    replay: ReplayOptions | null;
+    startAt: number | undefined;
+    skillsDir: string;
+    maxConcurrency: number;
+    previousSentinel: PreviousSentinelStatus | null;
+    schemaPromptsHaveRun: boolean;
+  }
+): Promise<{
+  outcomes: PromptOutcome[];
+  halted: boolean;
+  haltedAt: { index: number; id: string } | null;
+  haltReason: string | null;
+  schemaPromptsHaveRun: boolean;
+  previousSentinel: PreviousSentinelStatus | null;
+}> {
+  const { log } = ctx;
+  const orderIndex = new Map<string, number>(schedule.order.map((e, i) => [e.id, i + 1] as const));
+
+  // Dry run: concurrency is meaningless (nothing executes) â€” assemble + predict every entry
+  // sequentially, exactly as the sequential loop's own dry-run branch does.
+  if (ctx.dryRun) {
+    const outcomes: PromptOutcome[] = [];
+    const previousSentinel = opts.previousSentinel;
+    for (const entry of schedule.order) {
+      const index = orderIndex.get(entry.id) ?? 0;
+      const outcome = await runWithBuildContext({ promptId: entry.id }, () => dryRunPrompt(ctx, entry, index, previousSentinel));
+      outcomes.push(outcome);
+    }
+    return { outcomes, halted: false, haltedAt: null, haltReason: null, schemaPromptsHaveRun: opts.schemaPromptsHaveRun, previousSentinel };
+  }
+
+  // Best-effort hygiene: drop stale linked-worktree metadata a prior crashed/interrupted concurrent
+  // run left behind, so a reused worktree directory name never collides.
+  try {
+    ctx.git.pruneWorktrees();
+  } catch {
+    /* non-fatal */
+  }
+
+  const outcomes: PromptOutcome[] = [];
+  const recordedIds = new Set<string>(); // ids already given a real PromptOutcome (carried/executed)
+  let schemaPromptsHaveRun = opts.schemaPromptsHaveRun;
+  let previousSentinel = opts.previousSentinel;
+  let halted = false;
+  let haltReason: string | null = null;
+  let haltedAt: { index: number; id: string } | null = null;
+  // The concurrent generalisation of "index - 1's checkpoint" â€” the highest prompt index this run
+  // has itself successfully merged + checkpointed, seeded from wherever the replay / --start-at
+  // carry boundary left off (mirrors the sequential path's `index > 1` rollback guard).
+  let lastGoodIndex = Math.max((opts.replay?.fromPromptIndex ?? 1) - 1, (opts.startAt ?? 1) - 1, 0);
+
+  const summary = await executeSchedule(entries, {
+    log,
+    maxConcurrency: opts.maxConcurrency,
+    haltOnFailure: true,
+    execute: async (entry, { wave: waveIndex }) => {
+      const index = orderIndex.get(entry.id) ?? 0;
+
+      // Replay carry / --start-at skip (F12 / start-at): identical semantics to the sequential
+      // loop's own a0/a1 steps, just reached via the scheduler's execute callback instead of a
+      // `for` loop. Recorded as a real PromptOutcome here (the post-loop reconciliation below only
+      // synthesizes outcomes for entries `executeSchedule` itself skipped).
+      if (opts.replay && index < opts.replay.fromPromptIndex) {
+        const note = `Replay â€” carried from checkpoint (prompt ${index} < resume index ${opts.replay.fromPromptIndex}), not re-executed.`;
+        outcomes.push(skippedOutcome(entry, index, note));
+        recordedIds.add(entry.id);
+        if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
+        log(`prompt ${index}/${schedule.order.length} '${entry.id}': ${note}`);
+        return { success: true, note };
+      }
+      if (opts.startAt !== undefined && index < opts.startAt) {
+        const note = `Skipped â€” --start-at ${opts.startAt}: prompt ${index} is before the requested start index.`;
+        outcomes.push(skippedOutcome(entry, index, note));
+        recordedIds.add(entry.id);
+        if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
+        log(`[--start-at] skipping prompt ${index}/${schedule.order.length} '${entry.id}'`);
+        return { success: true, note };
+      }
+
+      // Snapshot the wave-start shared state BEFORE any `await` (see doc comment above) so every
+      // sibling in this wave reads the identical previousSentinel/schemaPromptsHaveRun value.
+      const waveSchema = schemaPromptsHaveRun;
+      const wavePrevious = previousSentinel;
+
+      // Skill injection (identical to the sequential loop's own step).
+      let entryForExec = entry;
+      if (entry.skills && entry.skills.length > 0) {
+        const skillContent = await loadSkillContent(entry.skills, opts.skillsDir, log);
+        if (skillContent) {
+          entryForExec = { ...entry, description: `${skillContent}\n\n---\n\n${entry.description}` };
+          log(`prompt ${index} '${entry.id}': prepended ${entry.skills.length} skill(s) (${entry.skills.join(', ')})`);
+        }
+      }
+
+      // Contract-10 fan-out: one linked git worktree per concurrent entry, checked out detached at
+      // main's current tip; the entry then creates its OWN feature branch inside it exactly as the
+      // sequential path does (via `executePrompt`'s own `ctx.git.createBranch` call, unmodified).
+      const worktree = ctx.git.createWorktree(buildIdOf(ctx), index, entry.name);
+      if (!worktree.success) {
+        const note = `Concurrent worktree creation failed for prompt ${index} '${entry.id}': ${worktree.error ?? 'unknown git error'}`;
+        log(`ERROR: ${note}`);
+        const failedOutcome: PromptOutcome = {
+          index,
+          id: entry.id,
+          name: entry.name,
+          promptType: entry.prompt_type,
+          disposition: 'failed',
+          branchName: null,
+          failureProbability: null,
+          wasRewritten: false,
+          timedOut: false,
+          decomposed: false,
+          promptHash: '',
+          promptExecutionId: null,
+          tokensEstimated: 0,
+          durationMs: 0,
+          sentinel: null,
+          recovery: null,
+          note,
+        };
+        outcomes.push(failedOutcome);
+        recordedIds.add(entry.id);
+        return { success: false, note };
+      }
+
+      const entryGit = new GitManager({
+        cwd: worktree.worktreePath,
+        mainBranch: ctx.mainBranch,
+        log: (m) => log(`git[wt ${index}]: ${m}`),
+        mergeDelegate: (branchName) => ctx.git.mergeBranchToMain(branchName),
+        tagDelegate: (buildId, promptIndex) => ctx.git.tagCheckpoint(buildId, promptIndex),
+      });
+      const entryCtx: LoopContext = { ...ctx, projectPath: worktree.worktreePath, git: entryGit };
+
+      const outcome = await runWithBuildContext({ promptId: entry.id }, () =>
+        executePrompt(entryCtx, entryForExec, index, wavePrevious, waveSchema)
+      );
+      outcomes.push(outcome);
+      recordedIds.add(entry.id);
+
+      // Post-execution bookkeeping mirrored from the sequential loop's own step (learning engine,
+      // cost/health telemetry, live status) â€” see runPhase3Executor's `for` loop for the sequential
+      // twin of every call below.
+      const realTechStackTags = deriveStackTags(ctx.stackFingerprint);
+      const changedThisPrompt = filesChanged(entryCtx);
+      onPromptComplete({
+        promptId: entry.id,
+        success: outcome.disposition === 'completed',
+        retryCount: outcome.recovery?.attempted ? 1 : 0,
+        tokensConsumed: outcome.tokensEstimated,
+        gatePassRate: outcome.sentinel?.passed ? 1.0 : 0.0,
+        errorOutput: outcome.sentinel?.diagnosticReport ?? undefined,
+        buildId: ctx.buildRunId ?? '',
+        projectName: ctx.projectName,
+        taskType: mapPromptTypeToTaskType(entry.prompt_type),
+        techStackTags: realTechStackTags.length > 0 ? realTechStackTags : ['typescript'],
+        templateHash: outcome.promptHash,
+      });
+
+      try {
+        const memoryClient = BuildMemory.getClient();
+        if (memoryClient && outcome.sentinel) {
+          observeRewriteOutcome(entry.id, outcome.wasRewritten, outcome.sentinel.passed, memoryClient);
+        }
+      } catch {
+        /* non-fatal â€” Contract 4 */
+      }
+
+      try {
+        const { handlePostToolUse } = await import('../learning/hooks-enhanced.js');
+        await handlePostToolUse({
+          buildId: ctx.buildRunId ?? '',
+          promptId: entry.id,
+          taskType: mapPromptTypeToTaskType(entry.prompt_type),
+          techStackTags: realTechStackTags.length > 0 ? realTechStackTags : ['typescript', 'nextjs'],
+          firstPassSuccess: outcome.disposition === 'completed',
+          retryCount: outcome.recovery?.attempted ? 1 : 0,
+          tokensConsumed: outcome.tokensEstimated,
+          gatPassRate: outcome.disposition === 'completed' ? 1 : 0,
+          errorOutput: outcome.sentinel?.diagnosticReport ?? '',
+          filesModified: [...changedThisPrompt.created, ...changedThisPrompt.modified],
+          projectName: ctx.projectName,
+        });
+      } catch {
+        /* non-fatal */
+      }
+
+      const completedSoFar = outcomes.filter((o) => o.disposition === 'completed').length;
+      const failedSoFar = outcomes.filter((o) => o.disposition === 'failed').length;
+      const totalElapsedMs = outcomes.reduce((sum, o) => sum + o.durationMs, 0);
+      log(
+        `prompt ${index} '${entry.id}' (wave ${waveIndex}): ${humanDuration(outcome.durationMs)} this prompt, ` +
+          `${humanDuration(totalElapsedMs)} build total so far.`
+      );
+      await ctx.liveStatus.totals({
+        completed: completedSoFar,
+        failed: failedSoFar,
+        remaining: Math.max(0, schedule.order.length - outcomes.length),
+        tokensEstimated: outcomes.reduce((sum, o) => sum + o.tokensEstimated, 0),
+        costEstimatedUsd: ctx.costTracker.totalCostUsd(),
+        totalElapsedMs,
+      });
+
+      ctx.healthMonitor.recordPromptResult(
+        outcome.disposition === 'completed',
+        outcome.confidenceScore ?? (outcome.disposition === 'completed' ? 1 : 0)
+      );
+      await ctx.healthMonitor.shouldPause();
+
+      if (entry.prompt_type === 'schema') schemaPromptsHaveRun = true;
+      if (outcome.sentinel) previousSentinel = toPreviousSentinelStatus(outcome.sentinel, entry.name, index);
+
+      if (outcome.disposition === 'completed') {
+        lastGoodIndex = Math.max(lastGoodIndex, index);
+      } else if (outcome.disposition === 'failed') {
+        try {
+          await onSentinelFailure(outcome.sentinel?.failedCheck ?? 'unknown', entry.id, ctx.buildRunId ?? '', ctx.projectPath);
+        } catch (error) {
+          log(`integration bus onSentinelFailure failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // Best-effort worktree cleanup â€” run from the PRIMARY (never from inside the worktree being
+      // removed). A failure here never affects this entry's own disposition (Contract 4 posture).
+      try {
+        ctx.git.removeWorktree(worktree.worktreePath);
+      } catch {
+        /* non-fatal */
+      }
+
+      return { success: outcome.disposition === 'completed', note: outcome.note };
+    },
+  });
+
+  // Reconcile entries `executeSchedule` itself skipped (unmet dependency, or an earlier wave in
+  // this same run halted) â€” these never reached the execute callback above, so they have no
+  // PromptOutcome yet. Entries already recorded above (carried/--start-at/executed) are left alone.
+  for (const o of summary.outcomes) {
+    if (o.status !== 'skipped' || recordedIds.has(o.entry.id)) continue;
+    const index = orderIndex.get(o.entry.id) ?? 0;
+    outcomes.push(skippedOutcome(o.entry, index, o.note));
+    recordedIds.add(o.entry.id);
+    log(`prompt ${index}/${schedule.order.length} '${o.entry.id}': ${o.note}`);
+  }
+  outcomes.sort((a, b) => a.index - b.index);
+
+  // Halt handling (Contract 13): find the halted wave's failed entries (there may be more than one
+  // â€” concurrent siblings can fail together), roll main back ONCE, and report the halt using the
+  // lowest-index failure as the representative (generalises the sequential path's single-failure
+  // halt report to "first in queue order" when several fail at once).
+  if (summary.halted) {
+    const failedThisWave = outcomes
+      .filter((o) => o.disposition === 'failed')
+      .filter((o) => {
+        const wave = schedule.waves.find((w) => w.entries.some((e) => e.id === o.id));
+        return wave?.index === summary.haltedAtWave;
+      })
+      .sort((a, b) => a.index - b.index);
+    const primary = failedThisWave[0] ?? outcomes.filter((o) => o.disposition === 'failed').sort((a, b) => a.index - b.index)[0] ?? null;
+
+    halted = true;
+    if (primary) {
+      haltedAt = { index: primary.index, id: primary.id };
+      haltReason =
+        primary.recovery?.reason ??
+        `Sentinel failed at prompt ${primary.index} '${primary.id}' (${primary.sentinel?.failedCheck ?? 'unknown'}) ` +
+          `and was not auto-recovered${failedThisWave.length > 1 ? ` (${failedThisWave.length} entries failed in wave ${summary.haltedAtWave})` : ''}.`;
+
+      // Roll main back to the last checkpoint THIS run actually created (or the replay/--start-at
+      // carry boundary if nothing has merged yet) â€” see the concurrency doc comment above for why
+      // this differs from the sequential path's plain `index - 1`.
+      if (lastGoodIndex >= 1) {
+        const tag = checkpointTagName(buildIdOf(ctx), lastGoodIndex);
+        const rollback = ctx.git.rollbackToCheckpoint(tag);
+        if (!rollback.success) {
+          log(`halt: rollback to ${tag} failed â€” ${rollback.error ?? 'unknown'} (feature branch(es) preserved regardless)`);
+        } else {
+          log(`halt: main reset to last checkpoint ${tag}; feature branch(es) preserved`);
+        }
+      }
+
+      const report = [
+        '# FORGE Phase 3 â€” HALT (concurrent execution)',
+        '',
+        `- **Halted at:** wave ${summary.haltedAtWave ?? 'unknown'}, prompt ${primary.index} '${primary.id}' (${primary.promptType})`,
+        `- **Reason:** ${haltReason}`,
+        `- **Feature branch (preserved):** ${primary.branchName ?? '(none)'}`,
+        failedThisWave.length > 1
+          ? `- **Other failures this wave:** ${failedThisWave
+              .slice(1)
+              .map((o) => `${o.id} (branch ${o.branchName ?? '(none)'})`)
+              .join(', ')}`
+          : null,
+        `- **When:** ${nowIso()}`,
+        '',
+        '## Sentinel diagnostic',
+        '',
+        primary.sentinel?.diagnosticReport ?? '(no Sentinel report captured)',
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n');
+
+      await ctx.writeHaltReport(report);
+      try {
+        await ctx.updateStateProgress(
+          `[FORGE Phase 3] HALTED at wave ${summary.haltedAtWave ?? 'unknown'}, prompt ${primary.index} '${primary.id}': ${haltReason}`
+        );
+      } catch {
+        /* state update is non-fatal */
+      }
+    } else {
+      haltReason = `Concurrent execution halted (wave ${summary.haltedAtWave ?? 'unknown'}) but the specific failing entry could not be resolved.`;
+    }
+  }
+
+  return { outcomes, halted, haltedAt, haltReason, schemaPromptsHaveRun, previousSentinel };
 }
 
 /** Every prompt type â€” used to seed the per-type count record. */

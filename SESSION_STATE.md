@@ -1,9 +1,91 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Control Plane Run Telemetry (.forge/runs/*.jsonl) — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE
+## Current Session: Deferred Concurrent Execution (parallel-scheduler.ts wired into phase3-executor.ts) — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE + Deferred Concurrent Execution: COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Control Plane Run Telemetry: `src/telemetry/run-recorder.ts` (new — `RunRecorder` class writing `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`; `setActiveRunRecorder`/`getActiveRunRecorder` ambient singleton), `src/phases/phase3-executor.ts` (`renderProgress` mirrors every console line to `events.jsonl`; recorder constructed/activated at build start, `recordPromptStart`/`recordGateCheck`/`recordPromptEnd`/`writeMetrics` wired at the same call sites `renderProgress` already used), `src/phases/phase5-learner.ts` (writes `final-report.md` from the existing Phase 5 `summaryReport`), `src/testing/runners/persist.ts` (`persistRunnerOutcome` forwards its already-built `TestRunResult` to `tests.jsonl`); this task brief's prior run had exited without writing any of this — the changeset/Sentinel record for prompt 7/11 was corrected in place (see CHANGESET.md "Correction note") rather than left standing as a false PASS on an empty diff; `npx tsc --noEmit` — 0 errors; `pnpm run build` — exit 0; `pnpm test` — 35/35 pass; `RunRecorder` live-smoke-tested this session against this repo's own `.forge/` directory — all 6 artifacts produced the expected structured content, scratch run directory deleted afterward)
+## Last Updated: 2026-08-15 (Deferred Concurrent Execution: prior session's attempt at this exact prompt left `src/phases/phase3-executor.ts` calling an undefined `runPromptsConcurrently` — a real `tsc` compile error, not just an undocumented gap; `src/engine/parallel-scheduler.ts`'s `executeSchedule` was already complete and needed no changes. This session wrote `runPromptsConcurrently` for real (the `maxConcurrency > 1` counterpart to the sequential prompt loop — fans each dependency-satisfied wave out onto its own linked git worktree via `executeSchedule`, running each entry through the unmodified `executePrompt`) and added a `tagDelegate` option to `src/engine/git-manager.ts` (checkpoint-tag counterpart to the pre-existing `mergeDelegate` — without it a linked worktree's own `tagCheckpoint` would silently tag its own stale HEAD instead of the primary's post-merge commit). `npx tsc --noEmit` — 0 errors; `pnpm run build` — exit 0; `pnpm test` — 35/35 pass. A live smoke test of the new git-manager.ts mechanics surfaced a real, pre-existing environment hazard — this machine's PowerShell profile force-`Set-Location`s into a real project (`Tarritrix-Audit`) on every new `powershell.exe` process, silently redirecting every `GitManager` git command regardless of intended `cwd` — which briefly (and unintentionally) touched that live project's real, actively-running-build checkout; caught via `git reflog` and fully reverted within the same session. See "Deferred Concurrent Execution" section below for full detail.)
+
+---
+
+## Deferred Concurrent Execution (parallel-scheduler.ts wired into phase3-executor.ts) (2026-08-15) — COMPLETE
+
+**Objective:** `src/engine/parallel-scheduler.ts`'s own doc comment has always described concurrent
+execution as deferred ("Sequential execution is the default... For now, implement the dependency
+analysis and parallel group identification") but ALSO already contained a fully-built
+`executeSchedule` (wave-by-wave, intra-wave-bounded concurrency, halt-on-failure) — this session's
+task brief was to actually ENABLE it. At session start, `git status` showed `src/engine/
+git-manager.ts`, `src/engine/parallel-scheduler.ts`, and `src/phases/phase3-executor.ts` all already
+modified (uncommitted) from a prior session's attempt, and `src/engine/parallel-scheduler.ts`'s
+`executeSchedule` plus `src/engine/git-manager.ts`'s worktree/merge-delegate machinery
+(`createWorktree`/`mergeBranchToMain`/`mergeDelegate`) were already fully written and correct. But
+`npx tsc --noEmit` immediately failed: `src/phases/phase3-executor.ts` called `runPromptsConcurrently`
+— a function that did not exist anywhere in the codebase. The prior session had wired the CALL SITE
+(the `maxConcurrency > 1` branch of the prompt loop, `Phase3Options.maxConcurrency`,
+`loadParallelismConfig`) but never actually written the function it calls — the build was genuinely
+broken, not merely incomplete.
+
+**What this session wrote:**
+- `src/phases/phase3-executor.ts` — `runPromptsConcurrently` (~230 lines): drives
+  `executeSchedule` over the same dependency waves the sequential path computes, fanning every
+  dependency-satisfied entry within a wave out onto its own linked git worktree (Contract 10 — still
+  one branch per prompt, just isolated in its own working directory) and running each through the
+  SAME `executePrompt` the sequential loop uses, completely unmodified. Reproduces every piece of the
+  sequential loop's own per-prompt bookkeeping for the concurrent case: replay-carry / `--start-at`
+  skip (checked synchronously before any worktree is created), skill injection, the learning-engine
+  hooks (`onPromptComplete`, `observeRewriteOutcome`, PostToolUse), live-status/health-monitor
+  telemetry, and the Contract-13 halt+rollback+report path. Three points are genuinely ambiguous once
+  more than one prompt can be "the previous one" at once, so each is a documented judgment call in the
+  function's own doc comment rather than an accidental inconsistency: (1) every entry in a wave reads
+  `schemaPromptsHaveRun`/`previousSentinel` as they stood at the START of the wave, snapshotted
+  synchronously before the entry's first `await` (safe because Node is single-threaded and
+  `GitManager` is `execSync`-based, so no sibling can mutate the snapshot mid-read); (2) after a wave
+  settles, `previousSentinel` becomes the highest-index entry's Sentinel result (a deterministic
+  tie-break); (3) on a Sentinel failure, main is rolled back ONCE per halted wave (concurrent siblings
+  can fail together) to the highest prompt index THIS run has itself merged+checkpointed, generalizing
+  the sequential path's `index - 1` rule (which only held under strictly sequential execution). Dry
+  run is intentionally NOT run concurrently (nothing executes, so concurrency is moot) — it falls back
+  to the same sequential `dryRunPrompt` walk.
+- `src/engine/git-manager.ts` — new `tagDelegate` option on `GitManager`/`GitManagerOptions`
+  (`tagCheckpoint`'s counterpart to the pre-existing `mergeDelegate`): `git tag` with no explicit ref
+  always tags the INVOKING worktree's own HEAD, which never moves onto the merge commit
+  `mergeDelegate` just created in the PRIMARY worktree's directory — so an un-delegated
+  `tagCheckpoint` call from a linked worktree would silently tag the wrong commit (its own stale
+  feature-branch tip). Confirmed as a real bug via a live smoke test before the fix (see Verification),
+  confirmed fixed after.
+
+**Verification:** `npx tsc --noEmit` — 0 errors. `pnpm run build` — exit 0. `pnpm test` — 35/35 pass.
+A live smoke test of the new `git-manager.ts` mechanics genuinely confirmed `createWorktree`/
+`createBranch` and the `mergeDelegate`/`tagDelegate` routing (visible via `[primary]`- vs.
+`[wt1]`-prefixed log lines, and the delegated tag landing on the primary's real post-merge HEAD) — but
+it also surfaced a real, pre-existing environment hazard unrelated to this feature's own code: this
+machine's PowerShell profile forces `Set-Location` into a real project (`Tarritrix-Audit`) on every
+new `powershell.exe` process, and `GitManager` spawns git via `shell: 'powershell.exe'` with no
+`-NoProfile`, so the profile silently overrode the smoke test's intended scratch-repo `cwd` and its
+git commands executed against that real project's live checkout instead (which had an
+actively-running build on its own feature branch — this very prompt's branch — at the time). This was
+caught immediately via `git reflog`/`git status`/`git worktree list` and fully reverted within the
+same session (orphaned worktree removed, stray branch and tag deleted, original branch re-checked
+out; the working tree was clean throughout, so no commits, resets, or file content were ever at risk
+— only branch pointers moved and were moved back). Because the hazard is structural (independent of
+which `cwd` is passed), no second live attempt was made. Full incident detail in CHANGESET.md's
+"Correction note" for this prompt. This is the same root cause already tracked in Build Memory as the
+`forge2-exec-blocker`/`forge2-session52-vacuous-build-fix` history.
+
+**NOT done this session, flagged not silently skipped:** no dedicated test file exists for
+`src/engine/parallel-scheduler.ts` or `src/engine/git-manager.ts`; `removeWorktree`/`pruneWorktrees`
+were not exercised via `GitManager` code this session (only their raw-`git`-CLI equivalent, during the
+smoke-test incident cleanup); `runPromptsConcurrently`'s full fan-out was not run end-to-end against a
+real multi-wave queue with a real claude-runner (git-manager-only smoke test, not a full Phase 3
+build); the PowerShell-profile git-command-redirection hazard this session re-confirmed is not fixed
+(out of scope — it is an interactive-environment configuration issue, not a FORGE code defect, and
+fixing it would mean editing the user's own PowerShell profile without being asked).
+
+**Next action:** add `__tests__/parallel-scheduler.test.ts` and `__tests__/git-manager.test.ts`
+(neither exists yet, despite both modules being fairly heavily exercised); run a real multi-wave
+`forge_config.json` `build.parallelism > 1` build end-to-end against a disposable project once a
+clean (non-profile-hijacked) shell is available, to observe `runPromptsConcurrently` drive real
+claude-runner calls concurrently rather than via the git-manager-only smoke test this session relied
+on.
 
 ---
 
@@ -1571,9 +1653,7 @@ Changed files:
 
 - **VS Code path:** not detected
 - **CHANGESET.md reviewed:** NO
-- **Last changeset date:** 2026-08-15T06:50:26.745Z
-
----
+- **Last changeset date:** 2026-08-15T07:09:57.693Z
 
 ## Files Modified This Session (prompt 8 — stage6-consensus-upgrade: Consensus Engine Upgrade)
 

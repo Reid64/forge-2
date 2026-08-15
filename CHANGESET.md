@@ -249,3 +249,78 @@ disposition; the scratch run directory was deleted afterward (not committed).
 - (none)
 
 ---
+## 2026-08-15T07:09:57.693Z â€” Enable deferred concurrent execution in parallel-scheduler (prompt 9/11)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- (none)
+
+### Files Deleted
+
+- (none)
+
+### Correction note
+
+The original auto-generated entry above recorded zero files because the prompt run it describes
+left `src/phases/phase3-executor.ts` calling an undefined `runPromptsConcurrently` â€” a real `tsc`
+compile error (`TS2304: Cannot find name 'runPromptsConcurrently'`), i.e. the prior run exited
+mid-implementation with the build actually broken, not merely undocumented. `src/engine/
+parallel-scheduler.ts` itself was already complete and correct (its `executeSchedule` â€” wave-by-wave,
+intra-wave-bounded concurrency, halt-on-failure â€” needed no changes); the gap was entirely in
+wiring it into the executor. This pass wrote the wiring for real:
+
+- `src/phases/phase3-executor.ts` â€” new `runPromptsConcurrently` function (the `maxConcurrency > 1`
+  counterpart to the sequential `for` loop): drives `executeSchedule` over the same dependency
+  waves, fanning every dependency-satisfied entry in a wave out onto its own linked git worktree
+  (Contract 10: still one branch per prompt) and running each through the unmodified `executePrompt`
+  the sequential path already uses. Replay-carry / `--start-at` skip, skill injection, learning-engine
+  hooks, live-status/health-monitor telemetry, and the Contract-13 halt+rollback+report path are all
+  reproduced for the concurrent case (documented design choices for the genuinely-ambiguous parts â€”
+  which wave-mate's Sentinel result becomes `previousSentinel`, what "last checkpoint" means when
+  several entries can complete out of order â€” are recorded in the function's own doc comment).
+  Dry run is intentionally NOT run concurrently (nothing executes, so concurrency is moot); it falls
+  back to the same sequential `dryRunPrompt` walk the classic loop uses.
+- `src/engine/git-manager.ts` â€” new `tagDelegate` option (`GitManager.tagCheckpoint`), the checkpoint
+  counterpart to the pre-existing `mergeDelegate`: a linked worktree's own HEAD never moves onto the
+  merge commit `mergeDelegate` creates in the primary worktree, so an un-delegated `git tag` from the
+  worktree would silently tag the wrong commit (its own stale feature-branch tip) â€” confirmed by a
+  live smoke test (see Verification) before the fix, and confirmed fixed after.
+
+**Verification:** `npx tsc --noEmit` â€” 0 errors. `pnpm run build` â€” exit 0. `pnpm test` â€” 35/35 pass
+(no dedicated test file exists for either module â€” see "NOT done" below).
+
+Attempted a live smoke test of the new git-manager.ts mechanics (`createWorktree`, `createBranch`,
+the `mergeDelegate`/`tagDelegate` routing) against what was intended to be an isolated scratch repo.
+It surfaced a real, pre-existing environment hazard, unrelated to this feature's own code: this
+machine's PowerShell profile (`$PROFILE`) unconditionally `Set-Location`s into a real target project
+(`Tarritrix-Audit`) on every new `powershell.exe` process, and `GitManager` spawns every git command
+via `shell: 'powershell.exe'` with no `-NoProfile` â€” so the profile silently overrides whichever `cwd`
+`GitManager` was constructed with, for every FORGE git operation on this machine, regardless of this
+session's changes. The smoke test's git commands were consequently executed against that real
+project's live primary checkout (which had an actively-running build on its own feature branch,
+`forge/.../prompt-9-enable-deferred-concurrent-execution-in` â€” this very prompt â€” at the time); this
+was caught immediately via `git reflog`/`git status`/`git worktree list` and fully reverted (orphaned
+worktree removed, stray branch and checkpoint tag deleted, original branch re-checked out, working
+tree confirmed clean throughout â€” no commits, resets, or file content were ever touched, only branch
+pointers). Because the hazard is structural (any new `powershell.exe` this machine spawns is
+redirected, independent of which path is passed as `cwd`), a second attempt would have reproduced the
+same redirection rather than validating anything new, so no further live attempt was made this
+session. What the (redirected) run DID still genuinely prove, from its own log prefixes and the
+post-hoc inspection of the affected repo: `createWorktree`/`createBranch` succeed and register real
+git state; `mergeToMain`/`tagCheckpoint` called on a worktree-bound `GitManager` correctly route
+through `mergeDelegate`/`tagDelegate` to the primary instance (visible as `[primary]`-prefixed log
+lines from calls made on the `[wt1]`-logging instance) rather than acting locally; the delegated tag
+landed on the primary's actual post-merge HEAD, not the calling instance's own `cwd`. NOT verified
+live this session: `removeWorktree`/`pruneWorktrees` (cleanup during the incident used the equivalent
+raw `git` CLI directly, not these `GitManager` methods) and the full `runPromptsConcurrently` fan-out
+against a real multi-wave queue with a real claude-runner. This PowerShell-profile hazard is the same
+root cause already tracked in Build Memory as the `forge2-exec-blocker`/
+`forge2-session52-vacuous-build-fix` history â€” pre-existing, out of this task's scope, and NOT
+modified here; flagged again because this session produced a concrete, reproducible near-incident
+against a real project, not just a theoretical concern.
+
+---

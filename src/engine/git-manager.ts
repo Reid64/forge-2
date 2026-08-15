@@ -32,8 +32,8 @@
  */
 
 import { execSync, type ExecSyncOptions } from 'node:child_process';
-import { writeFileSync, rmSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { join, basename, dirname } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
 
@@ -93,6 +93,18 @@ export interface MergeResult extends GitResult {
 export interface TagResult extends GitResult {
   /** The checkpoint tag name (returned even on failure). */
   tag: string;
+}
+
+/**
+ * {@link GitResult} for {@link GitManager.createWorktree} — a Contract-10 concurrent-execution
+ * fan-out point (parallel-scheduler.ts's `executeSchedule`, deferred to "Phase 2" per the
+ * scheduler's original design and now enabled). One linked worktree gives one queued prompt its
+ * own working directory + detached checkout, so N prompts with no mutual dependency (a scheduler
+ * WAVE) can run claude-runner concurrently without their file writes / branch checkouts colliding.
+ */
+export interface WorktreeResult extends GitResult {
+  /** Absolute path to the new linked worktree (usable as a `cwd` for a sibling `GitManager`). */
+  worktreePath: string;
 }
 
 /** {@link GitResult} for {@link GitManager.rollbackToCheckpoint}. */
@@ -159,6 +171,28 @@ export interface GitManagerOptions {
   log?: (message: string) => void;
   /** Override `execSync` (tests). Default: `child_process.execSync`. */
   execImpl?: ExecSyncFn;
+  /**
+   * Concurrent-execution mode (Contract 10 parallel fan-out): when this `GitManager`'s `cwd` is a
+   * LINKED WORKTREE (created by {@link GitManager.createWorktree}) rather than the primary
+   * checkout, it can never check out `mainBranch` itself — that branch is already checked out in
+   * the primary worktree, and git refuses to check out the same branch in two worktrees at once.
+   * Set `mergeDelegate` to the primary `GitManager`'s {@link GitManager.mergeBranchToMain} (bound)
+   * so {@link GitManager.mergeToMain} routes the actual merge through the worktree that legitimately
+   * has `mainBranch` checked out, instead of attempting (and failing) it locally. Unset (default)
+   * for the classic single-worktree sequential path — `mergeToMain` then merges locally as before.
+   */
+  mergeDelegate?: (branchName: string) => MergeResult;
+  /**
+   * Concurrent-execution mode counterpart to {@link mergeDelegate}: a linked worktree's own HEAD
+   * never moves onto the merge commit `mergeDelegate` just created (the checkout+merge happened in
+   * the PRIMARY worktree's directory) — `git tag` with no explicit ref always tags the INVOKING
+   * worktree's own HEAD, so a plain local {@link GitManager.tagCheckpoint} call from a linked
+   * worktree would silently tag the wrong commit (its own feature-branch tip). Set `tagDelegate` to
+   * the primary `GitManager`'s {@link GitManager.tagCheckpoint} (bound) so the tag is created from
+   * the worktree that actually has the merge commit checked out. Unset (default) for the classic
+   * single-worktree sequential path — `tagCheckpoint` then tags locally as before.
+   */
+  tagDelegate?: (buildId: string, promptIndex: number) => TagResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +276,8 @@ export class GitManager {
   private readonly shell: string | boolean;
   private readonly log: (message: string) => void;
   private readonly execImpl: ExecSyncFn;
+  private readonly mergeDelegate: ((branchName: string) => MergeResult) | undefined;
+  private readonly tagDelegate: ((buildId: string, promptIndex: number) => TagResult) | undefined;
 
   constructor(options: GitManagerOptions = {}) {
     this.cwd = options.cwd ?? process.cwd();
@@ -250,6 +286,13 @@ export class GitManager {
     this.shell = options.shell ?? (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh');
     this.log = options.log ?? logLine('git');
     this.execImpl = options.execImpl ?? ((command, opts) => execSync(command, opts));
+    this.mergeDelegate = options.mergeDelegate;
+    this.tagDelegate = options.tagDelegate;
+  }
+
+  /** This manager's bound working directory (a linked worktree's path, for a concurrent worker). */
+  getCwd(): string {
+    return this.cwd;
   }
 
   // -- core runner ----------------------------------------------------------
@@ -360,6 +403,11 @@ export class GitManager {
     }
     const mergedBranch = current.branch;
 
+    // Concurrent-execution mode: this cwd is a linked worktree that can never legitimately check
+    // out `mainBranch` itself (see GitManagerOptions.mergeDelegate) — route the merge through the
+    // primary worktree instead of attempting it here.
+    if (this.mergeDelegate) return this.mergeDelegate(mergedBranch);
+
     const co = this.checkout(this.mainBranch);
     if (!co.success) return { ...co, mergedBranch, targetBranch: this.mainBranch };
 
@@ -368,8 +416,71 @@ export class GitManager {
     return { ...merge, mergedBranch, targetBranch: this.mainBranch };
   }
 
+  /**
+   * Merge an explicit branch into `mainBranch` from THIS manager's cwd, which must be the
+   * PRIMARY worktree (the one with `mainBranch` actually checked out) — the counterpart a linked
+   * worktree's {@link mergeDelegate} calls into. Unlike {@link mergeToMain}, the branch to merge
+   * is a parameter rather than "whatever is currently checked out here", since the primary
+   * worktree never checks out the concurrent feature branches itself. On a conflicted/failed
+   * merge, the merge is aborted (`git merge --abort`) so `mainBranch` is left clean for the next
+   * concurrent sibling's merge rather than stuck mid-conflict.
+   */
+  mergeBranchToMain(branchName: string): MergeResult {
+    const co = this.checkout(this.mainBranch);
+    if (!co.success) return { ...co, mergedBranch: branchName, targetBranch: this.mainBranch };
+
+    const merge = this.run(['merge', '--no-ff', '--no-edit', branchName]);
+    if (!merge.success) {
+      this.log(`merge of ${branchName} into ${this.mainBranch} failed â€” aborting to leave ${this.mainBranch} clean`);
+      this.run(['merge', '--abort']);
+    }
+    return { ...merge, mergedBranch: branchName, targetBranch: this.mainBranch };
+  }
+
+  /**
+   * Create a linked git worktree (Contract-10 concurrent fan-out) checked out DETACHED at
+   * `mainBranch`'s current tip — detached, not `-b <branch>`, so this never collides with
+   * `mainBranch` already being checked out in the primary worktree. The caller (a per-worker
+   * `GitManager` bound to `worktreePath`) then creates its OWN feature branch there exactly as
+   * the sequential path does (`createBranch`), so branch-per-prompt (Contract 10) still holds.
+   * The worktree directory is created under `.forge-worktrees/` beside `cwd` (a sibling, never
+   * inside the tracked working tree, so it can never show up as untracked project content).
+   */
+  createWorktree(buildId: string, promptIndex: number, promptName: string): WorktreeResult {
+    const dirName = `${sanitizeSegment(buildId)}-prompt-${normalizeIndex(promptIndex)}-${slugify(promptName)}`;
+    const worktreePath = join(this.worktreesRoot(), dirName);
+    try {
+      mkdirSync(this.worktreesRoot(), { recursive: true });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      this.log(`FAILED to create worktree root directory: ${error}`);
+      return { success: false, command: `mkdir ${this.worktreesRoot()}`, stdout: '', stderr: error, exitCode: null, error, worktreePath };
+    }
+    const result = this.run(['worktree', 'add', '--detach', worktreePath, this.mainBranch]);
+    return { ...result, worktreePath };
+  }
+
+  /** Remove a linked worktree created by {@link createWorktree} (force â€” its branch is already merged/preserved). */
+  removeWorktree(worktreePath: string): GitResult {
+    return this.run(['worktree', 'remove', '--force', worktreePath]);
+  }
+
+  /** Prune stale linked-worktree metadata left behind by a prior crashed/interrupted concurrent run. */
+  pruneWorktrees(): GitResult {
+    return this.run(['worktree', 'prune']);
+  }
+
+  /** The directory concurrent-execution linked worktrees live under â€” a sibling of `cwd`. */
+  private worktreesRoot(): string {
+    return join(dirname(this.cwd), '.forge-worktrees');
+  }
+
   /** Create the Contract-11 LIGHTWEIGHT checkpoint tag at the current HEAD. */
   tagCheckpoint(buildId: string, promptIndex: number): TagResult {
+    // Concurrent-execution mode: this cwd is a linked worktree whose own HEAD never moved onto the
+    // merge commit `mergeDelegate` created in the primary worktree — route the tag through the
+    // primary instead of tagging this worktree's (wrong) HEAD locally (see GitManagerOptions.tagDelegate).
+    if (this.tagDelegate) return this.tagDelegate(buildId, promptIndex);
     const tag = checkpointTagFor(buildId, promptIndex);
     const result = this.run(['tag', tag]);
     return { ...result, tag };
