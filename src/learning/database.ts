@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '3.0.0';
+export const CURRENT_SCHEMA_VERSION = '3.1.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -681,6 +681,45 @@ const DESIGN_ARTIFACTS_SCHEMA_SQL = `
     CREATE INDEX IF NOT EXISTS idx_design_artifacts_prompt ON design_artifacts(prompt_id);
 `;
 
+/**
+ * Design review + screenshot pipeline tables (schema bump 3.0.0 -> 3.1.0). Note: the task
+ * brief for this addition named schema version 2.9.0 — that value was already consumed by the
+ * Autonomy tables bump (2.8.0 -> 2.9.0) that landed before Design Artifacts (2.9.0 -> 3.0.0), so
+ * assigning 2.9.0 here would be a downgrade that collides with and contradicts existing migration
+ * history. 3.1.0 is the actual next version in sequence and is what CURRENT_SCHEMA_VERSION and
+ * this comment record, per the same "record the real next version, not a stale brief number"
+ * precedent already established throughout this file's history (see the Enhanced Retrofit /
+ * UI Engine sessions in STATE_OF_THE_BUILD.md).
+ */
+const DESIGN_REVIEWS_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS design_reviews (
+      id                TEXT PRIMARY KEY,
+      build_run_id      TEXT NOT NULL,
+      prompt_id         TEXT NOT NULL,
+      component_name    TEXT NOT NULL,
+      screenshot_path   TEXT,
+      penpot_file_id    TEXT,
+      human_approved    INTEGER DEFAULT 0,
+      human_feedback    TEXT,
+      auto_approved     INTEGER DEFAULT 0,
+      created_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_reviews_build ON design_reviews(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_design_reviews_prompt ON design_reviews(prompt_id);
+
+    CREATE TABLE IF NOT EXISTS design_screenshots (
+      id             TEXT PRIMARY KEY,
+      build_run_id   TEXT NOT NULL,
+      prompt_id      TEXT NOT NULL,
+      file_path      TEXT NOT NULL,
+      url            TEXT,
+      viewport       TEXT NOT NULL,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_design_screenshots_build ON design_screenshots(build_run_id);
+    CREATE INDEX IF NOT EXISTS idx_design_screenshots_prompt ON design_screenshots(prompt_id);
+`;
+
 /** Every Build Memory + learning-engine table name, for `forge health` row-count reporting. */
 export const ALL_FORGE_TABLES: readonly string[] = [
   // Build Memory (src/memory/ CRUD layer)
@@ -721,6 +760,9 @@ export const ALL_FORGE_TABLES: readonly string[] = [
   'deployment_history',
   // Design artifacts (schema 3.0.0)
   'design_artifacts',
+  // Design review + screenshot pipeline (schema 3.1.0)
+  'design_reviews',
+  'design_screenshots',
   // Learning engine (pre-existing, untouched)
   'prompt_scores',
   'fix_patterns',
@@ -1039,6 +1081,8 @@ export function initializeForgeMemory(dbPath?: string): void {
   db.exec(AUTONOMY_SCHEMA_SQL);
   // 2.9.0 -> 3.0.0 (Design Artifacts): generated UI component code + provenance.
   db.exec(DESIGN_ARTIFACTS_SCHEMA_SQL);
+  // 3.0.0 -> 3.1.0 (Design Review Pipeline): design_reviews, design_screenshots.
+  db.exec(DESIGN_REVIEWS_SCHEMA_SQL);
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

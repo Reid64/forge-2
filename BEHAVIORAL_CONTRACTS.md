@@ -671,3 +671,68 @@ never concatenating duplicates) with the pre-existing stack-tag-matched set from
 it is an ADDITIVE layer on top of stack detection, not a replacement for it, and `getForPrompt`
 retains Contract SKL-2's original invariant that it must never return "all skills" for a broad
 prompt type like `api`.
+
+## Design Pipeline Contracts
+
+Source: `src/design-pipeline/` modules (Design-Pipeline-specific, prose style of
+BEHAVIORAL_CONTRACTS.md, matching the R-series/SP-series/ORC-series/RET-series/SKL-series/AUT-
+series/TOK-series/UI-series/AG-series/ESKU-series precedent above). The Design Pipeline is a
+visual-evidence layer sitting above every other Phase 3 gate: Contract 13's five Sentinel checks,
+Sentinel Prime's composite confidence score, Architecture Guardian's pre/post-prompt code scan, and
+UI Engine's static WCAG 2.1 AA source scan all judge the CODE a `ui`/`feature` prompt produced —
+none of them judge what that code actually RENDERS AS. `PlaywrightScreenshotter` +
+`PenpotIntegration` + `DesignReviewGate`, composed by `DesignPipeline`, close that gap with a real
+headless-browser capture, an optional design-tool push, and a human/accessibility-score-gated
+approval verdict.
+
+### Contract DP-1: DesignPipeline Runs After Every Component and Page Prompt
+`DesignPipeline.run` (via `runDesignPipelineCheck`) MUST run for every Phase 3 prompt whose
+`prompt_type` is a UI-producing type — `SHADCN_INSTALL_PROMPT_TYPES` (`{'ui', 'feature'}`, the same
+real `PromptType` analogs for "component, page" already established by Contract UI-2/RET-3/SKL-2 —
+FORGE's `PromptType` union has no dedicated `component`/`page` member) — not a sample of such
+prompts. It runs only once the Contract 13 Sentinel gate has already passed for that prompt (no
+point screenshotting code that doesn't build) and strictly BEFORE the merge decision, so a
+design-rejected prompt is never merged to main on the strength of a green Sentinel alone. A prompt
+whose `modifiedFiles` contains no `.tsx` file is a legitimate, logged skip (`DESIGN_PIPELINE_SKIPPED_
+MESSAGE`) — not a violation of this contract, since there is genuinely nothing to visually review.
+
+### Contract DP-2: Human Rejection Injects Feedback Into Recovery
+A design review verdict of `approved: false` (an interactive human Reject, or a non-interactive
+below-threshold/unscored defer) MUST have its `feedback` field re-formatted as `DESIGN FEEDBACK:
+<feedback>` and injected directly into a single, targeted recovery re-run of the ORIGINAL prompt
+text (`${promptText}\n\n${feedback}`), gated on Autonomous Recovery being enabled — NEVER routed
+through Contract 14's pattern-matched Sentinel recovery path, which would immediately escalate a
+never-before-seen "design review rejected" error signature under its own "novel error → always
+escalate" rule. A successful feedback re-run (the re-run claude call succeeds AND Sentinel re-passes)
+merges normally; an unsuccessful one marks the prompt `failed` with the rejection feedback recorded
+verbatim in the disposition note, never silently dropped.
+
+### Contract DP-3: Design Artifacts Are Stored on an External Drive When Available
+`getDesignStoragePath` (`src/design-pipeline/storage-config.ts`) MUST resolve the base directory for
+every design artifact (screenshots, Penpot exports, design reviews, component specs) in this exact
+priority order: an explicit `FORGE_DESIGN_STORAGE` environment override always wins; absent that,
+the first drive letter `D:` through `Z:` that both exists and reports more than 100GB free (the
+documented, deliberate proxy this module uses for "external drive," since Node's `fs` has no
+portable removable-vs-fixed signal on Windows); absent any qualifying drive, the sanctioned local
+fallback `C:\Users\manag\Documents\forge-design-artifacts\`. An unreadable drive letter MUST be
+skipped, never treated as a hard failure — the scan simply continues to the next candidate.
+
+### Contract DP-4: Penpot Degrades Gracefully, Never Blocks the Build
+Every public method on `PenpotIntegration` MUST return a safe `null`/`false`/error-carrying result
+object on any failure — an unreachable Penpot instance, missing/invalid `PENPOT_EMAIL`/
+`PENPOT_PASSWORD` credentials, a malformed API response — and MUST NEVER throw an uncaught
+exception. `DesignPipeline.run`'s Penpot-upload step MUST be wrapped such that a Penpot failure logs
+`PENPOT_UNAVAILABLE_MESSAGE` and the pipeline continues in screenshot-only mode; Penpot being
+entirely absent (no instance running, no credentials configured — the expected state on most FORGE
+machines) MUST NOT prevent screenshot capture or the review gate from running to completion. This
+is the same Contract-4 "degrade to a smaller/emptier result, never a halting error" posture applied
+here specifically to Penpot as optional infrastructure.
+
+### Contract DP-5: Screenshots Are Captured at a Minimum of Four Viewports
+Every `PlaywrightScreenshotter.captureComponent`/`captureAllRoutes` call that does not receive an
+explicit `options.viewports` override MUST default to `DEFAULT_VIEWPORTS`
+(`['1920x1080', '1280x720', '768x1024', '375x812']` — desktop, laptop, tablet, mobile), exactly four
+viewport captures per component. A caller MAY request additional viewports via `options.viewports`,
+but the default sweep every `ui`/`feature` prompt receives through `DesignPipeline.run` MUST NEVER
+be fewer than these four, so a component's responsive behavior is never judged from a single
+screen size alone.

@@ -1,12 +1,33 @@
 /**
  * FORGE 2.0 — Skills Library unit tests: stack detection + prompt-type skill routing.
  *
- * Covers two responsibilities of `src/skills/index.ts`:
+ * Covers three responsibilities of `src/skills/index.ts`:
  *   1. `detectProjectStack` — reading a target project's `package.json` (+ marker files for
  *      file-detected tech like shadcn/ui) and returning the subset of known technologies present.
  *   2. `SkillsLibrary.getForPrompt` — returning the MINIMAL set of skills relevant to a given
- *      prompt type, narrowing further by project stack when supplied (a stack-specific skill like
- *      `supabase` must never appear for a project that doesn't actually use it).
+ *      prompt type: skills whose tags intersect the detected stack, narrowed further by
+ *      `applicablePromptTypes`, unioned with a small curated "always relevant" set per prompt
+ *      type (`ALWAYS_RELEVANT_BY_PROMPT_TYPE` — the Elite Skills Library layer, see
+ *      BEHAVIORAL_CONTRACTS.md Contract ESKU-3). This must NEVER return the full library for any
+ *      single prompt type, and a stack-specific skill (`supabase`, `stripe`, `twilio`, ...) must
+ *      never appear unless the corresponding tech is actually present in the stack.
+ *   3. `buildSkillsContext` — the function Phase 3 actually calls on every real prompt
+ *      (`phase3-executor.ts` step b2.5, passing `entry.prompt_type`). It MUST route through
+ *      `getForPrompt` (type-scoped) rather than the older `injectIntoContext` (stack-tag-only,
+ *      no prompt-type awareness) whenever a prompt type is supplied — otherwise every stack-
+ *      matched skill (e.g. `stripe`, `twilio`) would be injected into every prompt regardless of
+ *      whether it is a schema, api, ui, or deploy prompt. `injectIntoContext`'s broader match is
+ *      retained only for callers with no prompt type, i.e. `forge skills inject` (a generic
+ *      debugging command with no queue entry to read a type from).
+ *
+ * NOTE on "minimal": the real skills library ships 39 templates (10 original + 29 Elite Skills
+ * Library additions, 2026-07-22). `getForPrompt`'s curated "always relevant" layer intentionally
+ * adds a handful of security/reliability/performance skills to certain prompt types regardless of
+ * stack (e.g. every `api` prompt always gets `security-owasp`/`jwt-patterns`/`rbac`/
+ * `retry-patterns`/`webhook-reliability`/`circuit-breaker`) — this is deliberate, contract-
+ * governed behavior (ESKU-3), not a bug, so "minimal" here means "scoped and bounded," not
+ * "the single smallest possible set." The assertions below match the ACTUAL current routing
+ * logic exactly, not a stale pre-Elite-Skills-Library expectation.
  *
  * HOW TO RUN
  *     node --import tsx --test src/skills/__tests__/skills.test.ts
@@ -18,7 +39,14 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { detectProjectStack, loadSkillsLibrary, defaultSkillsLibraryDir } from '../index.js';
+import {
+  detectProjectStack,
+  loadSkillsLibrary,
+  defaultSkillsLibraryDir,
+  buildSkillsContext,
+  validateSkillFile,
+  SKILLS_CONTEXT_HEADER,
+} from '../index.js';
 
 // ---------------------------------------------------------------------------
 // Fixture helper — a disposable project directory with a given package.json
@@ -85,6 +113,11 @@ test('detectProjectStack: detects playwright from "@playwright/test" in devDepen
   assert.ok(detectProjectStack(dir).includes('playwright'));
 });
 
+test('detectProjectStack: detects playwright from "playwright" in dependencies', () => {
+  const dir = makeProject({ dependencies: { playwright: '^1.49.1' } });
+  assert.ok(detectProjectStack(dir).includes('playwright'));
+});
+
 test('detectProjectStack: detects vitest from "vitest" in devDependencies', () => {
   const dir = makeProject({ devDependencies: { vitest: '^2.1.0' } });
   assert.ok(detectProjectStack(dir).includes('vitest'));
@@ -115,12 +148,65 @@ test('detectProjectStack: a project with neither @radix-ui deps nor components.j
   assert.ok(!detectProjectStack(dir).includes('shadcn'));
 });
 
+test('detectProjectStack: detects redis, i18n, background-jobs, and ai (Elite Skills Library detectors)', () => {
+  const dir = makeProject({
+    dependencies: { ioredis: '^5.4.1', 'next-intl': '^3.0.0', bullmq: '^5.0.0', openai: '^4.0.0' },
+  });
+  const stack = detectProjectStack(dir);
+  assert.ok(stack.includes('redis'));
+  assert.ok(stack.includes('i18n'));
+  assert.ok(stack.includes('background-jobs'));
+  assert.ok(stack.includes('ai'));
+});
+
+test('detectProjectStack: detects ai from "@anthropic-ai/*" prefix', () => {
+  const dir = makeProject({ dependencies: { '@anthropic-ai/sdk': '^0.30.0' } });
+  assert.ok(detectProjectStack(dir).includes('ai'));
+});
+
 test('detectProjectStack: detects a full realistic combination (nextjs + typescript + supabase + tailwind)', () => {
   const dir = makeProject({
     dependencies: { next: '^14.2.18', '@supabase/supabase-js': '^2.110.7', tailwindcss: '^3.4.0' },
     devDependencies: { typescript: '^5.7.2' },
   });
   assert.deepStrictEqual(sorted(detectProjectStack(dir)), sorted(['nextjs', 'typescript', 'supabase', 'tailwind']));
+});
+
+test('detectProjectStack: detects every requested combination at once (stripe/playwright/vitest/shadcn/twilio + core stack)', () => {
+  const dir = makeProject(
+    {
+      dependencies: {
+        next: '^14.2.18',
+        react: '^18.3.1',
+        '@supabase/supabase-js': '^2.110.7',
+        tailwindcss: '^3.4.0',
+        stripe: '^14.0.0',
+        twilio: '^5.3.0',
+        '@radix-ui/react-dialog': '^1.1.0',
+      },
+      devDependencies: {
+        typescript: '^5.7.2',
+        vitest: '^2.1.0',
+        '@playwright/test': '^1.49.1',
+      },
+    },
+    { 'components.json': '{"style":"default"}' }
+  );
+  assert.deepStrictEqual(
+    sorted(detectProjectStack(dir)),
+    sorted([
+      'nextjs',
+      'react',
+      'typescript',
+      'supabase',
+      'tailwind',
+      'stripe',
+      'twilio',
+      'shadcn',
+      'vitest',
+      'playwright',
+    ])
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -130,49 +216,202 @@ test('detectProjectStack: detects a full realistic combination (nextjs + typescr
 
 const library = loadSkillsLibrary(defaultSkillsLibraryDir());
 
-test('the real skills library loads all 10 shipped templates', () => {
-  assert.strictEqual(library.skills.length, 10);
+test('the real skills library loads all 39 shipped templates', () => {
+  assert.strictEqual(library.skills.length, 39);
 });
 
-test('getForPrompt("database") returns only supabase + typescript-strict', () => {
-  const ids = sorted(library.getForPrompt('database').map((s) => s.id));
-  assert.deepStrictEqual(ids, sorted(['supabase', 'typescript-strict']));
-});
-
-test('getForPrompt("component") returns only ui-components + typescript-strict', () => {
-  const ids = sorted(library.getForPrompt('component').map((s) => s.id));
-  assert.deepStrictEqual(ids, sorted(['ui-components', 'typescript-strict']));
-});
-
-test('getForPrompt("api") with no stack returns api-patterns + typescript-strict + supabase', () => {
-  const ids = sorted(library.getForPrompt('api').map((s) => s.id));
-  assert.deepStrictEqual(ids, sorted(['api-patterns', 'typescript-strict', 'supabase']));
-});
-
-test('getForPrompt("api", stack) drops supabase when supabase is not detected in the stack', () => {
-  const ids = sorted(library.getForPrompt('api', ['typescript', 'nextjs']).map((s) => s.id));
-  assert.deepStrictEqual(ids, sorted(['api-patterns', 'typescript-strict']));
-});
-
-test('getForPrompt("api", stack) includes supabase when supabase IS detected in the stack', () => {
-  const ids = sorted(library.getForPrompt('api', ['typescript', 'nextjs', 'supabase']).map((s) => s.id));
-  assert.deepStrictEqual(ids, sorted(['api-patterns', 'typescript-strict', 'supabase']));
-});
-
-test('getForPrompt never returns the entire library for a narrow prompt type ("api"/"component"/"database")', () => {
-  // "feature" is deliberately broad (a feature prompt can legitimately touch db/api/ui/testing)
-  // and is not part of this assertion — only the narrow, single-concern prompt types are.
-  for (const promptType of ['api', 'component', 'database']) {
+test('getForPrompt never returns the entire library for any single prompt type', () => {
+  for (const promptType of ['schema', 'auth', 'api', 'ui', 'feature', 'agent', 'test', 'deploy', 'database', 'component']) {
     const result = library.getForPrompt(promptType);
     assert.ok(
       result.length < library.skills.length,
-      `getForPrompt("${promptType}") returned ${result.length}/${library.skills.length} skills — expected a minimal subset, not the whole library`
+      `getForPrompt("${promptType}") returned ${result.length}/${library.skills.length} skills — expected a bounded subset, not the whole library`
     );
   }
 });
 
-test('getForPrompt("agent") returns only agent-relevant skills (never the ui/database-only skills)', () => {
-  const ids = new Set(library.getForPrompt('agent').map((s) => s.id));
+test('getForPrompt("database", ["supabase"]) returns the supabase-tagged skill plus the curated database set', () => {
+  const ids = sorted(library.getForPrompt('database', ['supabase']).map((s) => s.id));
+  assert.deepStrictEqual(
+    ids,
+    sorted(['supabase', 'multi-tenancy', 'database-indexing', 'audit-logging', 'soft-delete', 'ux-intelligence'])
+  );
+});
+
+test('getForPrompt("database", ["supabase"]) excludes unrelated stack-specific skills (twilio, stripe)', () => {
+  const ids = new Set(library.getForPrompt('database', ['supabase']).map((s) => s.id));
+  assert.ok(!ids.has('twilio'));
+  assert.ok(!ids.has('stripe'));
   assert.ok(!ids.has('ui-components'));
-  assert.ok(!ids.has('nextjs-app-router'));
+});
+
+test('getForPrompt("component", []) returns only component-applicable skills plus ux-intelligence', () => {
+  const ids = sorted(library.getForPrompt('component', []).map((s) => s.id));
+  assert.deepStrictEqual(
+    ids,
+    sorted([
+      'bundle-optimization',
+      'mobile-first',
+      'core-web-vitals',
+      'nextjs-app-router',
+      'ui-components',
+      'ux-copywriting',
+      'typescript-strict',
+      'ux-intelligence',
+    ])
+  );
+});
+
+test('getForPrompt("api", ["nextjs", "typescript", "supabase"]) narrows to stack-matched + curated api security skills', () => {
+  const ids = sorted(library.getForPrompt('api', ['nextjs', 'typescript', 'supabase']).map((s) => s.id));
+  assert.deepStrictEqual(
+    ids,
+    sorted([
+      'api-patterns',
+      'multi-tenancy',
+      'nextjs-app-router',
+      'repository-pattern',
+      'typescript-strict',
+      'supabase',
+      'security-owasp',
+      'jwt-patterns',
+      'rbac',
+      'retry-patterns',
+      'webhook-reliability',
+      'circuit-breaker',
+      'ux-intelligence',
+    ])
+  );
+});
+
+test('getForPrompt("api", stack) drops stripe/subscription-billing when stripe is not in the stack', () => {
+  const ids = new Set(library.getForPrompt('api', ['nextjs', 'typescript', 'supabase']).map((s) => s.id));
+  assert.ok(!ids.has('stripe'));
+  assert.ok(!ids.has('subscription-billing'));
+});
+
+test('getForPrompt("api", stack) includes stripe/subscription-billing when stripe IS in the stack', () => {
+  const ids = new Set(library.getForPrompt('api', ['nextjs', 'typescript', 'supabase', 'stripe']).map((s) => s.id));
+  assert.ok(ids.has('stripe'));
+  assert.ok(ids.has('subscription-billing'));
+});
+
+test('getForPrompt("agent", ["ai"]) returns only the AI-tagged agent skills plus ux-intelligence', () => {
+  const ids = sorted(library.getForPrompt('agent', ['ai']).map((s) => s.id));
+  assert.deepStrictEqual(ids, sorted(['agent-memory', 'tool-calling', 'rag-patterns', 'prompt-engineering', 'ux-intelligence']));
+});
+
+test('getForPrompt("agent", []) never includes ui-only or database-only skills', () => {
+  const ids = new Set(library.getForPrompt('agent', []).map((s) => s.id));
+  assert.ok(!ids.has('ui-components'));
+  assert.ok(!ids.has('database-indexing'));
+  assert.ok(!ids.has('multi-tenancy'));
+});
+
+test('getForPrompt("api", ["compliance-hipaa"]) injects the compliance skill via the detected regime tag', () => {
+  const ids = sorted(library.getForPrompt('api', ['compliance-hipaa']).map((s) => s.id));
+  assert.deepStrictEqual(
+    ids,
+    sorted(['security-owasp', 'jwt-patterns', 'rbac', 'retry-patterns', 'webhook-reliability', 'circuit-breaker', 'compliance', 'ux-intelligence'])
+  );
+});
+
+test('getForPrompt("api", stack) never includes the compliance skill when no compliance regime tag is present', () => {
+  // A non-empty, compliance-unrelated stack is required here: an EMPTY stack disables tag
+  // filtering entirely (getForPrompt's documented "no stack info -> don't filter" fallback), so
+  // `compliance` (applicablePromptTypes includes "api") would pass through unfiltered — that is
+  // not what this test is checking. This checks the COMPLIANCE_STACK_TAGS gate specifically: with
+  // real filtering active and no compliance-* tag detected, compliance must not appear.
+  const ids = new Set(library.getForPrompt('api', ['nextjs', 'typescript']).map((s) => s.id));
+  assert.ok(!ids.has('compliance'));
+});
+
+test('getForPrompt is case-insensitive on prompt type and stack tags', () => {
+  const lower = sorted(library.getForPrompt('database', ['supabase']).map((s) => s.id));
+  const upper = sorted(library.getForPrompt('DATABASE', ['SUPABASE']).map((s) => s.id));
+  assert.deepStrictEqual(lower, upper);
+});
+
+// ---------------------------------------------------------------------------
+// buildSkillsContext — the function Phase 3 actually calls on every real prompt.
+// ---------------------------------------------------------------------------
+
+test('buildSkillsContext: with no promptType, returns promptText unchanged when no stack is detected', () => {
+  const dir = makeProject(null);
+  const promptText = 'Build the users table.';
+  assert.strictEqual(buildSkillsContext(dir, promptText), promptText);
+});
+
+test('buildSkillsContext: with a promptType, an unrecognized stack can still get curated always-relevant skills', () => {
+  const dir = makeProject(null);
+  const promptText = 'Build the users table.';
+  const result = buildSkillsContext(dir, promptText, 'database');
+  assert.notStrictEqual(result, promptText);
+  assert.ok(result.includes(SKILLS_CONTEXT_HEADER));
+  assert.ok(result.includes('Database Indexing Standards'));
+});
+
+test('buildSkillsContext: promptType scopes injection — a schema/database prompt never receives stripe/twilio content', () => {
+  const dir = makeProject({
+    dependencies: {
+      next: '^14.2.18',
+      '@supabase/supabase-js': '^2.110.7',
+      stripe: '^14.0.0',
+      twilio: '^5.3.0',
+    },
+  });
+  const promptText = 'Create the invoices table.';
+  const result = buildSkillsContext(dir, promptText, 'database');
+  assert.ok(!result.toLowerCase().includes('stripe integration patterns'));
+  assert.ok(!result.toLowerCase().includes('twilio'));
+});
+
+test('buildSkillsContext: without promptType (e.g. forge skills inject), stack-matched skills are injected regardless of applicability to any one prompt type', () => {
+  const dir = makeProject({
+    dependencies: { stripe: '^14.0.0' },
+  });
+  const promptText = 'Do something.';
+  const result = buildSkillsContext(dir, promptText);
+  assert.ok(result.toLowerCase().includes('stripe'));
+});
+
+test('buildSkillsContext: real project with a supabase+nextjs stack gets a bounded (not full-library) skills block for a ui prompt', () => {
+  const dir = makeProject({
+    dependencies: { next: '^14.2.18', '@supabase/supabase-js': '^2.110.7', tailwindcss: '^3.4.0' },
+    devDependencies: { typescript: '^5.7.2' },
+  });
+  const promptText = 'Build the dashboard page.';
+  const result = buildSkillsContext(dir, promptText, 'feature');
+  assert.notStrictEqual(result, promptText);
+  // Bounded: the injected block must not contain every single template's own name header —
+  // spot-check that an unrelated domain (telephony) never appears.
+  assert.ok(!result.toLowerCase().includes('twilio integration patterns'));
+});
+
+// ---------------------------------------------------------------------------
+// validateSkillFile — used by `forge skills add` to reject malformed candidate files.
+// ---------------------------------------------------------------------------
+
+test('validateSkillFile: rejects a file with no frontmatter', () => {
+  const result = validateSkillFile('Just some text, no frontmatter.', 'fallback-id');
+  assert.strictEqual(result.valid, false);
+  assert.ok(result.errors.length > 0);
+});
+
+test('validateSkillFile: rejects a file whose body is empty', () => {
+  const result = validateSkillFile('---\nid: empty-body\n---\n\n', 'fallback-id');
+  assert.strictEqual(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes('empty')));
+});
+
+test('validateSkillFile: accepts a well-formed skill file', () => {
+  const result = validateSkillFile('---\nid: my-skill\ndomain: test\ntags: [foo]\n---\n\nSome guidance here.', 'fallback-id');
+  assert.strictEqual(result.valid, true);
+  assert.strictEqual(result.skill?.id, 'my-skill');
+});
+
+test('validateSkillFile: falls back to the provided id when frontmatter omits it', () => {
+  const result = validateSkillFile('---\ndomain: test\n---\n\nSome guidance.', 'derived-from-filename');
+  assert.strictEqual(result.valid, true);
+  assert.strictEqual(result.skill?.id, 'derived-from-filename');
 });

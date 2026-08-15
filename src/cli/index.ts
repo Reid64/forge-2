@@ -38,7 +38,7 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, statfsSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -106,6 +106,9 @@ import {
   ensureComponentsInstalled,
   type ComponentSpec,
 } from '../ui-engine/index.js';
+import { createDesignPipeline, type DesignPipelinePromptEntry } from '../design-pipeline/index.js';
+import { createPlaywrightScreenshotter } from '../design-pipeline/screenshotter.js';
+import { getDesignStoragePath, ensureStorageDirectories, getScreenshotPath } from '../design-pipeline/storage-config.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -2645,6 +2648,200 @@ async function cmdDesignInstallShadcn(pathArg: string, componentNames: string[])
   designLog('PASS', `${installed.length} component(s) installed: ${installed.join(', ')}`);
 }
 
+/**
+ * `forge design screenshot <project-path>` — discovers every App Router route and captures it at
+ * every default viewport via {@link PlaywrightScreenshotter.captureAllRoutes}, writing PNGs under
+ * the resolved design-storage path ({@link getDesignStoragePath}, env override → external drive
+ * with >100GB free → local fallback) and printing every file path captured. Runs outside any real
+ * Phase 3 build, so `buildRunId`/`promptId` are fresh synthetic values (matching
+ * {@link cmdDesignComponent}'s own precedent for a standalone `forge design` invocation).
+ */
+async function cmdDesignScreenshot(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  designLog('INFO', `forge design screenshot — ${projectPath}`);
+
+  const storageBasePath = getDesignStoragePath();
+  ensureStorageDirectories(storageBasePath);
+
+  const buildRunId = randomUUID();
+  const promptId = randomUUID();
+  const screenshotDir = getScreenshotPath(storageBasePath, buildRunId, promptId);
+
+  const screenshotter = createPlaywrightScreenshotter({ log: (m) => designLog('INFO', m) });
+  if (!(await screenshotter.isAvailable())) {
+    designFail('forge design screenshot requires the "playwright" package — it is not installed/importable.');
+    return;
+  }
+
+  const results = await withSpinner('UI Engine — capture all routes', () =>
+    screenshotter.captureAllRoutes(projectPath, {
+      projectPath,
+      buildRunId,
+      promptId,
+      componentName: 'page',
+      storageDir: screenshotDir,
+    })
+  );
+
+  if (results.length === 0) {
+    designLog('WARN', 'no routes captured — check that src/app has page.tsx files and the dev server can start.');
+    return;
+  }
+
+  for (const shot of results) designLog('PASS', `[${shot.viewport}] ${shot.componentName} → ${shot.filePath}`);
+  designLog('PASS', `${results.length} screenshot(s) captured → ${screenshotDir}`);
+}
+
+/**
+ * `forge design review <project-path> [--non-interactive]` — runs the full {@link DesignPipeline}
+ * (screenshot capture → optional Penpot upload → the visual approval gate) over the whole project.
+ * `DesignPipeline.run` gates on "did this prompt modify a .tsx file" — there is no modified-files
+ * list for a manual, whole-project review, so a synthetic marker is passed purely to satisfy that
+ * check (it is never read for any other purpose by `run()`).
+ */
+async function cmdDesignReview(pathArg: string, opts: { nonInteractive?: boolean }): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const projectName = basename(projectPath) || 'project';
+  designLog('INFO', `forge design review — ${projectPath}`);
+
+  const buildRunId = randomUUID();
+  const promptEntry: DesignPipelinePromptEntry = { id: randomUUID(), name: projectName, prompt_type: 'ui' };
+  const pipeline = createDesignPipeline({ log: (m) => designLog('INFO', m) });
+
+  const result = await withSpinner('Design Pipeline — full review', () =>
+    pipeline.run(promptEntry, projectPath, buildRunId, ['forge-design-review.tsx'], opts.nonInteractive ?? false)
+  );
+
+  designLog('INFO', `${result.screenshotPaths.length} screenshot(s) reviewed`);
+  for (const p of result.screenshotPaths) designLog('INFO', `  ${p}`);
+  if (result.penpotUrl) designLog('INFO', `Penpot: ${result.penpotUrl}`);
+
+  if (result.approved) {
+    designLog('PASS', `review APPROVED${result.autoApproved ? ' (auto-approved)' : ''}`);
+  } else {
+    designLog('FAIL', `review NOT approved${result.feedback ? ` — ${result.feedback}` : ''}`);
+    process.exitCode = 1;
+  }
+}
+
+/**
+ * `forge design storage` — prints the resolved design-artifact storage path
+ * ({@link getDesignStoragePath}) and its drive's free/total space.
+ */
+async function cmdDesignStorage(): Promise<void> {
+  const storagePath = getDesignStoragePath();
+  designLog('INFO', `design storage path: ${storagePath}`);
+
+  const driveRootMatch = /^([A-Za-z]:\\)/.exec(storagePath);
+  const root = driveRootMatch ? driveRootMatch[1]! : null;
+  if (!root) {
+    designLog('WARN', 'could not determine a drive root to check free space for this path.');
+    return;
+  }
+
+  try {
+    const stats = statfsSync(root);
+    const freeBytes = stats.bavail * stats.bsize;
+    const totalBytes = stats.blocks * stats.bsize;
+    const freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
+    const totalGb = (totalBytes / (1024 * 1024 * 1024)).toFixed(1);
+    designLog('PASS', `drive ${root} — ${freeGb}GB free of ${totalGb}GB total`);
+  } catch (error) {
+    designLog(
+      'WARN',
+      `could not read free space for '${root}' (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+}
+
+/**
+ * `forge design penpot-setup` — prints a Docker run command for a local Penpot instance (matching
+ * `penpot-integration.ts`'s own default `http://localhost:9001`), volume-mounted to the same
+ * auto-detected design-storage path ({@link getDesignStoragePath} — env override → external drive
+ * with >100GB free → local fallback) every other design-pipeline artifact already uses, so
+ * Penpot's persistent data lives alongside FORGE's own screenshots/exports rather than an
+ * unconfigured anonymous volume.
+ */
+function cmdDesignPenpotSetup(): void {
+  const storagePath = getDesignStoragePath();
+  const dockerVolumePath = storagePath.replace(/\\+$/, '').replace(/\\/g, '/');
+  designLog('INFO', `auto-detected design storage path: ${storagePath}`);
+  designLog('PASS', 'Docker run command for a local Penpot instance:');
+  console.log(
+    `\n  docker run -d --name penpot-forge -p 9001:9001 \\\n` +
+      `    -v "${dockerVolumePath}:/opt/data" \\\n` +
+      `    -e PENPOT_PUBLIC_URI=http://localhost:9001 \\\n` +
+      `    penpotapp/penpot-backend:latest\n`
+  );
+  designLog(
+    'INFO',
+    'set PENPOT_EMAIL / PENPOT_PASSWORD (env, or `forge vault set <project> PENPOT_EMAIL/PENPOT_PASSWORD`) once running.'
+  );
+}
+
+/** Row shape read back from `design_reviews` for `forge design history`. */
+interface DesignReviewRow {
+  id: string;
+  build_run_id: string;
+  prompt_id: string;
+  component_name: string;
+  screenshot_path: string | null;
+  penpot_file_id: string | null;
+  human_approved: number;
+  human_feedback: string | null;
+  auto_approved: number;
+  created_at: string;
+}
+
+/**
+ * `forge design history <project-path> --limit <n>` — the last N `design_reviews` rows for a
+ * project, joined on `build_runs.project_path` (the same join `cmdSentinelHistory` already uses
+ * for `sentinel_prime_runs`) — so only reviews tied to a real, recorded build are listed.
+ */
+async function cmdDesignHistory(pathArg: string, opts: { limit?: string }): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  const limit = opts.limit ? Number.parseInt(opts.limit, 10) : 20;
+  if (!Number.isInteger(limit) || limit < 1) {
+    designFail('--limit must be a positive integer.');
+    return;
+  }
+
+  const db = BuildMemory.getClient();
+  if (!db) {
+    designFail('Build Memory is unreachable — cannot read design_reviews.');
+    return;
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT dr.id, dr.build_run_id, dr.prompt_id, dr.component_name, dr.screenshot_path,
+              dr.penpot_file_id, dr.human_approved, dr.human_feedback, dr.auto_approved, dr.created_at
+       FROM design_reviews dr
+       JOIN build_runs br ON br.id = dr.build_run_id
+       WHERE br.project_path = ?
+       ORDER BY dr.created_at DESC
+       LIMIT ?`
+    )
+    .all(projectPath, limit) as DesignReviewRow[];
+
+  if (rows.length === 0) {
+    designLog('WARN', `no design_reviews found for project ${projectPath}.`);
+    return;
+  }
+
+  designLog('INFO', `${rows.length} design review(s) for ${projectPath}:`);
+  for (const row of rows) {
+    const approved = fromSqliteBool(row.human_approved);
+    const auto = fromSqliteBool(row.auto_approved);
+    designLog(
+      approved ? 'PASS' : 'FAIL',
+      `${row.created_at.slice(0, 19).replace('T', ' ')}  build ${row.build_run_id.slice(0, 8)}  ` +
+        `${row.component_name}  ${approved ? 'approved' : 'not approved'}${auto ? ' (auto)' : ''}` +
+        `${row.human_feedback ? ` — ${row.human_feedback}` : ''}`
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // forge vault — per-project encrypted credential storage (src/autonomy/credential-vault.ts)
 // ---------------------------------------------------------------------------
@@ -3002,8 +3199,9 @@ async function main(): Promise<void> {
   const design = program
     .command('design')
     .description(
-      'Run Phase 0 + 1 only (PRD + Architecture; stops at Gate 2), or use a UI Engine subcommand ' +
-        '(component / tokens / storybook / audit / install-shadcn)'
+      'Run Phase 0 + 1 only (PRD + Architecture; stops at Gate 2), or use a UI Engine / Design ' +
+        'Pipeline subcommand (component / tokens / storybook / audit / install-shadcn / screenshot / ' +
+        'review / storage / penpot-setup / history)'
     )
     .argument('<path>', 'target project directory')
     .option('--idea <text>', 'raw product idea (generates the PRD)')
@@ -3048,6 +3246,36 @@ async function main(): Promise<void> {
     .argument('<project-path>', 'target project directory')
     .argument('<component-names...>', 'shadcn/ui component names to install')
     .action((pathArg: string, componentNames: string[]) => cmdDesignInstallShadcn(pathArg, componentNames));
+
+  design
+    .command('screenshot')
+    .description('Capture every discovered App Router route at every default viewport, saving to the design-storage path')
+    .argument('<project-path>', 'target project directory')
+    .action((pathArg: string) => cmdDesignScreenshot(pathArg));
+
+  design
+    .command('review')
+    .description('Run the full design pipeline (screenshot capture → optional Penpot upload → review gate) for the whole project')
+    .argument('<project-path>', 'target project directory')
+    .option('--non-interactive', 'auto-decide via the accessibility-score threshold instead of prompting interactively', false)
+    .action((pathArg: string, opts: { nonInteractive?: boolean }) => cmdDesignReview(pathArg, opts));
+
+  design
+    .command('storage')
+    .description('Show the resolved design-artifact storage path and its available free space')
+    .action(() => cmdDesignStorage());
+
+  design
+    .command('penpot-setup')
+    .description('Print a Docker run command for a local Penpot instance, volume-mounted to the auto-detected design storage path')
+    .action(() => cmdDesignPenpotSetup());
+
+  design
+    .command('history')
+    .description('List the last N design reviews recorded for a project')
+    .argument('<project-path>', 'target project directory')
+    .option('--limit <n>', 'number of reviews to show', '20')
+    .action((pathArg: string, opts: { limit?: string }) => cmdDesignHistory(pathArg, opts));
 
   program
     .command('resume')

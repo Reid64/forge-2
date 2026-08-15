@@ -1,0 +1,13 @@
+﻿Per upgrades\SYSTEMS-5-9-GAP-MATRIX.md Section 1: create root-level SOURCE-OF-TRUTH.md by promoting governance\FORGE_CANONICAL_INSTRUCTIONS.md section 7 content to root, updating it to also declare that FORGE.md's role is split across BLUEPRINT.md (identity/rules) and PRD.md (requirements/success criteria), TOOLS.md's role is filled by TOOLCHAIN.md (note it is a regenerated-per-run snapshot, not a static policy - flag this as a known limitation, do not silently treat it as equivalent), CONTEXT.md's role is filled by BLUEPRINT.md sections 12-141, RULES.md's role is filled by BEHAVIORAL_CONTRACTS.md, and NOW.md's role is filled by FORGE_HANDOFF.md plus SESSION_STATE.md.
+
+Create root MODEL-ROUTING.md defining which LLM handles architecture, frontend design, debugging, security review, consensus, research, and code generation - base this on actual current provider usage in src\engine\provider-router.ts, do not invent a routing scheme unrelated to what the code actually does.
+
+Create root manifest.yaml with project identity, current autonomy flags, and approval-gate config reflecting actual current CLI flags in src\cli\index.ts, not invented ones.
+
+Append an explicit authority-precedence hierarchy section to SOURCE-OF-TRUTH.md: human approval greater than FORGE governance docs greater than security policy greater than architecture/ADRs greater than BEHAVIORAL_CONTRACTS.md greater than manifest.yaml greater than queue YAML greater than skill instructions greater than model-specific files greater than current prompt greater than agent-generated suggestions.
+
+Do not touch BLUEPRINT.md, PRD.md, TOOLCHAIN.md, or BEHAVIORAL_CONTRACTS.md content.
+
+Run pnpm run build in C:\Users\manag\Documents\forge-2 and confirm 0 errors.
+
+Commit: git add -A; git commit -m "docs(governance): root SOURCE-OF-TRUTH.md, MODEL-ROUTING.md, manifest.yaml, authority-precedence hierarchy"

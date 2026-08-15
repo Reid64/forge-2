@@ -2,18 +2,18 @@
 id: feature-flags
 name: Feature Flag Patterns
 domain: infrastructure
-tags: [feature-flags, deployment]
-applicablePromptTypes: [feature]
+tags: [deployment]
+applicablePromptTypes: [feature, api]
 ---
 
-DECOUPLE DEPLOY FROM RELEASE: Ship code behind a flag that defaults OFF, deploy it, then flip the flag on separately once it's verified — deployment and release become two independent events instead of one risky atomic step.
+FLAGS LIVE IN THE DATABASE, NOT IN CODE: A feature flag's on/off state (and its rollout percentage) is a database row, never a hardcoded boolean or an env var checked into the repo — flipping a flag must be an operational action, not a code change requiring a deploy.
 
-SERVER-SIDE EVALUATION FOR GATING LOGIC: Evaluate a flag server-side for anything that controls access, billing, or data exposure — a client-side-only flag check can be bypassed by editing the client, so it is a UX toggle, never a security boundary.
+SERVER-SIDE EVALUATION: Evaluate every flag server-side, never client-side-only — a client-side check can be bypassed by editing the client, so it is a UX toggle at best, never a security or billing boundary.
 
-NAMESPACE AND EXPIRE FLAGS: Name flags by intent (`feature-x-rollout`, not `flag1`), and remove a flag from the codebase once it has fully rolled out or been fully reverted — a flag left in code indefinitely after its rollout decision is made is dead conditional logic that silently increases branch-testing surface.
+PERCENTAGE ROLLOUT BY USER ID HASH: A partial rollout hashes the user's stable ID (never a random number re-rolled per request) against the flag's rollout percentage, so the same user consistently lands on the same side of the flag across requests instead of flickering between old and new behavior.
 
-DEFAULT TO THE SAFE STATE: A flag's default (when the flag service is unreachable or the flag is unset) must be the safe/old behavior, never the new/risky one — a flag service outage should never accidentally enable a half-tested feature for everyone.
+NAMING CONVENTION — ENABLE_FEATURE_NAME: Every flag is named `ENABLE_<FEATURE_NAME>` (e.g. `ENABLE_NEW_CHECKOUT`) — a consistent, greppable prefix that makes every flag reference in code and in the flag store trivially searchable.
 
-SCOPE FLAGS TO THE SMALLEST UNIT THAT MAKES SENSE: Percentage rollout, per-company, or per-user — pick the narrowest scope that lets you validate the feature on real traffic before a full rollout, and always support an instant kill-switch flip back to OFF.
+REMOVE WITHIN 30 DAYS OF FULL ROLLOUT: Once a flag reaches 100% and has stayed there through a full verification window, delete the flag and its dead conditional branch from the codebase within 30 days — a flag left in code indefinitely after its rollout decision is made is dead branch-testing surface that silently accumulates.
 
-LOG FLAG EVALUATIONS FOR ROLLOUT DEBUGGING: When a flagged feature misbehaves for a specific user/company, you need to know which flag state they were evaluated under — record the flag value alongside the request, not just the feature's outcome.
+AUDIT LOG ON FLAG CHANGE: Every flag state change (who changed it, old value, new value, timestamp) is recorded to an audit log — a flag flip is a production change and must be traceable exactly like a deploy or a migration.

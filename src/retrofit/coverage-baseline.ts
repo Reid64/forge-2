@@ -179,37 +179,62 @@ function computeCoveragePercent(exportedSymbols: number, coveredSymbols: number,
 const LIB_CORE_OR_UTILS_RE = /^src\/lib\/(core|utils)(\/|$)/;
 const LIB_RE = /^src\/lib\//;
 const COMPONENTS_RE = /^src\/components\//;
+const LOW_COVERAGE_THRESHOLD = 50;
 
 /**
  * critical: src/lib/core or src/lib/utils with no test file.
  * high: any other src/lib/* file with no test file.
  * medium: src/components/* with no test file.
- * low: a test file exists — whether well-covered or under the 50% threshold called
- * out in the spec, both land here since there is no dedicated "adequately covered"
- * priority tier; low is the floor severity, not a claim of adequate coverage.
+ * low: a test file exists but estimated coverage is below the 50% threshold.
+ * A file that has a test file AND coverage at/above 50% is adequately covered and
+ * returns `null` — none of the four priority tiers describe "no action needed", so
+ * the caller excludes such a file from the findings list entirely rather than
+ * misclassifying it into a tier that implies a problem.
  */
-function classifyPriority(relPath: string, hasTestFile: boolean): CoverageBaselineFinding['priority'] {
+function classifyPriority(
+  relPath: string,
+  hasTestFile: boolean,
+  coveragePercent: number
+): CoverageBaselineFinding['priority'] | null {
   if (!hasTestFile) {
     if (LIB_CORE_OR_UTILS_RE.test(relPath)) return 'critical';
     if (LIB_RE.test(relPath)) return 'high';
     if (COMPONENTS_RE.test(relPath)) return 'medium';
+    return 'medium'; // unreachable given the two scan roots below — kept as a safe default
   }
-  return 'low';
+  return coveragePercent < LOW_COVERAGE_THRESHOLD ? 'low' : null;
 }
 
 // ---------------------------------------------------------------------------
 // Coverage summary
 // ---------------------------------------------------------------------------
 
-function computeSummary(findings: CoverageBaselineFinding[]): CoverageSummary {
-  const totalFiles = findings.length;
-  const filesWithTests = findings.filter((f) => f.hasTestFile).length;
+/** One scanned testable unit's full stats, whether or not it ends up flagged as a finding. */
+interface ScannedFile {
+  filePath: string;
+  hasTestFile: boolean;
+  testFilePath: string | null;
+  exportedSymbols: number;
+  coveredSymbols: number;
+  coveragePercent: number;
+  priority: CoverageBaselineFinding['priority'] | null;
+}
+
+/**
+ * Aggregate stats across EVERY scanned testable unit, not only the ones flagged as findings —
+ * total files scanned, how many have a co-located test file, how many don't, and an estimated
+ * overall coverage percent (the mean of every scanned file's `coveragePercent`, including
+ * adequately-covered files the findings list omits).
+ */
+function computeSummary(entries: ScannedFile[]): CoverageSummary {
+  const totalFiles = entries.length;
+  const filesWithTests = entries.filter((f) => f.hasTestFile).length;
   const filesWithoutTests = totalFiles - filesWithTests;
 
   const estimatedCoveragePercent =
     totalFiles === 0
       ? 0
-      : Math.round((findings.reduce((sum, f) => sum + f.coveragePercent, 0) / totalFiles) * 100) / 100;
+      : Math.round((entries.reduce((sum, f) => sum + f.coveragePercent, 0) / totalFiles) * 100) / 100;
 
   return { totalFiles, filesWithTests, filesWithoutTests, estimatedCoveragePercent };
 }
@@ -248,7 +273,7 @@ export class CoverageBaseline {
     const componentFiles = walkFiles(join(projectPath, 'src', 'components'), COMPONENT_FILE_RE);
     const allFiles = [...libFiles, ...componentFiles];
 
-    const findings: CoverageBaselineFinding[] = [];
+    const allEntries: ScannedFile[] = [];
 
     for (const absPath of allFiles) {
       let content: string;
@@ -278,9 +303,9 @@ export class CoverageBaseline {
       }
 
       const coveragePercent = computeCoveragePercent(exportedSymbols, coveredSymbols, hasTestFile);
-      const priority = classifyPriority(relPath, hasTestFile);
+      const priority = classifyPriority(relPath, hasTestFile, coveragePercent);
 
-      findings.push({
+      allEntries.push({
         filePath: relPath,
         hasTestFile,
         testFilePath,
@@ -291,11 +316,17 @@ export class CoverageBaseline {
       });
     }
 
+    const findings: CoverageBaselineFinding[] = [];
+    for (const entry of allEntries) {
+      if (entry.priority === null) continue; // adequately covered — not a finding
+      findings.push({ ...entry, priority: entry.priority });
+    }
+
     findings.sort(
       (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || a.filePath.localeCompare(b.filePath)
     );
 
-    logCoverageSummary(computeSummary(findings));
+    logCoverageSummary(computeSummary(allEntries));
 
     return findings;
   }
