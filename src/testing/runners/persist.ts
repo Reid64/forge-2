@@ -23,7 +23,12 @@ const COVERAGE_THRESHOLD_BRANCH = 0.7;
 const MAX_FAILURE_SUMMARY = 20;
 
 /** RunnerType (src/testing/types.ts) -> test_run_results.test_suite (the DB's CHECK-constrained
- *  19-value enum). Only DEPENDENCY needs remapping — every other name matches verbatim. */
+ *  19-value enum). Several RunnerTypes share one TestSuiteDb value on purpose — e.g. both
+ *  DEPENDENCY (pnpm audit) and TRIVY write DEPENDENCY_SCAN — the enum is a coarser category than
+ *  the concrete tool, distinguished by `runner` (SCHEMA_ADDITIONS §5), not `test_suite`. The five
+ *  newest entries (SECRET_SCAN, LIGHTHOUSE, SEO, MIGRATION_SAFETY have no exact TestSuiteDb match)
+ *  map to the closest existing category per upgrades/SYSTEMS-5-9-GAP-MATRIX.md §3 — no new enum
+ *  values were added, only the existing 19-value CHECK constraint is used. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -32,6 +37,13 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.SECURITY]: 'SECURITY',
   [RunnerType.PERFORMANCE]: 'PERFORMANCE',
   [RunnerType.DEPENDENCY]: 'DEPENDENCY_SCAN',
+  [RunnerType.TRIVY]: 'DEPENDENCY_SCAN',
+  [RunnerType.SECRET_SCAN]: 'SECURITY',
+  [RunnerType.LIGHTHOUSE]: 'PERFORMANCE',
+  [RunnerType.ACCESSIBILITY]: 'ACCESSIBILITY',
+  [RunnerType.VISUAL_REGRESSION]: 'VISUAL_REGRESSION',
+  [RunnerType.SEO]: 'DYNAMIC_ANALYSIS',
+  [RunnerType.MIGRATION_SAFETY]: 'STATIC_ANALYSIS',
 };
 
 const ANSI_RESET = '\x1b[0m';

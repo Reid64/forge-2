@@ -2111,7 +2111,7 @@ interface TrivyResult {
  * Skips gracefully when trivy binary is not in PATH.
  * Threshold: 0 CRITICAL + 0 HIGH CVEs.
  */
-async function runRing3TrivyCheck(
+export async function runRing3TrivyCheck(
   projectPath: string,
   run: CommandRunner,
   log: (m: string) => void
@@ -2222,7 +2222,7 @@ interface GitleaksFinding {
  * Skips gracefully when gitleaks binary is not in PATH.
  * Threshold: 0 findings.
  */
-async function runRing3GitleaksCheck(
+export async function runRing3GitleaksCheck(
   projectPath: string,
   run: CommandRunner,
   log: (m: string) => void
@@ -2354,7 +2354,7 @@ function killChildProcess(proc: ChildProcess | null, log: (m: string) => void): 
  * Skips gracefully when lighthouse is not installed or the dev server does not start.
  * Threshold: all four categories ≥ 90.
  */
-async function runRing3LighthouseCheck(
+export async function runRing3LighthouseCheck(
   projectPath: string,
   run: CommandRunner,
   log: (m: string) => void

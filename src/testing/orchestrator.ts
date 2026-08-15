@@ -23,6 +23,13 @@ import { run as runE2e } from './runners/e2e-runner.js';
 import { run as runSecurity } from './runners/security-runner.js';
 import { run as runPerformance } from './runners/performance-runner.js';
 import { run as runDependency } from './runners/dependency-runner.js';
+import { run as runTrivy } from './runners/trivy-runner.js';
+import { run as runGitleaks } from './runners/gitleaks-runner.js';
+import { run as runLighthouse } from './runners/lighthouse-runner.js';
+import { run as runAccessibility } from './runners/accessibility-runner.js';
+import { run as runVisualRegression } from './runners/visual-regression-runner.js';
+import { run as runSeo } from './runners/seo-runner.js';
+import { run as runMigrationSafety } from './runners/migration-safety-runner.js';
 
 type RunnerFn = (input: RunnerInput) => Promise<RunnerOutcome>;
 
@@ -34,6 +41,13 @@ const RUNNERS: Record<RunnerType, RunnerFn> = {
   [RunnerType.SECURITY]: runSecurity,
   [RunnerType.PERFORMANCE]: runPerformance,
   [RunnerType.DEPENDENCY]: runDependency,
+  [RunnerType.TRIVY]: runTrivy,
+  [RunnerType.SECRET_SCAN]: runGitleaks,
+  [RunnerType.LIGHTHOUSE]: runLighthouse,
+  [RunnerType.ACCESSIBILITY]: runAccessibility,
+  [RunnerType.VISUAL_REGRESSION]: runVisualRegression,
+  [RunnerType.SEO]: runSeo,
+  [RunnerType.MIGRATION_SAFETY]: runMigrationSafety,
 };
 
 /** TriggerType -> test_run_results.trigger. The schema has no POST_DEPLOY value (F9/DeployVerifier
