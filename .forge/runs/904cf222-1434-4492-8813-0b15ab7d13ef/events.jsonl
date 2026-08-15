@@ -71,3 +71,38 @@
 {"ts":"2026-08-15T22:57:20.221Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
 {"ts":"2026-08-15T22:57:20.228Z","level":"FAIL","message":"FAILED at 2026-08-15 17:57:20 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
 {"ts":"2026-08-15T22:57:20.436Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T23:06:20.825Z","level":"PASS","message":"PASSED at 2026-08-15 18:06:20"}
+{"ts":"2026-08-15T23:06:20.826Z","level":"PASS","message":"PROMPT fix-contract10-branch-isolation : ALL GATES PASSED"}
+{"ts":"2026-08-15T23:06:20.827Z","level":"INFO","message":"Prompt 2/22 'Investigate and fix root cause of Contract 10 Branch Isolation violations' â€” PASS (41a868a) â€” 25m12s"}
+{"ts":"2026-08-15T23:06:21.377Z","level":"INFO","message":"=== FORGE-2 ==="}
+{"ts":"2026-08-15T23:06:21.378Z","level":"INFO","message":"PROMPT 3 OF 22"}
+{"ts":"2026-08-15T23:06:21.378Z","level":"INFO","message":"PROMPT ID: fix-queue-prompt-type-metadata"}
+{"ts":"2026-08-15T23:06:21.379Z","level":"INFO","message":"PROMPT NAME: Fix unknown prompt_type warning appearing on every queue entry"}
+{"ts":"2026-08-15T23:06:21.379Z","level":"INFO","message":"PHASE: feature"}
+{"ts":"2026-08-15T23:06:21.380Z","level":"INFO","message":"STARTED at 2026-08-15 18:06:21"}
+{"ts":"2026-08-15T23:06:34.182Z","level":"INFO","message":"Executing Build Agent..."}
+{"ts":"2026-08-15T23:06:34.183Z","level":"INFO","message":"[timeout 900s]"}
+{"ts":"2026-08-15T23:21:34.267Z","level":"INFO","message":"Claude exit null (TIMEOUT) â€” 900.1s"}
+{"ts":"2026-08-15T23:22:07.219Z","level":"GATE","message":"Sentinel â€” 10 check(s)"}
+{"ts":"2026-08-15T23:22:07.219Z","level":"GATE","message":"Running gate: typescript"}
+{"ts":"2026-08-15T23:22:07.220Z","level":"PASS","message":"Gate TYPESCRIPT: PASS"}
+{"ts":"2026-08-15T23:22:07.221Z","level":"GATE","message":"Running gate: eslint"}
+{"ts":"2026-08-15T23:22:07.222Z","level":"PASS","message":"Gate ESLINT: PASS"}
+{"ts":"2026-08-15T23:22:07.223Z","level":"GATE","message":"Running gate: build"}
+{"ts":"2026-08-15T23:22:07.224Z","level":"PASS","message":"Gate BUILD: PASS"}
+{"ts":"2026-08-15T23:22:07.226Z","level":"GATE","message":"Running gate: file_integrity"}
+{"ts":"2026-08-15T23:22:07.227Z","level":"PASS","message":"Gate FILE_INTEGRITY: PASS"}
+{"ts":"2026-08-15T23:22:07.227Z","level":"GATE","message":"Running gate: file_delta"}
+{"ts":"2026-08-15T23:22:07.228Z","level":"PASS","message":"Gate FILE_DELTA: PASS"}
+{"ts":"2026-08-15T23:22:07.229Z","level":"GATE","message":"Running gate: schema_drift"}
+{"ts":"2026-08-15T23:22:07.229Z","level":"WARN","message":"Gate SCHEMA_DRIFT: SKIP"}
+{"ts":"2026-08-15T23:22:07.230Z","level":"GATE","message":"Running gate: dependencies"}
+{"ts":"2026-08-15T23:22:07.230Z","level":"WARN","message":"Gate DEPENDENCIES: SKIP"}
+{"ts":"2026-08-15T23:22:07.231Z","level":"GATE","message":"Running gate: lint"}
+{"ts":"2026-08-15T23:22:07.231Z","level":"WARN","message":"Gate LINT: SKIP"}
+{"ts":"2026-08-15T23:22:07.232Z","level":"GATE","message":"Running gate: format"}
+{"ts":"2026-08-15T23:22:07.232Z","level":"WARN","message":"Gate FORMAT: SKIP"}
+{"ts":"2026-08-15T23:22:07.234Z","level":"GATE","message":"Running gate: bundle_size"}
+{"ts":"2026-08-15T23:22:07.234Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
+{"ts":"2026-08-15T23:22:07.236Z","level":"FAIL","message":"FAILED at 2026-08-15 18:22:07 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
+{"ts":"2026-08-15T23:22:07.378Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}

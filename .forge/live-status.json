@@ -2,21 +2,21 @@
   "buildRunId": "904cf222-1434-4492-8813-0b15ab7d13ef",
   "project": "forge-2",
   "startedAt": "2026-08-15T22:38:43.448Z",
-  "updatedAt": "2026-08-15T22:57:20.438Z",
+  "updatedAt": "2026-08-15T23:22:07.380Z",
   "currentPrompt": {
-    "index": 2,
-    "id": "fix-contract10-branch-isolation",
-    "name": "Investigate and fix root cause of Contract 10 Branch Isolation violations",
+    "index": 3,
+    "id": "fix-queue-prompt-type-metadata",
+    "name": "Fix unknown prompt_type warning appearing on every queue entry",
     "type": "feature",
     "phase": "recovering"
   },
   "totals": {
-    "completed": 1,
+    "completed": 2,
     "failed": 0,
-    "remaining": 21,
-    "tokensEstimated": 1580,
-    "costEstimatedUsd": 0.07152,
-    "totalElapsedMs": 145108
+    "remaining": 20,
+    "tokensEstimated": 3587,
+    "costEstimatedUsd": 0.146256,
+    "totalElapsedMs": 1656676
   },
   "lastSentinel": {
     "passed": true,
@@ -61,6 +61,34 @@
     },
     {
       "timestamp": "2026-08-15T22:57:20.438Z",
+      "message": "Timeout retry: re-running with 2x budget (1800s)"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:12.472Z",
+      "message": "prompt 2 'fix-contract10-branch-isolation' (feature): sentinel"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:12.476Z",
+      "message": "Sentinel PASS"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:15.356Z",
+      "message": "prompt 2 'fix-contract10-branch-isolation' (feature): merged"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:21.381Z",
+      "message": "prompt 3 'fix-queue-prompt-type-metadata' (feature): start"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:21.393Z",
+      "message": "prompt 3 'fix-queue-prompt-type-metadata' (feature): assembled"
+    },
+    {
+      "timestamp": "2026-08-15T23:06:33.882Z",
+      "message": "prompt 3 'fix-queue-prompt-type-metadata' (feature): executing"
+    },
+    {
+      "timestamp": "2026-08-15T23:22:07.380Z",
       "message": "Timeout retry: re-running with 2x budget (1800s)"
     }
   ],

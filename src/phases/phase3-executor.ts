@@ -1163,8 +1163,9 @@ function asContextInjection(v: unknown): ContextInjection {
 /**
  * Coerce a single raw YAML mapping into a {@link QueueEntry}. Tolerant of the Queue
  * Generator's emitted shape (snake_case `context_injection`, flow-list dependencies, `|`
- * block description). Returns `null` (with a warning) when `raw` isn't a mapping or has no
- * id â€” shared by {@link parseQueueYaml} (one queue.yaml = a list of these) and
+ * block description). Returns `null` (with a warning) when `raw` isn't a mapping, has no id,
+ * or has a missing/invalid `prompt_type` (required â€” one of {@link PROMPT_TYPES}; no silent
+ * `'feature'` default) â€” shared by {@link parseQueueYaml} (one queue.yaml = a list of these) and
  * {@link parseSingleQueueEntryYaml} (`forge compile`'s one-entry-per-file prompt library â€”
  * see `src/cli/compile-command.ts`), so the tolerant-coercion rules live in exactly one place.
  */
@@ -1184,10 +1185,16 @@ export function coerceQueueEntry(
     return null;
   }
   const rawType = asString(o.prompt_type).trim();
-  const promptType = (PROMPT_TYPES.has(rawType) ? rawType : 'feature') as PromptType;
   if (!PROMPT_TYPES.has(rawType)) {
-    warn(`${label} ('${id}') has unknown prompt_type '${rawType}' â€” defaulted to 'feature'.`);
+    const allowed = [...PROMPT_TYPES].join(', ');
+    warn(
+      rawType === ''
+        ? `${label} ('${id}') is missing required field 'prompt_type' (must be one of: ${allowed}) â€” skipped.`
+        : `${label} ('${id}') has invalid prompt_type '${rawType}' (must be one of: ${allowed}) â€” skipped.`
+    );
+    return null;
   }
+  const promptType = rawType as PromptType;
   const entry: QueueEntry = {
     id,
     name: asString(o.name).trim() || id,

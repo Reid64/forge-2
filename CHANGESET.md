@@ -547,3 +547,18 @@ live during this retry. Confirmed as the source, not just a smoke-test hazard (s
 - (none)
 
 ---
+## 2026-08-15T23:21:40.693Z â€” Fix unknown prompt_type warning appearing on every queue entry (prompt 3/22)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---
