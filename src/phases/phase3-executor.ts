@@ -169,6 +169,7 @@ import {
 } from '../architecture-guardian/index.js';
 import { DesignPipeline, createDesignPipeline, type DesignReviewResult } from '../design-pipeline/index.js';
 import { getClient, logMemoryWarning, newId } from '../memory/client.js';
+import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -2170,6 +2171,23 @@ async function executePrompt(
     }
     const guardianClassification: PromptClassification =
       ctx.guardian.getLastClassification() ?? classifyPrompt(promptText, entry.prompt_type);
+
+    // b2.8. INVARIANT ENGINE (pre-write) â€” before this prompt's changes are written, confirm the
+    // build's machine-checked invariants (`src/governance/invariants.ts`, each a restatement of an
+    // existing BEHAVIORAL_CONTRACTS.md contract) still hold from every prompt executed so far this
+    // build. Observational only, per the same non-blocking posture already established for
+    // BuildHealthMonitor (Contract AUT-6: "observes and pauses; MUST NOT itself halt a build") â€”
+    // this is a NEW starter capability, not a sixth Sentinel check, so it logs a failure for human
+    // visibility rather than introducing an undocumented new halt path.
+    try {
+      const invariantResults = await checkAllInvariants(ctx.projectPath);
+      const violated = invariantResults.filter((r: InvariantResult) => r.status === 'fail');
+      for (const violation of violated) {
+        log(`[INVARIANTS] VIOLATED before prompt ${index} '${entry.id}': ${violation.id} (${violation.contract}) â€” ${violation.detail}`);
+      }
+    } catch (error) {
+      log(`[INVARIANTS] pre-write check degraded (${describe(error)})`);
+    }
 
     // b3. MODEL ROUTING â€” classify prompt complexity, select the optimal Claude model,
     // and record the estimated cost for this prompt (telemetry; never blocks execution).

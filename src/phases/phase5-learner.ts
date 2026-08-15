@@ -84,6 +84,7 @@ import { BuildMemory, nowIso } from '../memory/index.js';
 import { logLine } from '../tools/forge-logger.js';
 import { evaluateDoD, appendDoDFailureBlocker, type DoDResult } from '../governance/definition-of-done.js';
 import type { ReadinessTierId } from '../governance/readiness-levels.js';
+import { checkAllInvariants, type InvariantResult } from '../governance/invariants.js';
 import type { NewCrossProjectInsight } from '../memory/insights.js';
 import type {
   BuildRun,
@@ -164,6 +165,12 @@ export interface Phase5Result {
    * check is opt-in per build until a `--readiness-target` flag threads a tier in from the CLI).
    */
   dodResult: DoDResult | null;
+  /**
+   * Step 14 — machine-checked invariant results (`src/governance/invariants.ts`), each a
+   * restatement of an existing BEHAVIORAL_CONTRACTS.md contract, evaluated once against the whole
+   * finished build. Always runs (read-only, non-blocking) — never opt-in like `dodResult`.
+   */
+  invariantResults: InvariantResult[];
   /** Step 10 — the human-readable Phase 5 summary report (Markdown). */
   summaryReport: string;
   /** Absolute path the report was written to, or null when `writeReport` was off / it failed. */
@@ -420,6 +427,7 @@ function buildSummaryReport(
   evolutionPromotions: PromotionResult[],
   deployment: Phase5DeploymentResult,
   dodResult: DoDResult | null,
+  invariantResults: InvariantResult[],
   warnings: string[],
   generatedAt: string
 ): string {
@@ -551,6 +559,16 @@ function buildSummaryReport(
     lines.push(`- Target tier: **${dodResult.targetTier}** — ${dodResult.passed ? 'PASSED' : 'FAILED'}`);
     for (const check of dodResult.checks) {
       lines.push(`  - [${check.passed ? 'PASS' : 'FAIL'}] ${check.name}: ${check.detail}`);
+    }
+  }
+  lines.push('');
+
+  lines.push('## 14. Invariant Engine');
+  if (invariantResults.length === 0) {
+    lines.push('- No invariants evaluated.');
+  } else {
+    for (const inv of invariantResults) {
+      lines.push(`  - [${inv.status.toUpperCase()}] ${inv.id} (${inv.contract}): ${inv.detail}`);
     }
   }
   lines.push('');
@@ -962,6 +980,25 @@ export async function runPhase5Learner(
     log('step 13 (Definition of Done): skipped — no targetTier supplied.');
   }
 
+  // 14. Invariant Engine (ENGINEERING_COMPLETENESS.md § 3 — "machine-enforced invariants, not
+  //     prose suggestions"). Unlike step 13, this always runs: every invariant is a read-only,
+  //     non-blocking restatement of an existing BEHAVIORAL_CONTRACTS.md contract, so there is no
+  //     target-tier-style opt-in to gate it behind. A failed invariant does NOT reopen or fail the
+  //     already-finalized build_run (Contract 4, same posture as step 13) — it is logged and
+  //     surfaced in the summary report/warnings for human follow-up.
+  let invariantResults: InvariantResult[] = [];
+  try {
+    invariantResults = await checkAllInvariants(projectPath, buildRunId);
+    const violated = invariantResults.filter((r) => r.status === 'fail');
+    log(`step 14 (Invariant Engine): ${invariantResults.length} invariant(s) checked, ${violated.length} violated.`);
+    for (const violation of violated) {
+      warnings.push(`Invariant violated: ${violation.id} (${violation.contract}) — ${violation.detail}`);
+    }
+  } catch (error) {
+    warnings.push(`Invariant Engine check failed (${describe(error)}).`);
+    log(`WARNING: step 14 invariant check degraded (${describe(error)})`);
+  }
+
   // 10. Produce the Phase 5 summary report.
   const generatedAt = nowIso();
   const summaryReport = buildSummaryReport(
@@ -980,6 +1017,7 @@ export async function runPhase5Learner(
     evolutionPromotions,
     deployment,
     dodResult,
+    invariantResults,
     warnings,
     generatedAt
   );
@@ -1024,6 +1062,7 @@ export async function runPhase5Learner(
     evolutionPromotions,
     deployment,
     dodResult,
+    invariantResults,
     summaryReport,
     reportPath,
     warnings,

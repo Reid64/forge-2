@@ -1573,6 +1573,28 @@ async function cmdReadiness(pathArg: string, opts: { tier?: string }): Promise<v
   }
 }
 
+/**
+ * `forge trace <req-id> [project-path]` — the Requirements Traceability Engine
+ * (`src/governance/traceability.ts`). Reports how far a `REQ-NNN` id has progressed: PLANNED
+ * (referenced in queue.yaml), IMPLEMENTED (referenced in a git commit), TESTED (referenced in
+ * recorded test evidence), or DEPLOYED (the project's latest build completed and shipped).
+ */
+async function cmdTrace(reqIdArg: string, pathArg: string | undefined): Promise<void> {
+  const { traceRequirement, formatTraceResult } = await import('../governance/traceability.js');
+  const projectPath = resolveProjectPath(pathArg ?? '.');
+  const result = await traceRequirement(reqIdArg, projectPath);
+
+  console.log(chalk.bold(`\nFORGE Requirements Traceability — ${result.projectName}\n`));
+  console.log(formatTraceResult(result));
+  console.log('');
+
+  if (result.stage === 'unreferenced') {
+    fail(`${result.reqId} was not found in queue.yaml, git history, or recorded test evidence for ${projectPath}.`);
+  } else {
+    console.log(chalk.green.bold(`${result.reqId} — stage: ${result.stage.toUpperCase()}`));
+  }
+}
+
 /** `forge estimate <path> --idea` — cost/time estimate without building (F17). */
 async function cmdEstimate(pathArg: string, opts: { idea?: string; prd?: string }): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
@@ -3929,6 +3951,13 @@ async function main(): Promise<void> {
     .argument('<project-path>', 'target project directory')
     .option('--tier <id>', 'readiness tier to evaluate (e.g. MVP, ENTERPRISE_GRADE) — omit to list all tiers and their requirements')
     .action((pathArg: string, opts: { tier?: string }) => cmdReadiness(pathArg, opts));
+
+  program
+    .command('trace')
+    .description('Trace a REQ-NNN requirement id through queue.yaml, git history, and test evidence to its current stage')
+    .argument('<req-id>', 'requirement id, e.g. REQ-042')
+    .argument('[project-path]', 'target project directory', '.')
+    .action((reqIdArg: string, pathArg: string) => cmdTrace(reqIdArg, pathArg));
 
   program
     .command('compose')

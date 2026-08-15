@@ -1,13 +1,109 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-14 (Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
-**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + **Design Pipeline COMPLETE — Playwright-driven multi-viewport screenshot capture + optional Penpot design-file push + a human/accessibility-score-gated visual approval gate, wired into every `ui`/`feature` Phase 3 prompt after the Contract 13 Sentinel gate passes**
-**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + **Design Pipeline (ALL COMPLETE)**
+**Last Updated:** 2026-08-15 (Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + **Requirements Traceability + Invariant Engine COMPLETE — a `REQ-NNN` id scheme traced through queue.yaml/git history/test_run_results to a real PLANNED→IMPLEMENTED→TESTED→DEPLOYED stage, plus a starter set of 4 machine-checked invariants each a direct restatement of an existing BEHAVIORAL_CONTRACTS.md contract, wired into Phase 3 pre-write and Phase 5 end**
+**Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + **Requirements Traceability + Invariant Engine (ALL COMPLETE)**
 **Schema version:** **3.1.0** — bumped from `3.0.0` by the Design Pipeline's `design_reviews`/`design_screenshots` tables (`src/learning/database.ts:17`, `CURRENT_SCHEMA_VERSION` confirmed `'3.1.0'` this session). Note: this session's task brief named schema version `2.9.0` for this addition — that value was already consumed by the Autonomy Upgrades tables bump (`2.8.0` → `2.9.0`) that landed before Design Artifacts (`2.9.0` → `3.0.0`) in an earlier session, so recording `2.9.0` here would be a downgrade that collides with and contradicts existing migration history already committed to this file. `3.1.0` is the actual next version in sequence and is what `CURRENT_SCHEMA_VERSION` and the code's own migration comment record — recording the brief's number over the code's actual constant would be a fabrication (Iron Law 3), per the identical precedent already set in the Enhanced Retrofit / UI Engine sections below.
 **Total Prompts Executed:** 89 (r1-001…r4-013, r5-001…r5-010, r6-001…r6-007, r7-001, r9-001 through r9-013, ER-1 through ER-11) + 12 Skills Library prompts (SKL-1 through SKL-12) + 10 Autonomy Upgrades prompts (AUT-1 through AUT-10) + 6 Token Optimization prompts (TOK-1 through TOK-6) + 9 UI Engine prompts (UIE-1 through UIE-9) + 4 Architecture Guardian prompts (ARCHG-1 through ARCHG-4) + 11 Elite Skills Library prompts (ESK-1 through ESK-11) + 8 Design Pipeline prompts (DP-1 through DP-8, this session)
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Requirements Traceability + Invariant Engine (2026-08-15) — COMPLETE
+
+**Objective:** `upgrades/ENGINEERING_COMPLETENESS.md` § "2. A requirements traceability engine" and
+§ "3. An invariant engine" flagged two related gaps: FORGE could not answer "where in the code is
+requirement REQ-042 implemented?", and it had no machine-enforced rules that "must remain true
+regardless of what agents change" — only prose in `BEHAVIORAL_CONTRACTS.md`. This session made both
+real, grounded in data FORGE already records (no new table, no invented requirement, no fabricated
+evidence source) — the same posture `src/governance/definition-of-done.ts` already established for
+this file's prior session.
+
+**New modules:**
+1. `src/governance/traceability.ts` — `parseRequirementIds(text): string[]` extracts every
+   `REQ-NNN` id (`REQ-` + 3+ digits) from arbitrary text; `extractRequirementIdsFromGovernance
+   (projectPath)` applies it to `PRD.md`/`BLUEPRINT.md`. `traceRequirement(reqId, projectPath):
+   Promise<TraceResult>` follows one id through four real evidence sources: `queue.yaml` entry
+   name/description text (→ `planned`), git commit subjects via `git log --all --grep=<reqId> -i`
+   (→ `implemented`), `test_run_results` rows' `report_path`/`runner`/`failure_summary` (→
+   `tested`), and the project's latest `build_runs` row being `'completed'` AND having a `'ready'`
+   `deployment_history` row (→ `deployed`). Each stage strictly requires the evidence of the stage
+   before it — `tested` is never reported without a real `implemented`-stage commit, `deployed`
+   never without real `tested`-stage evidence — so a coincidental later-stage signal (e.g. a
+   completed build that has nothing to do with this requirement) can never inflate the reported
+   stage. An id that doesn't match `^REQ-\d{3,}$`, or one that matches nothing anywhere, reports
+   `'unreferenced'` rather than guessing.
+2. `src/governance/invariants.ts` — a starter set of 4 machine-checked invariants, `INVARIANTS:
+   InvariantDefinition[]`, each id a direct restatement of an existing `BEHAVIORAL_CONTRACTS.md`
+   contract (grounded, per the task brief, "rather than invented ones"):
+   - `no-write-during-build` (Contract 3, Governance Immutability During Execution) — scans every
+     `prompt_executions.files_created`/`files_modified`/`files_deleted` row for the current build
+     for a governance-doc basename (`PRD.md`/`BLUEPRINT.md`/`SCHEMA_REGISTRY.md`/
+     `BEHAVIORAL_CONTRACTS.md`/`AGENTS.md`/`TOOLCHAIN.md`/`TESTING.md`). `STATE_OF_THE_BUILD.md`
+     and `SESSION_STATE.md` are deliberately EXCLUDED from this set — `src/engine/queue-
+     generator.ts`'s `STATE_FOOTER` instructs EVERY Phase 3 prompt to update those two files as
+     part of normal execution, so including them would make this invariant fail on every real
+     build FORGE has ever run; Contract 3 protects the DEFINITIONAL documents, not the living
+     build log, and the code comment on `PROTECTED_ARTIFACT_FILENAMES` records this reasoning
+     in full so it is never silently re-broadened.
+   - `sentinel-mandatory-checks-passed` (Contract 13, Health Check Suite) — for every prompt in
+     the build with recorded `sentinel_details`, fails if a prompt marked `sentinel_passed: true`
+     is missing one or more of `phase4-sentinel.ts`'s real `SENTINEL_CHECK_ORDER` names from its
+     stored `checks` array — i.e. it catches a "vacuous pass" (see the `forge2-session52-vacuous-
+     build-fix` prior-session finding this directly targets), not merely re-deriving
+     `sentinel_passed`.
+   - `critical-gaps-deferred-to-human` (Contract AUT-5) — the latest `gap_audit_runs` row's
+     `gaps_critical` must be `<= gaps_human_gated`, i.e. every CRITICAL gap has real evidence of
+     having been deferred to the human gate rather than silently auto-resolved.
+   - `no-direct-commits-to-main-during-build` (Contract 10, Branch Isolation) — `git log main
+     --since=<build.started_at> --no-merges` must return zero commits; a legitimate Phase-3-driven
+     change lands on main only via `GitManager.mergeToMain`'s `--no-ff` merge commit, so any
+     non-merge commit on main since the build started is a real Contract 10 violation.
+   Every check degrades to `'skipped'` (never a false pass) when Build Memory is unreachable, no
+   build exists yet, or the relevant row/data hasn't been recorded — matching `definition-of-
+   done.ts`'s established degrade-don't-fabricate posture. `checkAllInvariants(projectPath,
+   buildId?)` runs all four and returns `InvariantResult[]`; `checkInvariant(id, ctx)` runs one.
+3. Phase 3 wiring (`src/phases/phase3-executor.ts`, step b2.8, right after Architecture Guardian's
+   `prePrompt` and before model routing) — `checkAllInvariants(ctx.projectPath)` runs before every
+   prompt's changes are written, logging any `'fail'` result. Observational only (same posture
+   Contract AUT-6 already establishes for `BuildHealthMonitor` — "observes and pauses; MUST NOT
+   itself halt a build"): this is a new starter capability, not a sixth Sentinel check, so a
+   violation is logged for human visibility rather than introducing an undocumented new halt path.
+4. Phase 5 wiring (`src/phases/phase5-learner.ts`, new step 14, after step 13's Definition of Done)
+   — `checkAllInvariants(projectPath, buildRunId)` always runs (unlike step 13, there is no
+   target-tier-style opt-in to gate a read-only, non-blocking check behind); violations are pushed
+   into `warnings` and rendered in the Phase 5 summary report's new "## 14. Invariant Engine"
+   section. `Phase5Result.invariantResults: InvariantResult[]` is the new field callers can read.
+5. `forge trace <req-id> [project-path]` CLI command (`src/cli/index.ts`) — prints the requirement's
+   current stage and every piece of evidence found (queue matches, commit hashes/subjects, test
+   suite/status pairs, deployed yes/no); exits non-zero when the id is `'unreferenced'`.
+
+**Known gaps, flagged not silently accepted:**
+1. Test evidence in `traceRequirement` is necessarily best-effort: `test_run_results` has no
+   dedicated requirement-id column, so matching relies on a runner's own `report_path`/`runner`/
+   `failure_summary` text happening to mention the id. A requirement with real, passing test
+   coverage that never happens to name the `REQ-NNN` id anywhere in that text will under-report as
+   `implemented` rather than `tested` — a real limitation of the current schema, not a bug in the
+   matching logic, and not silently masked (the module doc comment states this explicitly).
+2. `parseRequirementIds`/`extractRequirementIdsFromGovernance` are exported and ready, but nothing
+   yet cross-references "every requirement declared in PRD.md/BLUEPRINT.md" against "every
+   requirement `traceRequirement` can find evidence for" to answer ENGINEERING_COMPLETENESS.md's
+   other named question, "what requirements have no tests?" — that aggregate report is a natural
+   next `forge trace --all` extension, not built this session (the task brief scoped this session
+   to the single-id `traceRequirement` lookup and the invariant starter set, not the full ontology).
+3. `INVARIANTS` is a genuine starter set (4), not the exhaustive list `ENGINEERING_COMPLETENESS.md`
+   § 3's example list implies (tenant isolation, secrets-never-committed, every-API-has-an-auth-
+   policy, etc.) — those examples were intentionally NOT added here because none of them is
+   restated as an actual `BEHAVIORAL_CONTRACTS.md` contract today (confirmed by grep — no "secret"/
+   "tenant isolation" contract exists in that file), and the task brief's own worked example
+   (Contract 3 → `no-write-during-build`) established that every invariant in this engine must be
+   grounded in an existing contract, not invented from the upgrade memo's illustrative list.
+
+**Verification:** `pnpm run build` (`tsc`) — exit code 0, zero diagnostics, run via Bash this
+session (the intermittent exec gate documented in the `forge2-exec-blocker` memory did not block
+this session's build/compiler invocations).
 
 ---
 
@@ -2199,3 +2295,9 @@ forge build ./my-project --start-at 5 --dry-run
 28. **`forge health` does not yet report the `design_reviews`/`design_screenshots` tables or a WIRED status for the 5 Design Pipeline modules** — the same gap already flagged for Autonomy Upgrades (item 12) and UI Engine (item 19).
 
 > 2026-08-15T04:17:31.675Z [FORGE Phase 3] prompt 1 'stage3-testing-wiring' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T04:33:05.547Z [FORGE Phase 3] prompt 2 'stage2-readiness-dod' (feature): FAILED â€" Sentinel FAIL(?).
+
+> 2026-08-15T04:57:21.222Z [FORGE Phase 3] prompt 1 'stage3-testing-wiring' (feature): COMPLETED â€" Sentinel PASS.
+
+> 2026-08-15T05:02:25.936Z [FORGE Phase 3] prompt 2 'stage2-readiness-dod' (feature): COMPLETED â€" Sentinel PASS.
