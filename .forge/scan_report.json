@@ -1,12 +1,12 @@
 {
   "projectName": "forge-2",
   "projectPath": "C:\\Users\\manag\\Documents\\forge-2",
-  "scanTimestamp": "2026-08-15T22:06:10.253Z",
+  "scanTimestamp": "2026-08-15T23:38:18.964Z",
   "scanScope": "A",
   "supabaseAvailable": false,
   "vercelAvailable": false,
   "fileTree": {
-    "totalFiles": 612,
+    "totalFiles": 616,
     "byExtension": {
       ".csv": {
         "count": 24,
@@ -22,7 +22,7 @@
       },
       ".md": {
         "count": 145,
-        "totalSizeKB": 2752.7646484375
+        "totalSizeKB": 2768.37890625
       },
       "(none)": {
         "count": 1,
@@ -38,23 +38,23 @@
       },
       ".json": {
         "count": 14,
-        "totalSizeKB": 164.91015625
+        "totalSizeKB": 175.607421875
       },
       ".jsonl": {
-        "count": 7,
-        "totalSizeKB": 23.87890625
+        "count": 10,
+        "totalSizeKB": 47.4228515625
       },
       ".yaml": {
         "count": 13,
-        "totalSizeKB": 367.1640625
+        "totalSizeKB": 364.484375
       },
       ".txt": {
         "count": 26,
         "totalSizeKB": 1163.9248046875
       },
       ".ts": {
-        "count": 281,
-        "totalSizeKB": 4587.5537109375
+        "count": 282,
+        "totalSizeKB": 4604.4912109375
       },
       ".css": {
         "count": 1,
@@ -320,7 +320,7 @@
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\forge_running.lock",
         "extension": ".lock",
         "sizeBytes": 152,
-        "lastModified": "2026-08-15T21:58:10.564Z"
+        "lastModified": "2026-08-15T22:38:43.451Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\gap_audit_report.md",
@@ -343,8 +343,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\live-status.json",
         "extension": ".json",
-        "sizeBytes": 1513,
-        "lastModified": "2026-08-15T22:05:49.907Z"
+        "sizeBytes": 3269,
+        "lastModified": "2026-08-15T23:38:05.279Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\RUN5-HANDOFF.md",
@@ -407,6 +407,24 @@
         "lastModified": "2026-08-15T19:42:39.835Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\904cf222-1434-4492-8813-0b15ab7d13ef\\events.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 14181,
+        "lastModified": "2026-08-15T23:38:04.719Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\904cf222-1434-4492-8813-0b15ab7d13ef\\failures.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 263,
+        "lastModified": "2026-08-15T23:38:04.720Z"
+      },
+      {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\904cf222-1434-4492-8813-0b15ab7d13ef\\prompts.jsonl",
+        "extension": ".jsonl",
+        "sizeBytes": 9665,
+        "lastModified": "2026-08-15T23:38:04.720Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\runs\\c47ae905-713a-4ccf-b2eb-8f348e467e5d\\events.jsonl",
         "extension": ".jsonl",
         "sizeBytes": 4367,
@@ -427,8 +445,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\scan_report.json",
         "extension": ".json",
-        "sizeBytes": 141274,
-        "lastModified": "2026-08-15T04:33:29.502Z"
+        "sizeBytes": 150472,
+        "lastModified": "2026-08-15T22:06:10.256Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\.forge\\SESSION_HANDOFF.md",
@@ -589,8 +607,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\CHANGESET.md",
         "extension": ".md",
-        "sizeBytes": 19768,
-        "lastModified": "2026-08-15T22:05:10.490Z"
+        "sizeBytes": 22522,
+        "lastModified": "2026-08-15T23:37:39.326Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\claude-runner-backup.txt",
@@ -824,13 +842,13 @@
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\COMPLIANCE_REQUIREMENTS.md",
         "extension": ".md",
         "sizeBytes": 4194,
-        "lastModified": "2026-08-15T21:57:50.897Z"
+        "lastModified": "2026-08-15T22:38:31.433Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\DESIGN_SYSTEM.md",
         "extension": ".md",
         "sizeBytes": 2598,
-        "lastModified": "2026-08-15T21:57:50.893Z"
+        "lastModified": "2026-08-15T22:38:31.430Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\governance\\FORGE_CANONICAL_INSTRUCTIONS.md",
@@ -1339,8 +1357,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\queue.yaml",
         "extension": ".yaml",
-        "sizeBytes": 24564,
-        "lastModified": "2026-08-15T21:57:30.869Z"
+        "sizeBytes": 21820,
+        "lastModified": "2026-08-15T23:10:37.127Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\README.md",
@@ -1495,8 +1513,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\SESSION_STATE.md",
         "extension": ".md",
-        "sizeBytes": 136853,
-        "lastModified": "2026-08-15T22:05:10.503Z"
+        "sizeBytes": 141783,
+        "lastModified": "2026-08-15T23:37:39.328Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\shield-err-tmp.txt",
@@ -1691,6 +1709,12 @@
         "lastModified": "2026-07-06T20:40:08.059Z"
       },
       {
+        "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\commands\\agent.ts",
+        "extension": ".ts",
+        "sizeBytes": 5286,
+        "lastModified": "2026-08-15T23:34:20.370Z"
+      },
+      {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\commands\\learning.ts",
         "extension": ".ts",
         "sizeBytes": 17594,
@@ -1723,8 +1747,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\index.ts",
         "extension": ".ts",
-        "sizeBytes": 219133,
-        "lastModified": "2026-08-15T06:06:22.620Z"
+        "sizeBytes": 219230,
+        "lastModified": "2026-08-15T23:34:43.520Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\cli\\repair-command.ts",
@@ -1879,8 +1903,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\git-manager.ts",
         "extension": ".ts",
-        "sizeBytes": 32103,
-        "lastModified": "2026-08-15T19:31:48.170Z"
+        "sizeBytes": 34190,
+        "lastModified": "2026-08-15T23:02:55.448Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\engine\\governance-gate.ts",
@@ -1999,8 +2023,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\invariants.ts",
         "extension": ".ts",
-        "sizeBytes": 15004,
-        "lastModified": "2026-08-15T05:11:33.595Z"
+        "sizeBytes": 17380,
+        "lastModified": "2026-08-15T22:54:55.701Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\governance\\provenance-ledgers.ts",
@@ -2047,8 +2071,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\evolution-promoter.ts",
         "extension": ".ts",
-        "sizeBytes": 20561,
-        "lastModified": "2026-07-17T19:59:54.545Z"
+        "sizeBytes": 25623,
+        "lastModified": "2026-08-15T23:34:00.317Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\fingerprint.ts",
@@ -2095,8 +2119,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\queries.ts",
         "extension": ".ts",
-        "sizeBytes": 12380,
-        "lastModified": "2026-07-06T01:34:36.164Z"
+        "sizeBytes": 13151,
+        "lastModified": "2026-08-15T23:33:31.230Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\learning\\retirement-filter.ts",
@@ -2347,8 +2371,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\phases\\phase3-executor.ts",
         "extension": ".ts",
-        "sizeBytes": 239651,
-        "lastModified": "2026-08-15T19:36:54.368Z"
+        "sizeBytes": 241316,
+        "lastModified": "2026-08-15T23:09:04.998Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\src\\phases\\phase4-sentinel.ts",
@@ -3259,8 +3283,8 @@
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\STATE_OF_THE_BUILD.md",
         "extension": ".md",
-        "sizeBytes": 294385,
-        "lastModified": "2026-08-15T22:05:49.581Z"
+        "sizeBytes": 302690,
+        "lastModified": "2026-08-15T23:38:04.717Z"
       },
       {
         "fullPath": "C:\\Users\\manag\\Documents\\forge-2\\supabase\\migrations\\001_create_gap_audit_runs.sql",
@@ -3779,7 +3803,7 @@
         "lastModified": "2026-08-14T04:36:55.220Z"
       }
     ],
-    "projectSizeKB": 11138.583984375
+    "projectSizeKB": 11202.697265625
   },
   "brokenImports": [
     {
@@ -4050,6 +4074,21 @@
   ],
   "envAudit": [
     {
+      "name": "NEXT_PUBLIC_SUPABASE_URL",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "USERPROFILE",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
       "name": "FORGE_AGENT_MODEL",
       "classification": "MISSING_LOCAL",
       "severity": "CRITICAL"
@@ -4070,12 +4109,12 @@
       "severity": "CRITICAL"
     },
     {
-      "name": "FORGE_SUPABASE_URL",
+      "name": "KEY_NAME",
       "classification": "MISSING_LOCAL",
       "severity": "CRITICAL"
     },
     {
-      "name": "FORGE_SUPABASE_SERVICE_KEY",
+      "name": "FORGE_LIBRARY_PATH",
       "classification": "MISSING_LOCAL",
       "severity": "CRITICAL"
     },
@@ -4120,7 +4159,27 @@
       "severity": "CRITICAL"
     },
     {
+      "name": "LOCALAPPDATA",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "P",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "FORGE_SUPABASE_URL",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
       "name": "SUPABASE_URL",
+      "classification": "MISSING_LOCAL",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "FORGE_SUPABASE_SERVICE_KEY",
       "classification": "MISSING_LOCAL",
       "severity": "CRITICAL"
     },
@@ -4168,41 +4227,6 @@
       "name": "NODE_ENV",
       "classification": "MISSING_LOCAL",
       "severity": "CRITICAL"
-    },
-    {
-      "name": "NEXT_PUBLIC_SUPABASE_URL",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "USERPROFILE",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "KEY_NAME",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "FORGE_LIBRARY_PATH",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "LOCALAPPDATA",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "P",
-      "classification": "MISSING_LOCAL",
-      "severity": "CRITICAL"
     }
   ],
   "schemaAudit": [
@@ -4226,8 +4250,8 @@
     }
   ],
   "gitAudit": {
-    "lastCommitHash": "754c2fe1742b81a0d7b1def8007dde160e989ed3",
-    "lastCommitDate": "2026-08-15 17:04:50 -0500",
+    "lastCommitHash": "22d2b35182d4fa780db801dacbc4a076ae0a48a4",
+    "lastCommitDate": "2026-08-15 18:37:24 -0500",
     "daysSinceCommit": 0,
     "uncommittedChanges": 7,
     "branches": [
@@ -4274,7 +4298,7 @@
     {
       "filename": "BEHAVIORAL_CONTRACTS.md",
       "exists": true,
-      "lastModifiedDays": 23,
+      "lastModifiedDays": 24,
       "staleness": "AGING"
     },
     {

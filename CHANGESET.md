@@ -562,3 +562,18 @@ live during this retry. Confirmed as the source, not just a smoke-test hazard (s
 - (none)
 
 ---
+## 2026-08-15T23:37:39.324Z â€” Build forge agent approve/reject/list CLI command (prompt 4/22)
+
+### Files Created
+
+- (none)
+
+### Files Modified
+
+- .forge/build.log
+
+### Files Deleted
+
+- (none)
+
+---

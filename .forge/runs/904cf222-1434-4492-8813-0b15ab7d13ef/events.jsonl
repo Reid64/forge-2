@@ -106,3 +106,41 @@
 {"ts":"2026-08-15T23:22:07.234Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
 {"ts":"2026-08-15T23:22:07.236Z","level":"FAIL","message":"FAILED at 2026-08-15 18:22:07 - claude-runner TIMEOUT after 900s for prompt type feature â€” Sentinel reported PASS, but a timed-out run proves nothing about whether the work completed.\n\n--- Sentinel's checks (informational only â€”"}
 {"ts":"2026-08-15T23:22:07.378Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T23:29:06.153Z","level":"PASS","message":"PASSED at 2026-08-15 18:29:06"}
+{"ts":"2026-08-15T23:29:06.154Z","level":"PASS","message":"PROMPT fix-queue-prompt-type-metadata : ALL GATES PASSED"}
+{"ts":"2026-08-15T23:29:06.154Z","level":"INFO","message":"Prompt 3/22 'Fix unknown prompt_type warning appearing on every queue entry' â€” PASS (41a868a) â€” 22m45s"}
+{"ts":"2026-08-15T23:29:06.841Z","level":"INFO","message":"=== FORGE-2 ==="}
+{"ts":"2026-08-15T23:29:06.842Z","level":"INFO","message":"PROMPT 4 OF 22"}
+{"ts":"2026-08-15T23:29:06.843Z","level":"INFO","message":"PROMPT ID: wire-agent-approval-cli"}
+{"ts":"2026-08-15T23:29:06.844Z","level":"INFO","message":"PROMPT NAME: Build forge agent approve/reject/list CLI command"}
+{"ts":"2026-08-15T23:29:06.844Z","level":"INFO","message":"PHASE: feature"}
+{"ts":"2026-08-15T23:29:06.845Z","level":"INFO","message":"STARTED at 2026-08-15 18:29:06"}
+{"ts":"2026-08-15T23:29:21.419Z","level":"INFO","message":"Executing Build Agent..."}
+{"ts":"2026-08-15T23:29:21.420Z","level":"INFO","message":"[timeout 900s]"}
+{"ts":"2026-08-15T23:37:32.977Z","level":"INFO","message":"Claude exit 0 â€” 491.6s"}
+{"ts":"2026-08-15T23:38:03.396Z","level":"GATE","message":"Sentinel â€” 10 check(s)"}
+{"ts":"2026-08-15T23:38:03.397Z","level":"GATE","message":"Running gate: typescript"}
+{"ts":"2026-08-15T23:38:03.397Z","level":"PASS","message":"Gate TYPESCRIPT: PASS"}
+{"ts":"2026-08-15T23:38:03.398Z","level":"GATE","message":"Running gate: eslint"}
+{"ts":"2026-08-15T23:38:03.398Z","level":"PASS","message":"Gate ESLINT: PASS"}
+{"ts":"2026-08-15T23:38:03.399Z","level":"GATE","message":"Running gate: build"}
+{"ts":"2026-08-15T23:38:03.399Z","level":"PASS","message":"Gate BUILD: PASS"}
+{"ts":"2026-08-15T23:38:03.400Z","level":"GATE","message":"Running gate: file_integrity"}
+{"ts":"2026-08-15T23:38:03.400Z","level":"PASS","message":"Gate FILE_INTEGRITY: PASS"}
+{"ts":"2026-08-15T23:38:03.401Z","level":"GATE","message":"Running gate: file_delta"}
+{"ts":"2026-08-15T23:38:03.401Z","level":"PASS","message":"Gate FILE_DELTA: PASS"}
+{"ts":"2026-08-15T23:38:03.402Z","level":"GATE","message":"Running gate: schema_drift"}
+{"ts":"2026-08-15T23:38:03.402Z","level":"WARN","message":"Gate SCHEMA_DRIFT: SKIP"}
+{"ts":"2026-08-15T23:38:03.403Z","level":"GATE","message":"Running gate: dependencies"}
+{"ts":"2026-08-15T23:38:03.403Z","level":"WARN","message":"Gate DEPENDENCIES: SKIP"}
+{"ts":"2026-08-15T23:38:03.404Z","level":"GATE","message":"Running gate: lint"}
+{"ts":"2026-08-15T23:38:03.404Z","level":"WARN","message":"Gate LINT: SKIP"}
+{"ts":"2026-08-15T23:38:03.405Z","level":"GATE","message":"Running gate: format"}
+{"ts":"2026-08-15T23:38:03.405Z","level":"WARN","message":"Gate FORMAT: SKIP"}
+{"ts":"2026-08-15T23:38:03.406Z","level":"GATE","message":"Running gate: bundle_size"}
+{"ts":"2026-08-15T23:38:03.406Z","level":"PASS","message":"Gate BUNDLE_SIZE: PASS"}
+{"ts":"2026-08-15T23:38:03.409Z","level":"FAIL","message":"FAILED at 2026-08-15 18:38:03 - claude did not complete prompt type feature (exit 0) â€” Sentinel reported PASS, but a run that did not succeed proves nothing about whether the work happened.\n\n--- Sentinel's checks (informational on"}
+{"ts":"2026-08-15T23:38:03.500Z","level":"INFO","message":"[SENTINEL PRIME] Confidence: 0.94"}
+{"ts":"2026-08-15T23:38:04.718Z","level":"FAIL","message":"FAILED at 2026-08-15 18:38:04 - Dead loop detected -- STOP RETRYING (error family seen 11x (>= 4); remediation class 'prompt_rewrite' attempted 10x (>= 3)). Recommended: multi_llm_consensus, architecture_review, alternative_strategy_generation."}
+{"ts":"2026-08-15T23:38:04.718Z","level":"ERROR","message":"PROMPT wire-agent-approval-cli : FAILED after 0 retries"}
+{"ts":"2026-08-15T23:38:04.718Z","level":"INFO","message":"Prompt 4/22 'Build forge agent approve/reject/list CLI command' â€” FAIL (unknown check) â€” 8m58s"}
