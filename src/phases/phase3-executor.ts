@@ -399,6 +399,14 @@ export interface Phase3Options {
   /** Simulate only â€” assemble + predict, but do NOT run claude/git/Sentinel. Default false. */
   dryRun?: boolean;
   /**
+   * Explicit override for the non-TTY startup guard (the CLI's `--allow-headless` flag):
+   * permits Phase 3 to start with a backgrounded/non-interactive stdout. Default false â€”
+   * without it, a non-TTY stdout makes {@link runPhase3Executor} throw immediately instead
+   * of silently running claude Code with no visible output (see the module doc comment on
+   * `claude-runner.ts` for the incident that motivated this).
+   */
+  allowHeadless?: boolean;
+  /**
    * Build Replay (F12): when set, this run resumes the {@link ReplayOptions.originalBuildRunId}
    * build from {@link ReplayOptions.fromCheckpointTag} / {@link ReplayOptions.fromPromptIndex}.
    */
@@ -1520,6 +1528,20 @@ function installQuietConsole(buildLogPath: string | null): () => void {
  * the default. Always resolves â€” every collaborator is guarded and the loop never throws.
  */
 export async function runPhase3Executor(options: Phase3Options): Promise<Phase3Result> {
+  // Hard-fail startup check: a backgrounded/non-interactive stdout means every claude-runner
+  // stream write below (see claude-runner.ts) goes nowhere anyone can watch. This is exactly
+  // how a `Start-Job`-piped `claude` process hung silently for 15+ hours with zero visible
+  // output and no error. Refuse to even start unless the caller explicitly opted in via
+  // `--allow-headless`, before any prompt is dispatched or any claude process is spawned.
+  if (!process.stdout.isTTY && !(options.allowHeadless ?? false)) {
+    throw new Error(
+      'FORGE 2.0 refuses to run in a non-interactive/backgrounded terminal - output would be ' +
+        'silent. Run this in a foreground PowerShell/terminal window you can watch, or pass ' +
+        '--allow-headless if you specifically want silent background execution and will monitor ' +
+        'via .forge/runs/*.jsonl instead.'
+    );
+  }
+
   // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines for the lifetime of this
   // call â€” every pino line any collaborator emits (this module included) is diverted to
   // `.forge/build.log` from the very first instruction, before any other code runs, so nothing

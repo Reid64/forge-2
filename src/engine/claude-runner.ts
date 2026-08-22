@@ -21,6 +21,16 @@
  * It never throws: a spawn failure (e.g. `claude` not found) or a timeout resolves to a
  * result with `success: false` and the reason captured in `stderr` / `timedOut`.
  *
+ * Streaming by default: every stdout/stderr chunk from the spawned `claude` process is
+ * written live to THIS process's own stdout/stderr, in addition to being buffered for
+ * Sentinel/telemetry as before. This was added after a build launched via `Start-Job`
+ * (PowerShell backgrounding stdin into a spawned `claude` process) silently hung for over
+ * 15 hours with zero visible output and no error — the buffering alone gave no way to tell
+ * a healthy long-running prompt from a dead one. See {@link runPhase3Executor} in
+ * `phase3-executor.ts` for the companion hard-fail guard: it refuses to start Phase 3 at
+ * all on a non-TTY stdout unless `--allow-headless` was explicitly passed, so a silent
+ * background run can no longer happen by accident.
+ *
  * The returned `tokensEstimated` is a DELIBERATELY COARSE heuristic (≈ chars / 4 over the
  * piped prompt + captured stdout) for cost/telemetry only — it is NOT the API's real token
  * count (the CLI does not surface one over this interface). The executor records it to
@@ -343,8 +353,8 @@ export function runClaude(
       else options.signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    child.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+    child.stdout?.on('data', (chunk: Buffer) => { stdoutChunks.push(chunk); process.stdout.write(chunk); });
+    child.stderr?.on('data', (chunk: Buffer) => { stderrChunks.push(chunk); process.stderr.write(chunk); });
 
     child.on('error', (error: Error) => {
       // Asynchronous spawn failure (e.g. ENOENT — `claude` not on PATH).

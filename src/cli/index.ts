@@ -763,6 +763,7 @@ async function cmdBuild(
     maxResumes?: string;
     acceptBlockers?: boolean;
     autoApproveGates?: boolean;
+    allowHeadless?: boolean;
   }
 ): Promise<void> {
   beginQuietLogging('.forge/build.log');
@@ -819,6 +820,7 @@ async function cmdBuild(
           toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
           autonomousRecoveryMode: opts.autonomousRecovery ?? false,
           dryRun: opts.dryRun ?? false,
+          allowHeadless: opts.allowHeadless ?? false,
           log,
         },
         startAt,
@@ -903,6 +905,7 @@ async function cmdBuild(
           toolchainManifest: sr.toolchainManifest as unknown as JsonObject,
           autonomousRecoveryMode: opts.autonomousRecovery ?? false,
           dryRun: opts.dryRun ?? false,
+          allowHeadless: opts.allowHeadless ?? false,
           log,
         },
         startAt,
@@ -944,6 +947,7 @@ async function cmdBuild(
         toolchainManifest: scout.toolchainManifest as unknown as JsonObject,
         autonomousRecoveryMode: opts.autonomousRecovery ?? false,
         dryRun: opts.dryRun ?? false,
+        allowHeadless: opts.allowHeadless ?? false,
         log,
       },
       startAt,
@@ -3609,6 +3613,11 @@ async function main(): Promise<void> {
       'acknowledge the three human-approval gates (Contract 2) without pausing for review. FORGE already proceeds past these gates automatically in autonomous mode (they render as banners, never a real pause) — this flag exists for explicit, logged acknowledgment. Does NOT bypass adversarial-review BLOCKER findings; use --accept-blockers for that.',
       false
     )
+    .option(
+      '--allow-headless',
+      'permit Phase 3 to start with a backgrounded/non-interactive terminal (process.stdout.isTTY false). Without this, FORGE refuses to start Phase 3 at all rather than run claude Code with silent output — a backgrounded run (e.g. Start-Job piping stdin to a spawned claude process) was found to hang for 15+ hours with zero visible output and no error. Pass this ONLY if you will monitor progress via .forge/runs/*.jsonl instead of the terminal.',
+      false
+    )
     .action(
       (
         pathArg: string,
@@ -3626,6 +3635,7 @@ async function main(): Promise<void> {
           maxResumes?: string;
           acceptBlockers?: boolean;
           autoApproveGates?: boolean;
+          allowHeadless?: boolean;
         }
       ) => cmdBuild(pathArg, opts)
     );
