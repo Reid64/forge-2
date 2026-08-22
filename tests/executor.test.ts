@@ -145,6 +145,7 @@ function baseOptions(cwd: string, entries: QueueEntry[], over: Partial<Phase3Opt
     projectPath: cwd,
     entries,
     gitManager: git,
+    allowHeadless: true,
     predictImpl: async () => prediction(),
     assembleImpl: async ({ entry: e }) => ({
       prompt: `PROMPT ${e.id}`,
