@@ -445,15 +445,19 @@ function describeAuth(auth: ArchitectureDesign['auth']): string {
   );
 }
 
-function describeApiGroup(resource: string, routes: ApiRoute[]): string {
+function describeApiGroup(resource: string, routes: ApiRoute[], needsAuth: boolean): string {
   const lines = routes.map((r) => `${r.method} ${r.path} — ${r.purpose || 'route'}`);
   const tables = uniqueSorted(routes.flatMap((r) => [...r.dbReads, ...r.dbWrites]).map(normTable));
+  const authLine = needsAuth
+    ? `Each handler authenticates the user, derives company_id from the session (NEVER from the request body,\n` +
+      `Six Laws Law 2), validates input, and returns the response shape defined in BEHAVIORAL_CONTRACTS.md.`
+    : `Each handler validates input and returns the response shape defined in BEHAVIORAL_CONTRACTS.md (this` +
+      ` design has no auth layer per Auth Architecture — do NOT add a login/session/company_id check here).`;
   return withFooter(
     [
       `Implement the "${resource}" API route(s) as Next.js App Router route handlers (app/api/.../route.ts):`,
       ...lines.map((l) => `  - ${l}`),
-      `Each handler authenticates the user, derives company_id from the session (NEVER from the request body,`,
-      `Six Laws Law 2), validates input, and returns the response shape defined in BEHAVIORAL_CONTRACTS.md.`,
+      authLine,
       tables.length > 0 ? `Reads/writes only the real tables: ${tables.join(', ')} (no mocks — Iron Law 8).` : '',
       `Return documented error responses; never leak secrets or stack traces.`,
     ]
@@ -621,11 +625,16 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
   // --- Stage: auth --------------------------------------------------------
   const authIds: string[] = [];
   const tenantTables = design.database.tables.filter((t) => t.tenantScoped).map((t) => t.name);
+  // `hasAuthLayer === false` is an EXPLICIT "no auth/login layer" architecture decision (the PRD
+  // declares no user accounts, no login, no in-app auth of any kind) and overrides every other
+  // signal below — a non-empty `roles`/`flows` array alone is NOT proof a login system is needed
+  // (e.g. a single implicit role identified by network reachability, not a credential check).
   const needsAuth =
-    design.auth.roles.length > 0 ||
-    design.auth.flows.length > 0 ||
-    tenantTables.length > 0 ||
-    design.api.routes.some((r) => r.authRequired);
+    design.auth.hasAuthLayer !== false &&
+    (design.auth.roles.length > 0 ||
+      design.auth.flows.length > 0 ||
+      tenantTables.length > 0 ||
+      design.api.routes.some((r) => r.authRequired));
   if (needsAuth) {
     const id = uniqueId('auth-setup', used);
     authIds.push(id);
@@ -681,7 +690,7 @@ export function buildQueueEntries(design: ArchitectureDesign, warnings: string[]
         behavioralSections: ['API Contracts'],
         interactionMaps: [],
       },
-      description: describeApiGroup(resource, routes),
+      description: describeApiGroup(resource, routes, needsAuth),
     });
   }
   assignParallelGroups(apiDrafts, 'api-routes');

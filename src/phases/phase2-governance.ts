@@ -259,12 +259,14 @@ function renderSystemOverview(design: ArchitectureDesign): string {
   return parts.join(' ');
 }
 
-function renderTechStack(fingerprint: StackFingerprint | undefined): string {
+function renderTechStack(design: ArchitectureDesign, fingerprint: StackFingerprint | undefined): string {
+  const hasDb = design.database.tables.length > 0;
+  const dbDefault = hasDb ? 'Supabase (PostgreSQL + Auth + RLS)' : 'None — the design has no tables (see PRD.md)';
   if (fingerprint) {
     const lines = [
       `- **Framework:** ${fingerprint.framework || 'Next.js 14'}`,
       `- **Language:** ${fingerprint.language || 'TypeScript (strict)'}`,
-      `- **Database:** ${fingerprint.database || 'Supabase (PostgreSQL + Auth + RLS)'}`,
+      `- **Database:** ${!hasDb ? dbDefault : fingerprint.database || dbDefault}`,
       `- **Deployment:** ${fingerprint.deployment || 'Vercel'}`,
       `- **Package Manager:** ${fingerprint.packageManager || 'pnpm'}`,
     ];
@@ -279,7 +281,7 @@ function renderTechStack(fingerprint: StackFingerprint | undefined): string {
   // FORGE default stack (TECH STACK â€” LOCKED, per CLAUDE.md).
   return [
     '- **Framework:** Next.js 14 (App Router), TypeScript strict mode',
-    '- **Database:** Supabase (PostgreSQL + Auth + RLS + Realtime)',
+    `- **Database:** ${hasDb ? 'Supabase (PostgreSQL + Auth + RLS + Realtime)' : dbDefault}`,
     '- **Hosting:** Vercel',
     '- **Package Manager:** pnpm',
     '- **Testing:** Playwright',
@@ -401,7 +403,7 @@ function renderBlueprint(
       : `${renderSystemOverview(design)}\n\n${crossProjectContext.trim()}`;
   return {
     SYSTEM_OVERVIEW: overview,
-    TECH_STACK: renderTechStack(fingerprint),
+    TECH_STACK: renderTechStack(design, fingerprint),
     ARCHITECTURE_OVERVIEW: renderArchitectureOverview(design),
     PROJECT_STRUCTURE: renderProjectStructure(design),
     ENVIRONMENT_VARIABLES: renderEnvironmentVariables(design),

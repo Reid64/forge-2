@@ -335,6 +335,17 @@ export interface AuthArchitecture {
   middleware: string;
   multiTenancy: string;
   permissionsModel: string;
+  /**
+   * Explicit "does this product have a login/authentication/authorization layer at all"
+   * decision. `false` means the PRD declares no user accounts, no login, and no in-app
+   * auth/authz — the Queue Generator (s4-p02) reads this to skip the `auth-setup` prompt
+   * entirely rather than inferring "no auth" from `roles`/`flows` happening to be empty
+   * (a role list can be non-empty — e.g. a single implicit "owner" role identified by
+   * network reachability — without there being any login/session/credential system).
+   * Defaults to `true` (the proven authenticated-SaaS pattern) when the artifact doesn't
+   * set it, matching the pre-existing behavior for designs generated before this field existed.
+   */
+  hasAuthLayer: boolean;
   markdown: string;
 }
 
@@ -848,6 +859,7 @@ function parseAuth(raw: Record<string, unknown>): AuthArchitecture {
     middleware: asString(raw['middleware']),
     multiTenancy: asString(raw['multiTenancy']),
     permissionsModel: asString(raw['permissionsModel']),
+    hasAuthLayer: asBool(raw['hasAuthLayer'], true),
     markdown: asString(raw['markdown']),
   };
 }
@@ -947,7 +959,15 @@ function fallbackInteractionMaps(reason: string): InteractionMapsArtifact {
   return { maps: [], markdown: fallbackMarkdown('Interaction Maps', reason) };
 }
 function fallbackAuth(reason: string): AuthArchitecture {
-  return { flows: [], roles: [], middleware: '', multiTenancy: '', permissionsModel: '', markdown: fallbackMarkdown('Auth Architecture', reason) };
+  return {
+    flows: [],
+    roles: [],
+    middleware: '',
+    multiTenancy: '',
+    permissionsModel: '',
+    hasAuthLayer: true,
+    markdown: fallbackMarkdown('Auth Architecture', reason),
+  };
 }
 function fallbackAgents(reason: string): AgentArchitecture {
   return { agents: [], orchestration: '', markdown: fallbackMarkdown('Agent Architecture', reason) };
@@ -1260,12 +1280,25 @@ function detectSingleTenantDeclaration(prd: string): boolean {
   );
 }
 
+/**
+ * Detect an EXPLICIT no-auth declaration in the PRD (mirrors {@link detectSingleTenantDeclaration},
+ * Session 5 finding #9): a product that says outright it has no login/account/auth layer must not
+ * be scaffolded one anyway (the concrete bug this closes: a Queue Generator `auth-setup` prompt
+ * inventing a `/login` redirect and session-derived `company_id` for a PRD that forbids both).
+ * Deliberately narrow — requires an explicit "no X" phrase, not merely the ABSENCE of an auth
+ * mention (silence still defaults to the proven authenticated-SaaS pattern).
+ */
+function detectNoAuthDeclaration(prd: string): boolean {
+  return /\bno\s+(user\s+)?(accounts?|logins?|passwords?|authentication|authorization|auth)\b/i.test(prd);
+}
+
 /** The shared system-prompt preamble + the per-artifact schema + rules. */
 function buildSystemPrompt(
   projectName: string,
   constrained: boolean,
   artifactSchema: string,
-  singleTenant: boolean
+  singleTenant: boolean,
+  noAuthDeclared: boolean
 ): string {
   const lines: string[] = [
     'You are FORGE Phase 1B, the Architecture Engine inside an autonomous software factory.',
@@ -1293,6 +1326,14 @@ function buildSystemPrompt(
   } else {
     lines.push('- Enforce company/tenant-scoped data isolation on every multi-tenant table (Six Laws Law 1):');
     lines.push('  such tables carry a company_id (or tenant_id) column, RLS enabled, and a company-scoped policy.');
+  }
+  if (noAuthDeclared) {
+    lines.push('- The PRD EXPLICITLY declares this product has NO authentication/authorization layer (no user');
+    lines.push('  accounts, no login, no in-app auth of any kind). Do NOT invent a login flow, role, or auth');
+    lines.push('  middleware for the AuthArchitecture artifact — set "hasAuthLayer": false, leave "flows" and');
+    lines.push('  "roles" empty, and describe the real access-control boundary (if any) in "markdown" instead.');
+    lines.push('  Every other artifact must likewise omit auth-gated UI, an auth check on API routes, and any');
+    lines.push('  company_id-from-session derivation that this declaration rules out.');
   }
   lines.push('- Prefer the FORGE default stack: Next.js 14 (App Router) + Supabase (Postgres + Auth + RLS) +');
   lines.push('  Vercel, pnpm, TypeScript strict.');
@@ -1396,11 +1437,12 @@ const ARTIFACT_SCHEMAS: Record<ArtifactKind, { schema: string; instruction: stri
       '  "flows": [{ "name": string, "steps": string[] }],',
       '  "roles": [{ "name": string, "description": string, "permissions": string[] }],',
       '  "middleware": string, "multiTenancy": string, "permissionsModel": string,',
+      '  "hasAuthLayer": boolean,',
       '  "markdown": string',
       '}',
     ].join('\n'),
     instruction:
-      'Now produce the AuthArchitecture JSON object. The middleware MUST follow the FORGE rule: on ANY role-fetch failure, redirect to /login ONLY — never render a default or wrong-role page (Iron Law 4). Roles must match those referenced by the API routes above.',
+      'Now produce the AuthArchitecture JSON object. Set "hasAuthLayer" to true only when the product actually has a login/authentication/authorization layer (a session, JWT, cookie, or credential check) — set it to false when the PRD declares no user accounts, no login, and no in-app auth/authz of any kind. When "hasAuthLayer" is false, "flows" and "roles" MUST be empty arrays and "middleware" MUST be empty — describe the real access-control boundary (if any, e.g. a private network) in "markdown" instead, and do NOT invent a role, login flow, or middleware just to look thorough. When "hasAuthLayer" is true, the middleware MUST follow the FORGE rule: on ANY role-fetch failure, redirect to /login ONLY — never render a default or wrong-role page (Iron Law 4). Roles must match those referenced by the API routes above.',
   },
   agents: {
     schema: [
@@ -1681,7 +1723,7 @@ export function renderBlueprintMd(design: ArchitectureDesign): string {
     '| Layer | Technology |',
     '|-------|-----------|',
     '| Framework | Next.js 14 (App Router) |',
-    '| Database | Supabase (PostgreSQL + Auth + RLS) |',
+    `| Database | ${design.database.tables.length > 0 ? 'Supabase (PostgreSQL + Auth + RLS)' : 'None — the design has no tables (see PRD.md)'} |`,
     '| Hosting | Vercel |',
     '| Package Manager | pnpm |',
     '| Language | TypeScript (strict mode) |',
@@ -2185,6 +2227,11 @@ export async function runPhase1bArchitect(
   const singleTenant = detectSingleTenantDeclaration(prd);
   if (singleTenant) log('PRD explicitly declares single-tenant — Six Laws Law 1 scaffolding will be skipped');
 
+  // 0b-2. No-auth declaration (mirrors 0b): an explicit PRD statement skips auth/login scaffolding
+  // for every artifact generated below (see detectNoAuthDeclaration for the motivating bug).
+  const noAuthDeclared = detectNoAuthDeclaration(prd);
+  if (noAuthDeclared) log('PRD explicitly declares no auth/login layer — auth scaffolding will be skipped');
+
   // 0c. CrossProjectKnowledgeTransfer (LEARNING_BLUEPRINT.md § Agent: CrossProjectKnowledgeTransfer)
   // — PUSH stack-compatible, non-retired insights from prior builds into this build's prompt
   // assembly, as a pre-step ahead of Build Memory grounding below. Guarded: no stack fingerprint
@@ -2306,7 +2353,7 @@ export async function runPhase1bArchitect(
   const uiExtraContext = [designSystemBlock, brandBaselineBlock].filter((s) => s.trim() !== '').join('\n\n');
 
   const sys = (kind: ArtifactKind): string =>
-    buildSystemPrompt(projectName, constrained, ARTIFACT_SCHEMAS[kind].schema, singleTenant);
+    buildSystemPrompt(projectName, constrained, ARTIFACT_SCHEMAS[kind].schema, singleTenant, noAuthDeclared);
   const usr = (kind: ArtifactKind): string =>
     buildUserPrompt(
       baseContext,

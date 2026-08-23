@@ -361,6 +361,31 @@ interface DocSignal {
 }
 
 /**
+ * Negation markers that void a keyword match as a positive signal when they appear in the
+ * SAME sentence — e.g. "No database service: Explicitly no Supabase/Postgres or any DB" must
+ * NOT set `database: 'supabase'` just because the word "Supabase" appears. Without this, a
+ * PRD/BLUEPRINT that explicitly RULES OUT a technology reads as evidence FOR it (the bug this
+ * closes: a plain no-DB, no-auth Node project got fingerprinted as framework=nextjs,
+ * database=supabase purely from its own "explicitly forbids one" disclaimer text).
+ */
+const NEGATION_PATTERN =
+  /\b(no|not|none|never|without|zero|forbid\w*|exclud\w*|deviat\w*|non-|isn't|aren't|wasn't|weren't|won't|don't|doesn't|didn't)\b/;
+
+/** Split free text into rough sentences for negation-scoped keyword matching. */
+function toSentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+|\n+/).filter((s) => s.trim() !== '');
+}
+
+/**
+ * True when `pattern` matches in at least one sentence of `text` that carries NO negation
+ * marker — so a mention inside a "no X" / "explicitly forbids X" disclaimer never counts as a
+ * positive signal, while a plain, unnegated statement ("Framework: nextjs") still does.
+ */
+function affirmedSignal(text: string, pattern: RegExp): boolean {
+  return toSentences(text).some((s) => pattern.test(s) && !NEGATION_PATTERN.test(s));
+}
+
+/**
  * Read BLUEPRINT.md / PRD.md (if present, in the project root or a `governance/`
  * subdirectory) and emit a keyword-derived `DocSignal` to `apply`. These are the
  * weakest signals and only fill gaps the concrete config files left open.
@@ -386,17 +411,17 @@ async function applyDocSignals(
   const haystack = combined.toLowerCase();
   const signal: DocSignal = {};
 
-  if (/next\.?js/.test(haystack)) signal.framework = 'nextjs';
-  else if (/\bnode\.?js\b/.test(haystack)) signal.framework = 'node';
+  if (affirmedSignal(haystack, /next\.?js/)) signal.framework = 'nextjs';
+  else if (affirmedSignal(haystack, /\bnode\.?js\b/)) signal.framework = 'node';
 
-  if (/supabase/.test(haystack)) signal.database = 'supabase';
-  else if (/postgres/.test(haystack)) signal.database = 'postgres';
+  if (affirmedSignal(haystack, /supabase/)) signal.database = 'supabase';
+  else if (affirmedSignal(haystack, /postgres/)) signal.database = 'postgres';
 
-  if (/vercel/.test(haystack)) signal.deployment = 'vercel';
-  else if (/netlify/.test(haystack)) signal.deployment = 'netlify';
+  if (affirmedSignal(haystack, /vercel/)) signal.deployment = 'vercel';
+  else if (affirmedSignal(haystack, /netlify/)) signal.deployment = 'netlify';
 
-  if (/\bpnpm\b/.test(haystack)) signal.packageManager = 'pnpm';
-  else if (/\byarn\b/.test(haystack)) signal.packageManager = 'yarn';
+  if (affirmedSignal(haystack, /\bpnpm\b/)) signal.packageManager = 'pnpm';
+  else if (affirmedSignal(haystack, /\byarn\b/)) signal.packageManager = 'yarn';
 
   apply(signal);
 }
