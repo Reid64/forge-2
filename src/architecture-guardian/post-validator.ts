@@ -159,8 +159,30 @@ function checkThinImplementation(filePath: string, content: string): OutputViola
 // ---------------------------------------------------------------------------
 
 interface StubMarker {
-  regex: RegExp;
+  test: (line: string) => boolean;
   label: string;
+}
+
+/** Wraps a plain regex into a `StubMarker.test` — the common case where no context-awareness is needed. */
+function regexMarker(regex: RegExp, label: string): StubMarker {
+  return { test: (line) => regex.test(line), label };
+}
+
+/**
+ * The bare word "placeholder" is also legitimate, non-stub web platform syntax: the CSS
+ * `::placeholder` pseudo-element (e.g. `input::placeholder { color: #999; }`) and the HTML/JSX
+ * `placeholder="..."` / `placeholder={...}` attribute on form inputs. Neither signals unfinished
+ * work. This strips both known-legitimate forms out of the line first, then checks whether the
+ * word "placeholder" still appears — i.e. it was used as English prose about incomplete work
+ * ("// placeholder for actual implementation", "TODO: replace this placeholder"), not as CSS
+ * selector syntax or an HTML attribute name.
+ */
+function hasStubPlaceholderMention(line: string): boolean {
+  if (!/\bplaceholder\b/i.test(line)) return false;
+  const stripped = line
+    .replace(/::placeholder\b/gi, '')
+    .replace(/\bplaceholder\s*=\s*("[^"]*"|'[^']*'|\{[^}]*\})?/gi, '');
+  return /\bplaceholder\b/i.test(stripped);
 }
 
 /**
@@ -169,13 +191,13 @@ interface StubMarker {
  * an `any`-typed escape hatch is a placeholder for real typing, not a finished implementation.
  */
 const STUB_MARKERS: StubMarker[] = [
-  { regex: /\bTODO\b/, label: 'TODO marker' },
-  { regex: /\bFIXME\b/, label: 'FIXME marker' },
-  { regex: /\bHACK\b/, label: 'HACK marker' },
-  { regex: /\bplaceholder\b/i, label: 'placeholder marker' },
-  { regex: /\bstub\b/i, label: 'stub marker' },
-  { regex: /:\s*any\b/, label: 'any-type annotation' },
-  { regex: /\bas\s+any\b/, label: 'as any cast' },
+  regexMarker(/\bTODO\b/, 'TODO marker'),
+  regexMarker(/\bFIXME\b/, 'FIXME marker'),
+  regexMarker(/\bHACK\b/, 'HACK marker'),
+  { test: hasStubPlaceholderMention, label: 'placeholder marker' },
+  regexMarker(/\bstub\b/i, 'stub marker'),
+  regexMarker(/:\s*any\b/, 'any-type annotation'),
+  regexMarker(/\bas\s+any\b/, 'as any cast'),
 ];
 
 function checkStubMarkers(filePath: string, content: string): OutputViolation[] {
@@ -188,7 +210,7 @@ function checkStubMarkers(filePath: string, content: string): OutputViolation[] 
     const lineNumber = i + 1;
 
     for (const marker of STUB_MARKERS) {
-      if (!marker.regex.test(rawLine)) continue;
+      if (!marker.test(rawLine)) continue;
       violations.push({
         filePath,
         violationType: VIOLATION_TYPE.STUB_OR_PLACEHOLDER,
