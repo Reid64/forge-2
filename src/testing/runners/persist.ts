@@ -48,7 +48,14 @@ const MAX_FAILURE_SUMMARY = 20;
  *  MUTATION (Stryker Mutator — schema 3.6.0) is its own dedicated TestSuiteDb value, back to the
  *  IAC/SBOM/LICENSE-style reasoning: mutation findings are not folded into STATIC_ANALYSIS or UNIT
  *  because both are required starting at much lower readiness tiers, and a dedicated value is what
- *  lets `readiness-levels.ts` withhold it until MILESTONE/ENTERPRISE_RELEASE specifically. */
+ *  lets `readiness-levels.ts` withhold it until MILESTONE/ENTERPRISE_RELEASE specifically.
+ *
+ *  CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE (chaos-runner.ts/recovery-runner.ts/
+ *  backup-restore-runner.ts) map 1:1 to their own, already-existing TestSuiteDb values (present in
+ *  the CHECK constraint since before schema 3.4.0 — no new migration needed) — one-to-one rather
+ *  than a shared category, matching MUTATION's reasoning: each is gated to ENTERPRISE_RELEASE ONLY
+ *  in the RunnerType doc comments above, and a dedicated value is what keeps that withholding
+ *  expressible. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -73,6 +80,9 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.PYTHON_PROPERTY]: 'PROPERTY_BASED',
   [RunnerType.FASTCHECK]: 'PROPERTY_BASED',
   [RunnerType.MUTATION]: 'MUTATION',
+  [RunnerType.CHAOS]: 'CHAOS',
+  [RunnerType.DISASTER_RECOVERY]: 'DISASTER_RECOVERY',
+  [RunnerType.BACKUP_RESTORE]: 'BACKUP_RESTORE',
 };
 
 const ANSI_RESET = '\x1b[0m';

@@ -48,6 +48,20 @@ export enum RunnerType {
    *  (PRE-DEPLOYMENT) tier too, unlike IAC/SBOM/LICENSE's cumulative introduction, because mutation
    *  testing is far slower/more expensive than any other suite and must run as rarely as possible. */
   MUTATION = 'MUTATION',
+  /** Chaos engineering — latency injection + malformed-request injection against a live preview
+   *  URL (chaos-runner.ts's own throwaway dev server, reusing phase4-sentinel.ts's dev-server-spawn
+   *  convention). Gated to ENTERPRISE_RELEASE (MISSION_CRITICAL/HYPERSCALE) ONLY
+   *  (`src/governance/readiness-levels.ts`), same top-of-the-ladder placement as MUTATION's
+   *  ENTERPRISE_RELEASE half — never at MILESTONE or PRE-DEPLOYMENT. */
+  CHAOS = 'CHAOS',
+  /** Disaster-recovery readiness — health-check endpoint presence + correctness
+   *  (recovery-runner.ts). A presence/correctness check, never an actual DR drill. Same
+   *  ENTERPRISE_RELEASE-ONLY gate as CHAOS above. */
+  DISASTER_RECOVERY = 'DISASTER_RECOVERY',
+  /** Backup/restore governance-doc policy-presence gate (backup-restore-runner.ts) — verifies the
+   *  project has documented a backup/restore policy; never performs an actual backup or restore.
+   *  Same ENTERPRISE_RELEASE-ONLY gate as CHAOS/DISASTER_RECOVERY above. */
+  BACKUP_RESTORE = 'BACKUP_RESTORE',
 }
 
 export interface TestRunResult {
