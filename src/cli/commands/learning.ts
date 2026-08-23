@@ -325,7 +325,7 @@ export function registerLearningCommands(program: Command): void {
   learn
     .command('promote')
     .description('Auto-promote high-confidence pending evolutions and run rollback monitoring (EvolutionPromoter)')
-    .action(() => {
+    .action(async () => {
       try {
         const dbPath = getForgeDbPath();
         if (!existsSync(dbPath)) {
@@ -333,7 +333,7 @@ export function registerLearningCommands(program: Command): void {
           return;
         }
         const db = getConnection(dbPath);
-        const results = promoteEligible(db);
+        const results = await promoteEligible(db, { log: (m) => console.log(chalk.dim(`  ${m}`)) });
 
         console.log(chalk.bold('\n🚀 EvolutionPromoter\n'));
         if (results.length === 0) {

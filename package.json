@@ -14,7 +14,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "forge": "node dist/cli/index.js",
-    "test": "node --import tsx --test tests/learning-database.test.ts tests/learning-fingerprint.test.ts tests/learning-queries.test.ts tests/learning-sync.test.ts",
+    "test": "node --import tsx --test tests/learning-database.test.ts tests/learning-fingerprint.test.ts tests/learning-queries.test.ts tests/learning-sync.test.ts tests/evolution-promoter.test.ts",
     "test:memory": "node --import tsx --test tests/memory.test.ts",
     "web:dev": "next dev",
     "web:build": "next build",

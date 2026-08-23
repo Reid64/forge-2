@@ -885,7 +885,7 @@ export async function runPhase5Learner(
     try {
       const memoryClient = BuildMemory.getClient();
       if (memoryClient) {
-        evolutionPromotions = registerPromoterPhase5Hook(memoryClient);
+        evolutionPromotions = await registerPromoterPhase5Hook(memoryClient);
       } else {
         warnings.push('EvolutionPromoter skipped — Build Memory unreachable (stateless, Contract 4).');
       }

@@ -19,6 +19,7 @@
 
 import { newId, nowIso, logMemoryWarning, type MemoryDb } from '../memory/client.js';
 import { getMachineId } from './database.js';
+import { runShadowComparison, type ShadowComparisonResult } from './shadow-mode.js';
 import type { PendingEvolution } from './types.js';
 
 /** Confidence bar a `pending_evolutions` row must clear to auto-promote (Learning Iron Law L1/L2). */
@@ -397,15 +398,34 @@ function checkMonitoringWindows(db: MemoryDb): void {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+/** Injectable collaborators for {@link promoteEligible} — defaults are the real implementations; tests inject cheap fakes (mirrors `xImpl` DI style used across `src/phases/phase3-executor.ts` / `benchmarks/benchmark-runner.ts`). */
+export interface PromoteEligibleOptions {
+  /** Progress/decision reporter. Default: no-op. */
+  log?: (message: string) => void;
+  /** Stand-in for {@link runShadowComparison}. Default: the real shadow-mode benchmark comparison. */
+  runShadowComparisonImpl?: typeof runShadowComparison;
+}
+
 /**
  * Run monitoring-window bookkeeping for already-promoted evolutions, then auto-promote every
  * `pending_evolutions` row with `confidence >= {@link PROMOTION_THRESHOLD}`,
- * `evolution_type != 'GATE'`, and `status = 'PENDING'`. For each newly-promoted row: writes the
- * `evolution_promotions` audit row BEFORE applying its activation (L3), applies the activation,
- * then flips the row to `APPROVED`. Never throws (Contract 4) — degrades to `[]` on failure.
+ * `evolution_type != 'GATE'`, and `status = 'PENDING'` — PROVIDED it also clears the shadow-mode
+ * gate: {@link runShadowComparison} must report the candidate strategy as the strict winner
+ * against the existing strategy on the Task 16 benchmark suite (`upgrades/ENGINEERING_COMPLETENESS.md`
+ * §33/§34 — "require proof before I improved myself"; see `src/learning/shadow-mode.ts`'s module
+ * doc for the exact strict-outperformance definition). A row that clears the confidence bar but
+ * fails the shadow-mode gate is left `PENDING` — untouched, no audit row written, no activation
+ * applied — so it remains eligible for a future auto-promotion attempt (if a later benchmark run
+ * proves it out) or a human `forge agent approve` (Learning Iron Law L2, unaffected by this gate).
+ * For each newly-promoted row: writes the `evolution_promotions` audit row BEFORE applying its
+ * activation (L3), applies the activation, then flips the row to `APPROVED`. Never throws
+ * (Contract 4) — degrades to `[]` on failure.
  */
-export function promoteEligible(db: MemoryDb): PromotionResult[] {
+export async function promoteEligible(db: MemoryDb, options: PromoteEligibleOptions = {}): Promise<PromotionResult[]> {
   checkMonitoringWindows(db);
+
+  const log = options.log ?? (() => {});
+  const runShadow = options.runShadowComparisonImpl ?? runShadowComparison;
 
   const results: PromotionResult[] = [];
   try {
@@ -422,6 +442,25 @@ export function promoteEligible(db: MemoryDb): PromotionResult[] {
 
     for (const pending of rows) {
       try {
+        // NEW PRECONDITION (shadow mode): even a row that cleared the confidence bar may not
+        // auto-promote unless it also proves out as the strict winner on the benchmark suite.
+        let shadowResult: ShadowComparisonResult;
+        try {
+          shadowResult = await runShadow(
+            { pendingEvolutionId: pending.id, evolutionType: pending.evolution_type, changeDetail: pending.change_detail },
+            { log }
+          );
+        } catch (err) {
+          logMemoryWarning('evolution-promoter.promoteEligible:shadow-mode', err);
+          continue; // A broken shadow-mode check blocks promotion — it never waves one through.
+        }
+        if (!shadowResult.outperforms) {
+          log(
+            `EvolutionPromoter: pending_evolution ${pending.id} cleared confidence (${pending.confidence}) but was blocked by shadow-mode — ${shadowResult.reason}`
+          );
+          continue;
+        }
+
         const promotionId = newId();
         const promotedAt = nowIso();
         const prePromotionSuccessRate = recentSuccessRate(db);
@@ -484,9 +523,9 @@ export function promoteEligible(db: MemoryDb): PromotionResult[] {
  * Step 10"). Runs {@link promoteEligible} under the same NON-FATAL house style as every other
  * Phase 5 step: a promotion failure degrades to an empty result, never halts the build.
  */
-export function registerPromoterPhase5Hook(db: MemoryDb): PromotionResult[] {
+export async function registerPromoterPhase5Hook(db: MemoryDb): Promise<PromotionResult[]> {
   try {
-    return promoteEligible(db);
+    return await promoteEligible(db);
   } catch (err) {
     logMemoryWarning('evolution-promoter.registerPromoterPhase5Hook', err);
     return [];
