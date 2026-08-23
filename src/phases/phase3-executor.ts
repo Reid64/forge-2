@@ -189,6 +189,7 @@ import {
   type DeadLoopVerdict,
 } from '../governance/dead-loop-detection.js';
 import { detectStagnation, type StagnationVerdict } from '../governance/stagnation-detection.js';
+import { checkPermissions } from '../governance/permission-enforcer.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -815,6 +816,58 @@ function forceFailOnMissingGateFiles(
     passed: false,
     checks: [...sentinel.checks, check],
     failedCheck: 'file_exists',
+    diagnosticReport: `${note}\n\n${sentinel.diagnosticReport}`,
+  };
+}
+
+/**
+ * AGENT CONTRACTS enforcement (`src/governance/agent-contracts.ts` + `permission-enforcer.ts`):
+ * checks every file the Build Agent's feature branch actually created/modified/deleted this
+ * attempt against its registered `AgentContract` (write-scope: anywhere under the project root
+ * EXCEPT the governance docs `DEFAULT_SHARED_CANONICAL_GLOBS` reserves for other subsystems).
+ * This is a STATIC, post-hoc comparison (declared patterns vs. the real committed diff), not
+ * process sandboxing â€” nothing here can stop the claude subprocess from writing a file (Contract
+ * 5 runs it with `--dangerously-skip-permissions`); what it CAN do is deny the violation the same
+ * way every other force-fail check in this file does: by making Sentinel read as failed, which
+ * blocks the merge to main and routes the prompt into Autonomous Recovery / a halt instead of
+ * silently accepting an out-of-contract write. A no-op when Sentinel already failed for its own
+ * reason (mirrors {@link forceFailOnMissingGateFiles}) â€” but the violation is still logged either
+ * way, by `checkPermission` itself, so it is never silently swallowed.
+ */
+function forceFailOnPermissionViolation(
+  sentinel: SentinelResult,
+  entry: QueueEntry,
+  changed: { created: string[]; modified: string[]; deleted: string[] },
+  projectPath: string,
+  log: (message: string) => void,
+  index: number
+): SentinelResult {
+  const touched = [...changed.created, ...changed.modified, ...changed.deleted];
+  if (touched.length === 0) return sentinel;
+
+  const violations = checkPermissions('build-agent', touched, projectPath);
+  if (violations.length === 0) return sentinel;
+
+  const note =
+    `Build Agent AgentContract violation(s) â€” ${violations.length} write(s) outside its contracted ` +
+    `path patterns: ${violations.map((v) => `${v.normalizedPath} (${v.reason})`).join('; ')}.`;
+  log(`prompt ${index} '${entry.id}': ${note}`);
+
+  if (!sentinel.passed) return sentinel;
+
+  const check: CheckResult = {
+    name: 'agent_permission',
+    passed: false,
+    skipped: false,
+    detail: note,
+    output: '',
+    durationMs: 0,
+  };
+  return {
+    ...sentinel,
+    passed: false,
+    checks: [...sentinel.checks, check],
+    failedCheck: 'agent_permission',
     diagnosticReport: `${note}\n\n${sentinel.diagnosticReport}`,
   };
 }
@@ -3136,6 +3189,11 @@ async function executePrompt(
           `${sentinel.passed ? 'succeeded â€” Sentinel green' : `still failing (${retryRun.timedOut ? 'timed out again' : sentinel.failedCheck ?? 'unknown'})`}.`
       );
     }
+
+    // AGENT CONTRACTS: checked against the FINAL accumulated diff for this attempt (covers the
+    // timeout-retry commit above too, when it ran) â€” see forceFailOnPermissionViolation's doc
+    // comment for what this does and does not enforce.
+    sentinel = forceFailOnPermissionViolation(sentinel, entry, filesChanged(ctx), ctx.projectPath, log, index);
 
     await ctx.liveStatus.promptPhase({ index, id: entry.id, name: entry.name, type: entry.prompt_type, phase: 'sentinel' });
     await ctx.liveStatus.sentinelResult({ passed: sentinel.passed, failedCheck: sentinel.failedCheck });
