@@ -14,6 +14,13 @@ const TEST_COVERAGE_SNAPSHOTS_TABLE = 'test_coverage_snapshots';
 
 export type TestRunTrigger = 'POST_PROMPT' | 'SCHEDULED' | 'MANUAL' | 'PRE_DEPLOY' | 'CI';
 
+/** 22-value CHECK-constrained enum (`src/learning/database.ts` › `test_run_results.test_suite`
+ *  CHECK clause — must match this union EXACTLY, both edited together). IAC/SBOM/LICENSE (schema
+ *  3.4.0) were added as new values rather than folding into STATIC_ANALYSIS/DEPENDENCY_SCAN
+ *  specifically so `src/governance/readiness-levels.ts` can gate them to the MILESTONE
+ *  (ENTERPRISE_READY) and PRE-DEPLOYMENT (ENTERPRISE_GRADE) readiness tiers only — reusing an
+ *  existing value already required starting at a lower tier (STATIC_ANALYSIS at tier 3,
+ *  DEPENDENCY_SCAN at tier 4) would have made that tier-gating impossible to express. */
 export type TestSuiteDb =
   | 'UNIT'
   | 'INTEGRATION'
@@ -33,7 +40,10 @@ export type TestSuiteDb =
   | 'STATIC_ANALYSIS'
   | 'DYNAMIC_ANALYSIS'
   | 'CROSS_BROWSER'
-  | 'CROSS_DEVICE';
+  | 'CROSS_DEVICE'
+  | 'IAC'
+  | 'SBOM'
+  | 'LICENSE';
 
 export type TestRunStatus = 'running' | 'passed' | 'failed' | 'partial' | 'skipped' | 'error';
 

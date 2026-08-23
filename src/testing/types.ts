@@ -26,6 +26,13 @@ export enum RunnerType {
   SEMGREP = 'SEMGREP',
   OWASP_ZAP = 'OWASP_ZAP',
   SCHEMATHESIS = 'SCHEMATHESIS',
+  /** Infrastructure-as-Code security scan (checkov) — gated to MILESTONE/PRE-DEPLOYMENT tiers
+   *  only (`src/governance/readiness-levels.ts`), never run on every prompt. */
+  IAC = 'IAC',
+  /** Software Bill of Materials (trivy fs --format cyclonedx) — same MILESTONE/PRE-DEPLOYMENT gate. */
+  SBOM = 'SBOM',
+  /** Dependency license compliance (trivy fs --scanners license) — same MILESTONE/PRE-DEPLOYMENT gate. */
+  LICENSE = 'LICENSE',
 }
 
 export interface TestRunResult {

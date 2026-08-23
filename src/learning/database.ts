@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '3.3.0';
+export const CURRENT_SCHEMA_VERSION = '3.4.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -440,7 +440,7 @@ const SYSTEMS_1_3_SCHEMA_SQL = `
       build_run_id          TEXT,
       project_name          TEXT NOT NULL,
       trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
-      test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE')),
+      test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE')),
       runner                TEXT NOT NULL DEFAULT 'vitest',
       status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
       prompt_index          INTEGER,
@@ -1280,6 +1280,49 @@ export function initializeForgeMemory(dbPath?: string): void {
     db.exec('DROP TABLE IF EXISTS artifact_health_scores');
     db.exec('DROP TABLE IF EXISTS gap_audit_runs');
   }
+  // 3.3.0 -> 3.4.0 (IaC/SBOM/License runners): test_run_results.test_suite's CHECK constraint
+  // gains 'IAC','SBOM','LICENSE'. Unlike the ALTER TABLE ADD COLUMN cases above (safe against a
+  // live db with data), SQLite has no ALTER TABLE ... MODIFY CHECK — a CHECK constraint can only
+  // be changed by rebuilding the table. test_run_results is NOT a draft/runtime-only table like
+  // gap_audit_runs above (it has held real data since schema 2.3.0), so a drop-and-recreate would
+  // be a data-loss bug — instead: detect the old-shape table by checking sqlite_master.sql for the
+  // new 'IAC' literal; if absent, create a same-column table under the new CHECK, copy every row
+  // across unchanged (every existing test_suite value is a strict subset of the new 22-value set,
+  // so every row already satisfies the new CHECK), drop the old table, and rename. No data is
+  // lost. A freshly-created db never enters this branch — SYSTEMS_1_3_SCHEMA_SQL's own
+  // `CREATE TABLE IF NOT EXISTS` immediately below already carries the updated CHECK.
+  const testRunResultsRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'test_run_results'")
+    .get() as { sql: string } | undefined;
+  if (testRunResultsRow && !testRunResultsRow.sql.includes("'IAC'")) {
+    db.exec(`
+      CREATE TABLE test_run_results__migrating_3_4_0 (
+        id                    TEXT PRIMARY KEY,
+        build_run_id          TEXT,
+        project_name          TEXT NOT NULL,
+        trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
+        test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE')),
+        runner                TEXT NOT NULL DEFAULT 'vitest',
+        status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
+        prompt_index          INTEGER,
+        tests_total           INTEGER NOT NULL DEFAULT 0,
+        tests_passed          INTEGER NOT NULL DEFAULT 0,
+        tests_failed          INTEGER NOT NULL DEFAULT 0,
+        tests_skipped         INTEGER NOT NULL DEFAULT 0,
+        duration_ms           INTEGER NOT NULL DEFAULT 0,
+        failure_summary       TEXT,
+        report_path           TEXT,
+        exit_code             INTEGER,
+        started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at          TEXT,
+        machine_id            TEXT NOT NULL,
+        created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO test_run_results__migrating_3_4_0 SELECT * FROM test_run_results;
+      DROP TABLE test_run_results;
+      ALTER TABLE test_run_results__migrating_3_4_0 RENAME TO test_run_results;
+    `);
+  }
   db.exec(SYSTEMS_1_3_SCHEMA_SQL);
   // 2.3.0 -> 2.5.0 (System 5 — Sentinel Prime — and the Orchestrator): sentinel_prime_runs,
   // validation_events, orchestrator_manifests, orchestrator_queue_runs.
@@ -1308,6 +1351,9 @@ export function initializeForgeMemory(dbPath?: string): void {
   // 3.2.0 -> 3.3.0 (Design Intelligence): app_design_profiles, design_router_decisions,
   // design_preferences, design_tournament_runs, design_tournament_variants.
   db.exec(DESIGN_INTELLIGENCE_SCHEMA_SQL);
+  // 3.3.0 -> 3.4.0 (IaC/SBOM/License runners): test_run_results.test_suite CHECK gains
+  // 'IAC','SBOM','LICENSE' — see the table-rebuild migration above (CHECK constraints can't be
+  // ALTERed in SQLite) and SYSTEMS_1_3_SCHEMA_SQL's CREATE TABLE just below for the new CHECK.
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

@@ -31,7 +31,14 @@ const MAX_FAILURE_SUMMARY = 20;
  *  OWASP_ZAP, SCHEMATHESIS) map to the closest existing category — SEMGREP (SAST) and
  *  MIGRATION_SAFETY share STATIC_ANALYSIS, OWASP_ZAP (DAST) shares DYNAMIC_ANALYSIS with SEO, and
  *  SCHEMATHESIS (API contract testing) shares API with the hand-written API runner — no new enum
- *  values were added, only the existing 19-value CHECK constraint is used. */
+ *  values were added, only the existing 19-value CHECK constraint is used.
+ *
+ *  IAC/SBOM/LICENSE (added in schema 3.4.0 for iac-runner.ts/sbom-runner.ts/license-runner.ts) ARE
+ *  new, dedicated TestSuiteDb values — unlike the reuses above, checkov/SBOM/license findings are
+ *  deliberately NOT folded into STATIC_ANALYSIS or DEPENDENCY_SCAN, because those two categories
+ *  are already required starting at a lower readiness tier (PRODUCTION_READY_MVP / COMMERCIAL_SAAS
+ *  respectively); a dedicated value is what lets `readiness-levels.ts` withhold them until the
+ *  MILESTONE/PRE-DEPLOYMENT tiers instead. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -50,6 +57,9 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.SEMGREP]: 'STATIC_ANALYSIS',
   [RunnerType.OWASP_ZAP]: 'DYNAMIC_ANALYSIS',
   [RunnerType.SCHEMATHESIS]: 'API',
+  [RunnerType.IAC]: 'IAC',
+  [RunnerType.SBOM]: 'SBOM',
+  [RunnerType.LICENSE]: 'LICENSE',
 };
 
 const ANSI_RESET = '\x1b[0m';

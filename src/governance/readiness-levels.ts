@@ -12,10 +12,15 @@
  *    (`src/resurrection/types.ts` › `ARTIFACT_NAMES`), the real 9-value set System 1 (GapAuditor)
  *    already scores — not a fabricated artifact list.
  *  - `requiredTestSuites` values are drawn exclusively from `TestSuiteDb`
- *    (`src/memory/test-results.ts`), the real 19-value CHECK-constrained enum `test_run_results`
+ *    (`src/memory/test-results.ts`), the real 22-value CHECK-constrained enum `test_run_results`
  *    is persisted against, and are ordered to match the progressive-gate escalation described in
  *    `upgrades/QA_TESTING_FRAMEWORK.md` § "progressive gates" (PROMPT COMPLETION → FEATURE
  *    COMPLETION → QUEUE YAML COMPLETION → MILESTONE → PRE-DEPLOYMENT → ENTERPRISE RELEASE).
+ *    IAC/SBOM/LICENSE (checkov/trivy-cyclonedx/trivy-license — schema 3.4.0) are deliberately
+ *    introduced starting at ENTERPRISE_READY (the MILESTONE gate) rather than at whatever tier
+ *    STATIC_ANALYSIS/DEPENDENCY_SCAN first appear: they are their own TestSuiteDb values
+ *    specifically so they can be withheld until MILESTONE/PRE-DEPLOYMENT instead of being pulled
+ *    forward to a lower tier by an existing, already-required category.
  *  - `requiredSecurityObservabilityItems` are free-text labels drawn verbatim from
  *    CAPABILITIES_MEMO.md's own enumerated Enterprise-Grade requirement list (lines ~933-997) —
  *    no item below was invented outside that list.
@@ -82,7 +87,7 @@ const ALL_ARTIFACTS: ArtifactName[] = [
   'TESTING',
 ];
 
-/** All 19 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
+/** All 22 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
 const ALL_TEST_SUITES: TestSuiteDb[] = [
   'UNIT',
   'INTEGRATION',
@@ -103,6 +108,9 @@ const ALL_TEST_SUITES: TestSuiteDb[] = [
   'SOAK',
   'DISASTER_RECOVERY',
   'CHAOS',
+  'IAC',
+  'SBOM',
+  'LICENSE',
 ];
 
 /**
@@ -274,6 +282,9 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'PERFORMANCE',
       'CROSS_BROWSER',
       'CROSS_DEVICE',
+      'IAC',
+      'SBOM',
+      'LICENSE',
     ],
     requiredSecurityObservabilityItems: [
       'code review',
@@ -294,7 +305,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'monitoring',
       'observability',
     ],
-    source: `${CAPABILITIES_MEMO_SOURCE}, tier 6 — "6. ENTERPRISE-READY"; ${QA_FRAMEWORK_SOURCE} "MILESTONE"`,
+    source: `${CAPABILITIES_MEMO_SOURCE}, tier 6 — "6. ENTERPRISE-READY"; ${QA_FRAMEWORK_SOURCE} "MILESTONE" (also introduces IAC/SBOM/LICENSE, gated to start here)`,
   },
   {
     id: 'ENTERPRISE_GRADE',
@@ -320,6 +331,9 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'CROSS_DEVICE',
       'LOAD',
       'BACKUP_RESTORE',
+      'IAC',
+      'SBOM',
+      'LICENSE',
     ],
     requiredSecurityObservabilityItems: ENTERPRISE_GRADE_CHECKLIST,
     source: `${CAPABILITIES_MEMO_SOURCE}, tier 7 — "7. ENTERPRISE-GRADE" (full checklist, lines ~933-997); ${QA_FRAMEWORK_SOURCE} "PRE-DEPLOYMENT"`,
