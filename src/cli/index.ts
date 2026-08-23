@@ -38,9 +38,12 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, statfsSync } from 'node:fs';
-import { join, basename, resolve } from 'node:path';
+import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, statfsSync, unlinkSync } from 'node:fs';
+import { join, basename, resolve, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -2104,6 +2107,136 @@ async function cmdEstimate(pathArg: string, opts: { idea?: string; prd?: string 
 }
 
 // ---------------------------------------------------------------------------
+// `forge benchmark` — the FORGE self-benchmark suite (`benchmarks/benchmark-runner.ts`)
+// ---------------------------------------------------------------------------
+
+/** Mirrors `benchmarks/benchmark-runner.ts`'s `BenchmarkScenarioResult` (JSON contract, not a shared import — see below). */
+interface BenchmarkScenarioResultShape {
+  scenarioId: string;
+  name: string;
+  status: string;
+  totalPrompts: number;
+  completedPrompts: number;
+  failedPrompts: number;
+  skippedPrompts: number;
+  completionRate: number;
+  defectCount: number;
+  defectRate: number;
+  costUsd: number;
+  latencyMs: number;
+  warnings: string[];
+  error: string | null;
+}
+
+/** Mirrors `benchmarks/benchmark-runner.ts`'s `BenchmarkSuiteResult`. */
+interface BenchmarkSuiteResultShape {
+  generatedAt: string;
+  scenarios: BenchmarkScenarioResultShape[];
+  totals: {
+    scenarioCount: number;
+    meanCompletionRate: number;
+    meanDefectRate: number;
+    totalCostUsd: number;
+    totalLatencyMs: number;
+  };
+}
+
+/** Colorize a benchmark scenario's status the same way `statusChip` colors build/prompt status. */
+function benchmarkStatusChip(status: string): string {
+  if (status === 'completed') return chalk.green(status.padEnd(9));
+  if (status === 'halted' || status === 'failed' || status === 'error') return chalk.red(status.padEnd(9));
+  if (status === 'dry_run') return chalk.dim(status.padEnd(9));
+  return status.padEnd(9);
+}
+
+/**
+ * `forge benchmark` — runs the FIXED 5-scenario self-benchmark suite
+ * (`upgrades/ENGINEERING_COMPLETENESS.md` #32/#33) and prints a summary table.
+ *
+ * `benchmarks/benchmark-runner.ts` lives OUTSIDE `src/` on purpose (disposable fixtures +
+ * manifest belong beside it, not shipped in `dist/`) — `tsconfig.json`'s `rootDir` is `src/`, so
+ * statically importing it here would break `pnpm run build` (TS6059: file not under rootDir).
+ * Instead this spawns it as a child process — the exact command
+ * `node --import tsx benchmarks/benchmark-runner.ts` documented in that file's own module doc —
+ * writes its structured result to a temp JSON file, and renders the table from that, the same
+ * "spawn once, read the file back" shape `forge orchestrate`/`forge repair` already use for
+ * heavier sub-flows.
+ */
+async function cmdBenchmark(opts: { scenario?: string[] }): Promise<void> {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const runnerPath = join(repoRoot, 'benchmarks', 'benchmark-runner.ts');
+  if (!existsSync(runnerPath)) {
+    fail(`benchmark runner not found at ${runnerPath} — is benchmarks/ present in this checkout?`);
+    return;
+  }
+
+  const outFile = join(tmpdir(), `forge-benchmark-${randomUUID()}.json`);
+  const args = ['--import', 'tsx', runnerPath, '--out', outFile];
+  for (const id of opts.scenario ?? []) args.push('--scenario', id);
+
+  console.log(chalk.bold('\nRunning FORGE self-benchmark suite (5 fixed scenarios)...'));
+  console.log(chalk.dim('  This invokes a real Phase 3 build loop per scenario against disposable fixtures under'));
+  console.log(chalk.dim('  benchmarks/fixtures/ — see benchmarks/benchmark-runner.ts for exactly what is mocked.\n'));
+
+  const exitCode = await new Promise<number>((resolvePromise) => {
+    const child = spawn(process.execPath, args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderrTail = '';
+    child.stdout?.on('data', () => {}); // the child's own verbose build log is not the CLI's output; suppressed
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString('utf8')).slice(-4000);
+    });
+    child.on('error', (error) => {
+      stderrTail += `\n${error.message}`;
+      resolvePromise(1);
+    });
+    child.on('close', (code) => {
+      if (code !== 0 && stderrTail.trim()) console.error(chalk.dim(stderrTail.trim()));
+      resolvePromise(code ?? 1);
+    });
+  });
+
+  if (exitCode !== 0 || !existsSync(outFile)) {
+    fail(`benchmark suite did not complete cleanly (exit ${exitCode}).`);
+    return;
+  }
+
+  let suite: BenchmarkSuiteResultShape;
+  try {
+    suite = JSON.parse(await readFile(outFile, 'utf8')) as BenchmarkSuiteResultShape;
+  } catch (error) {
+    fail(`could not parse benchmark result JSON: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  } finally {
+    try {
+      unlinkSync(outFile);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  console.log(chalk.bold(`=== FORGE Benchmark Suite — ${suite.generatedAt} ===\n`));
+  console.log(
+    `  ${'scenario'.padEnd(24)} ${'status'.padEnd(9)} ${'completion'.padStart(10)}  ${'defects'.padStart(7)}  ${'cost'.padStart(9)}  ${'latency'.padStart(9)}`
+  );
+  for (const s of suite.scenarios) {
+    const completion = `${(s.completionRate * 100).toFixed(0)}%`.padStart(10);
+    const defects = String(s.defectCount).padStart(7);
+    const cost = `$${s.costUsd.toFixed(4)}`.padStart(9);
+    const latency = `${s.latencyMs}ms`.padStart(9);
+    console.log(`  ${s.scenarioId.padEnd(24)} ${benchmarkStatusChip(s.status)} ${completion}  ${defects}  ${cost}  ${latency}`);
+    if (s.error) console.log(chalk.red(`      error: ${s.error}`));
+    printWarnings(s.warnings);
+  }
+  console.log(
+    chalk.bold(`\n  ${suite.totals.scenarioCount} scenario(s)`) +
+      ` — mean completion ${chalk.cyan((suite.totals.meanCompletionRate * 100).toFixed(0) + '%')}` +
+      `, mean defect rate ${chalk.cyan((suite.totals.meanDefectRate * 100).toFixed(0) + '%')}` +
+      `, total cost ${chalk.cyan('$' + suite.totals.totalCostUsd.toFixed(4))}` +
+      `, total latency ${chalk.cyan(suite.totals.totalLatencyMs + 'ms')}\n`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // `forge schedule` — list / add / remove / trigger scheduled tasks
 // ---------------------------------------------------------------------------
 
@@ -3903,6 +4036,15 @@ async function main(): Promise<void> {
     .option('--idea <text>', 'raw product idea')
     .option('--prd <path>', 'use an existing PRD file instead of an idea')
     .action((pathArg: string, opts: { idea?: string; prd?: string }) => cmdEstimate(pathArg, opts));
+
+  program
+    .command('benchmark')
+    .description(
+      'Run the FORGE self-benchmark suite: 5 fixed scenarios (benchmarks/manifest.json) against disposable ' +
+        'fixtures, scored on completion rate, defect rate, cost, and latency (ENGINEERING_COMPLETENESS.md #32/#33)'
+    )
+    .option('--scenario <id>', 'restrict the run to one scenario id (repeatable)', (v, acc: string[]) => [...acc, v], [])
+    .action((opts: { scenario?: string[] }) => cmdBenchmark(opts));
 
   program
     .command('repair')

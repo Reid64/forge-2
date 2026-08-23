@@ -1,0 +1,8 @@
+{
+  "name": "benchmark-fixture-multi-tenant-check",
+  "private": true,
+  "version": "0.0.0",
+  "description": "FORGE benchmark fixture: a multi-tenant SaaS with a tenant-isolation leak in db.js.",
+  "type": "module",
+  "main": "src/db.js"
+}

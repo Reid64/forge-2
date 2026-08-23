@@ -1,0 +1,11 @@
+{
+  "name": "benchmark-fixture-simple-crud",
+  "private": true,
+  "version": "0.0.0",
+  "description": "FORGE benchmark fixture: a minimal, healthy CRUD API (baseline scenario).",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}

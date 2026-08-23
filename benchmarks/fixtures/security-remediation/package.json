@@ -1,0 +1,8 @@
+{
+  "name": "benchmark-fixture-security-remediation",
+  "private": true,
+  "version": "0.0.0",
+  "description": "FORGE benchmark fixture: a hardcoded secret + a SQL injection pattern.",
+  "type": "module",
+  "main": "src/api.js"
+}

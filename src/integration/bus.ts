@@ -242,12 +242,20 @@ export async function onSentinelFailure(
   projectPath: string
 ): Promise<void> {
   try {
+    // nonInteractive: true — Phase 3 is fully autonomous (BLUEPRINT "AUTONOMOUS OPERATION RULES":
+    // never wait for human approval mid-build, the same posture phase3-executor.ts's own Design
+    // Pipeline call enforces). This hook fires synchronously from inside executePrompt's Sentinel
+    // gate, so an omitted (default-interactive) `nonInteractive` here previously meant ANY gated
+    // (CRITICAL/low-score-MAJOR) gap this targeted audit found would open a real `readline`
+    // prompt and block the build indefinitely on a non-TTY/unattended run — every gap is deferred
+    // instead, matching `evaluateGates`'s own non-interactive contract (never auto-approve).
     await runGapAudit({
       projectPath,
       scope: 'TARGETED',
       trigger: 'halt_recovery',
       haltRecovery: true,
       buildRunId,
+      nonInteractive: true,
     });
   } catch (error) {
     log(`targeted gap audit failed for '${failedCheck}' at prompt ${promptId}: ${errorMessage(error)}`);

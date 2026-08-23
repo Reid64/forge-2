@@ -1,0 +1,10 @@
+{
+  "name": "benchmark-fixture-legacy-resurrection",
+  "private": true,
+  "version": "0.0.1",
+  "description": "FORGE benchmark fixture: a small, stale/abandoned project (last touched 2019).",
+  "main": "src/legacy.js",
+  "dependencies": {
+    "request": "^2.88.0"
+  }
+}

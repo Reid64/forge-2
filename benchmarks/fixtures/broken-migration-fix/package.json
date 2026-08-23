@@ -1,0 +1,6 @@
+{
+  "name": "benchmark-fixture-broken-migration-fix",
+  "private": true,
+  "version": "0.0.0",
+  "description": "FORGE benchmark fixture: a Supabase migration that fails to apply."
+}

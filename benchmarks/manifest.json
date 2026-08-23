@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "description": "FORGE self-benchmark suite (ENGINEERING_COMPLETENESS.md #32/#33): a FIXED set of 5 scenarios every FORGE version runs against disposable fixture projects, scored on completion rate, defect rate, cost, and latency, so improvement claims require proof rather than being taken on faith.",
+  "scenarios": [
+    {
+      "id": "simple-crud",
+      "name": "Simple CRUD SaaS",
+      "description": "Baseline scenario: build a small, healthy CRUD API (a `tasks` resource) from scratch — schema, REST endpoints, tests. No injected defects; establishes the completion-rate floor every version must clear.",
+      "fixtureDir": "fixtures/simple-crud",
+      "queueFile": "queue.yaml",
+      "simulatedFailures": []
+    },
+    {
+      "id": "multi-tenant-check",
+      "name": "Multi-Tenant SaaS Isolation Check",
+      "description": "The fixture's src/db.js has a real tenant-isolation bug (getDocuments() never filters by tenant_id, leaking every tenant's rows to every other tenant). Tests whether FORGE finds and closes a cross-tenant data leak, not just whether it writes code.",
+      "fixtureDir": "fixtures/multi-tenant-check",
+      "queueFile": "queue.yaml",
+      "simulatedFailures": []
+    },
+    {
+      "id": "legacy-resurrection",
+      "name": "Legacy Resurrection",
+      "description": "A small, stale/abandoned project (untouched since 2019, pinned to the deprecated/archived `request` package, callback-style API, zero tests). Tests whether FORGE can safely modernize a codebase it did not write.",
+      "fixtureDir": "fixtures/legacy-resurrection",
+      "queueFile": "queue.yaml",
+      "simulatedFailures": []
+    },
+    {
+      "id": "broken-migration-fix",
+      "name": "Broken Database Migration Fix",
+      "description": "supabase/migrations/0001_init.sql is genuinely broken (a dangling foreign-key reference to a table that doesn't exist, plus a trailing-comma syntax error). Tests whether FORGE correctly diagnoses AND fixes a migration that fails to apply — the fix-migration prompt is scripted to fail Sentinel once on this fixture, modeling a first-pass fix that doesn't fully resolve the defect, so the suite's defect-rate metric has a real non-zero case to report.",
+      "fixtureDir": "fixtures/broken-migration-fix",
+      "queueFile": "queue.yaml",
+      "simulatedFailures": [
+        { "promptId": "fix-migration", "checkName": "schema-apply", "detail": "supabase/migrations/0001_init.sql still references users_v2(user_id), which does not exist." }
+      ]
+    },
+    {
+      "id": "security-remediation",
+      "name": "Security Remediation",
+      "description": "src/api.js contains two real, intentional vulnerability patterns: a hardcoded Stripe secret key and a SQL-injection-prone string-concatenated query. Tests whether FORGE both finds AND remediates security defects rather than just adding features around them — the remediate-secrets prompt is scripted to fail Sentinel once on this fixture (a security-scan catching a residual finding), giving the suite's defect-rate metric a real non-zero case to report.",
+      "fixtureDir": "fixtures/security-remediation",
+      "queueFile": "queue.yaml",
+      "simulatedFailures": [
+        { "promptId": "remediate-secrets", "checkName": "security-scan", "detail": "src/api.js still concatenates `email` directly into the SQL string in findUserByEmail()." }
+      ]
+    }
+  ]
+}
