@@ -98,13 +98,42 @@ export interface AgentContract {
 // ---------------------------------------------------------------------------
 
 /**
- * `STATE_OF_THE_BUILD.md`/`SESSION_STATE.md` are end-of-prompt housekeeping files every Phase 3
- * prompt type is instructed to update as a matter of course (queue.yaml prompt descriptions,
- * BLUEPRINT.md Canonical Rule 9) — unlike the rest of {@link DEFAULT_SHARED_CANONICAL_GLOBS}, they
- * are NOT another subsystem's exclusive territory, so the Build Agent must not be denied writing
- * them (both the project-root path and, where a project nests them under `governance/`, that path).
+ * End-of-prompt housekeeping files that land in the Build Agent's feature branch but are NOT
+ * actually written by the Build Agent subprocess — `forceFailOnPermissionViolation`
+ * (`phase3-executor.ts`) checks `filesChanged(ctx)` (the branch's cumulative committed diff
+ * against main, `GitManager.getBranchDiff`) against the `'build-agent'` contract with no way to
+ * attribute an individual touched path to the subsystem that actually wrote it. Two distinct
+ * things land here as a result, both of which must be carved back out of the governance-doc
+ * denial below rather than left blocked:
+ *
+ *   1. `STATE_OF_THE_BUILD.md` / `SESSION_STATE.md` — every Phase 3 prompt type is INSTRUCTED to
+ *      update these itself (the mandatory footer every assembled prompt ends with, verbatim
+ *      `STATE_AUDIT_FOOTER` in `src/engine/prompt-assembler.ts`; also `STATE_FOOTER` in
+ *      `src/engine/queue-generator.ts`; BLUEPRINT.md Canonical Rule 9). A real Build Agent write.
+ *   2. `CHANGESET.md` — NEVER written by the Build Agent at all. FORGE's own orchestrator appends
+ *      to it directly (`appendChangeset` in `phase3-executor.ts`, `join(ctx.projectPath,
+ *      'CHANGESET.md')`) right after each prompt's commit, purely as a durable human-readable
+ *      record of what that commit touched (the VS Code integration layer). It has no
+ *      `governance/`-nested form — `appendChangeset` always targets the project root.
+ *
+ * `STATE_OF_THE_BUILD.md`/`SESSION_STATE.md` DO also get a second, FORGE-orchestrator-authored
+ * append after the fact (`defaultUpdateStateProgress`, `appendMigrationBlocker`,
+ * `definition-of-done.ts`, `src/integration/bus.ts`'s `onSentinelPrimeHalt`, `syncIdeStatus` in
+ * `src/tools/live-status.ts`) — same root cause as CHANGESET.md, just layered on top of a write
+ * the Build Agent was ALSO separately instructed to make itself. Either source alone would already
+ * require the exemption.
+ *
+ * Project convention nests governance docs under `governance/` for some projects and the root for
+ * others (both project-root and `governance/`-prefixed paths are listed here for the two files
+ * that use that convention); `CHANGESET.md` has no `governance/`-nested form so none is listed.
  */
-const BUILD_AGENT_HOUSEKEEPING_GLOBS = ['STATE_OF_THE_BUILD.md', 'SESSION_STATE.md', 'governance/STATE_OF_THE_BUILD.md', 'governance/SESSION_STATE.md'];
+const BUILD_AGENT_HOUSEKEEPING_GLOBS = [
+  'STATE_OF_THE_BUILD.md',
+  'SESSION_STATE.md',
+  'CHANGESET.md',
+  'governance/STATE_OF_THE_BUILD.md',
+  'governance/SESSION_STATE.md',
+];
 
 /**
  * The Build Agent: the `claude` CLI subprocess `phase3-executor.ts` invokes via
