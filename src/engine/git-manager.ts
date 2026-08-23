@@ -43,6 +43,36 @@ import { logLine } from '../tools/forge-logger.js';
 
 /** Default main branch merges target / rollback resets (Contract 10/12). */
 export const DEFAULT_MAIN_BRANCH = 'main';
+
+/**
+ * Detect the branch actually checked out at `cwd`, for resolving Contract 10's "main branch" on
+ * a repo that predates this build — `git init.defaultBranch` set to something other than `main`,
+ * or an initial commit made outside FORGE (e.g. manually, or by `create-next-app`) before Phase 3
+ * ever runs. Hardcoding `'main'` here silently breaks every `mainBranch...HEAD` diff, checkout,
+ * and rollback for the rest of the build the moment the real default branch has any other name
+ * (confirmed live: a repo with no branch literally named `main` at all, "unknown revision"
+ * repeated throughout the run).
+ *
+ * `git symbolic-ref --short HEAD` resolves an UNBORN branch too (no commit required), so this is
+ * safe to call before Phase 0's greenfield `git init` path or Phase 3's first feature-branch
+ * checkout. Detached HEAD, a missing/unreadable repo, or any other failure falls back to
+ * {@link DEFAULT_MAIN_BRANCH} — never throws.
+ */
+export function detectDefaultBranch(cwd: string): string {
+  try {
+    const out = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      timeout: 10_000,
+    });
+    const branch = String(out).trim();
+    return branch.length > 0 ? branch : DEFAULT_MAIN_BRANCH;
+  } catch {
+    return DEFAULT_MAIN_BRANCH;
+  }
+}
 /** Default per-command timeout. Git operations are local and fast; a stuck command is a failure. */
 export const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 /** Temp file (in the project working dir) used to pass commit messages via `git commit -F`. */

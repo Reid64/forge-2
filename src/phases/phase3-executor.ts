@@ -113,7 +113,7 @@ import {
   type PreviousSentinelStatus,
 } from '../engine/prompt-assembler.js';
 import { runClaude, DEFAULT_TIMEOUT_MS, type ClaudeRunResult } from '../engine/claude-runner.js';
-import { GitManager } from '../engine/git-manager.js';
+import { GitManager, detectDefaultBranch } from '../engine/git-manager.js';
 import {
   runSentinel,
   runAutonomousRecovery,
@@ -445,7 +445,13 @@ export interface Phase3Options {
    * the executor derives an approximate scope from the queue (and warns). Ignored when not a dry run.
    */
   features?: Array<FeatureSpec | string>;
-  /** The main branch merges target / rollback resets. Default `'main'`. */
+  /**
+   * The main branch merges target / rollback resets. Default: whatever branch is actually
+   * checked out at `projectPath` when this executor starts (via `detectDefaultBranch`, git-
+   * manager.js), so a repo whose default branch isn't literally named `main` still gets
+   * consistent handling. Pass this explicitly only to override that detection (tests, or a
+   * caller that already knows the branch).
+   */
   mainBranch?: string;
   /**
    * Optional run-wide dollar cap (opt-in, mirrors `manifest.yaml`'s `maxBudgetUsd` field —
@@ -995,6 +1001,19 @@ async function applyPromoteScratchGate(
  * `.claude/skills/**` and `.claude/plugins/**` directories, and the FORGE library/projects tree
  * under `Documents/FORGE/**`. A match against any of these is excluded before violations are
  * returned; anything else outside `projectPath` still fails as before.
+ *
+ * POSIX-STYLE RELATIVE MENTIONS (a second false-positive class, same root cause): claude routinely
+ * writes a project-relative path with a leading slash in prose â€” "created /app/api/list/route.ts",
+ * "the /tsconfig / Next.js setup" â€” which the POSIX alternative below matches as if it were an
+ * absolute path, and it can never `startsWith(normalizedRoot)` because it isn't rooted at
+ * `projectPath` at all. Every FORGE target is a Windows project (Contract 6): a REAL absolute-path
+ * escape from claude shows up as a drive-letter path (the first alternative, still fully checked
+ * against `projectPath` + the allowlist above) or a genuine OS-root mention (`/etc/...`,
+ * `/mnt/...`, a Windows profile path). So a bare single-leading-slash match is now treated as
+ * project-relative (skipped) UNLESS its first path segment names a real system directory â€” see
+ * `isSuspiciousPosixRelative`. Unbounded per-path allowlisting (adding `/app`, `/pages`,
+ * `/components`, `/lib`, ... one at a time) doesn't generalize; narrowing what counts as
+ * "suspicious" does.
  */
 const OUT_OF_BOUNDS_PATH_PATTERN = /(?<![A-Za-z:])[A-Za-z]:[\\/][^\s"'`)]+|(?<![:/])\/[^\s"'`)]{2,}/g;
 
@@ -1006,6 +1025,26 @@ const ALLOWLISTED_EXTERNAL_PATTERNS: readonly RegExp[] = [
 
 function isAllowlistedExternalPath(normalized: string): boolean {
   return ALLOWLISTED_EXTERNAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Real OS/system root directory names â€” the only first segments that make a bare
+ * single-leading-slash token plausible as a genuine absolute path rather than a project-relative
+ * mention (see the POSIX-STYLE RELATIVE MENTIONS note above). Deliberately excludes names that
+ * routinely double as legitimate top-level project directories (`lib`, `bin`, `tmp`, `opt`), so a
+ * real project's `/lib/utils.ts` or `/bin/seed.ts` mention is never misflagged.
+ */
+const SYSTEM_ROOT_SEGMENTS = new Set([
+  'etc', 'proc', 'sys', 'mnt', 'media', 'srv', 'boot', 'root', 'home', 'usr', 'sbin',
+  'windows', 'system32', 'users',
+]);
+
+function isSuspiciousPosixRelative(normalized: string): boolean {
+  const firstSegment = normalized.replace(/^\/+/, '').split('/')[0] ?? '';
+  // A single-letter first segment is git-bash's `/c/Users/...` rendering of a Windows drive path
+  // (`C:\Users\...`) â€” a real project directory is never named just "c" or "d".
+  if (/^[a-z]$/.test(firstSegment)) return true;
+  return SYSTEM_ROOT_SEGMENTS.has(firstSegment);
 }
 
 export function findOutOfBoundsPaths(stdout: string, projectPath: string): string[] {
@@ -1020,6 +1059,8 @@ export function findOutOfBoundsPaths(stdout: string, projectPath: string): strin
   for (const raw of matches) {
     if (!/\.[a-zA-Z0-9]{1,10}$/.test(raw)) continue; // only path-shaped tokens (has an extension)
     const normalized = raw.replace(/\\/g, '/').toLowerCase();
+    const isDriveLetterPath = /^[a-z]:\//.test(normalized);
+    if (!isDriveLetterPath && !isSuspiciousPosixRelative(normalized)) continue;
     if (normalized.startsWith(normalizedRoot)) continue;
     if (isAllowlistedExternalPath(normalized)) continue;
     found.add(raw);
@@ -1675,7 +1716,12 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const machineId = options.machineId ?? process.env.FORGE_MACHINE_ID ?? randomUUID();
   const dryRun = options.dryRun ?? false;
   const replay = options.replay ?? null;
-  const mainBranch = options.mainBranch ?? 'main';
+  // `options.mainBranch` is almost never passed explicitly (see the doc comment on
+  // `Phase3Options.mainBranch`) — detect the branch actually checked out for this project instead
+  // of hardcoding 'main', so a repo whose default branch has any other name (a non-'main'
+  // `init.defaultBranch`, or an initial commit made outside FORGE before this build started)
+  // still gets consistent checkouts/diffs/rollbacks all the way through Phase 3.
+  const mainBranch = options.mainBranch ?? detectDefaultBranch(projectPath);
   const maxBudgetUsd = options.maxBudgetUsd ?? null;
   const dashboardEnabled = (options.dashboard ?? true) && !dryRun;
   // Live Dashboard log tail (src/dashboard â€” a SEPARATE, new browser dashboard on port 7734, not
