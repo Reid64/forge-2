@@ -1827,6 +1827,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         promptExecutionId,
       }));
   const git = options.gitManager ?? new GitManager({ cwd: projectPath, mainBranch, log: (m) => log(`git: ${m}`) });
+  // Session 5.3: `.forge/logs/build_<timestamp>.log` is appended to for this build's whole
+  // lifetime (see buildLogPath above) — including after commitAll would otherwise stage it — so
+  // ensure it can never dirty the tree ahead of the first feature-branch checkout below (a target
+  // project's own .gitignore may not already cover .forge/). Non-fatal: never blocks the build.
+  if (!dryRun) {
+    const logsIgnored = git.ensureLogsIgnored();
+    if (logsIgnored.changed) log(`git: .forge/logs/ ignored (${logsIgnored.success ? 'committed' : logsIgnored.error ?? 'commit failed'})`);
+  }
   const loadGovernanceDocs: NonNullable<Phase3Options['loadGovernanceDocs']> =
     options.loadGovernanceDocs ?? defaultLoadGovernanceDocs;
   const updateStateProgress: NonNullable<Phase3Options['updateStateProgress']> =

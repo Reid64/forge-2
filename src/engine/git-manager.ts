@@ -32,7 +32,7 @@
  */
 
 import { execSync, execFileSync, type ExecSyncOptions } from 'node:child_process';
-import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
@@ -77,6 +77,13 @@ export function detectDefaultBranch(cwd: string): string {
 export const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 /** Temp file (in the project working dir) used to pass commit messages via `git commit -F`. */
 export const COMMIT_MESSAGE_FILE = '.forge-commit-msg';
+/**
+ * `.gitignore` entry {@link GitManager.ensureLogsIgnored} maintains for the target project — the
+ * persistent per-build log file (`<projectPath>/.forge/logs/build_<timestamp>.log`,
+ * `phase3-executor.ts`) is appended to continuously for a build's whole lifetime, including AFTER
+ * the commit that would otherwise pick it up, so it must never be tracked at all.
+ */
+export const FORGE_LOGS_GITIGNORE_ENTRY = '.forge/logs/';
 /** Max characters kept from a prompt name when slugged into a branch segment. */
 const MAX_SLUG_LENGTH = 40;
 
@@ -109,6 +116,12 @@ export interface CreateBranchResult extends GitResult {
 export interface CommitResult extends GitResult {
   /** True when there was nothing staged to commit (treated as a benign success, not a failure). */
   nothingToCommit: boolean;
+}
+
+/** {@link GitResult} for {@link GitManager.ensureLogsIgnored}. */
+export interface EnsureLogsIgnoredResult extends GitResult {
+  /** True when `.gitignore` was updated and/or an already-tracked `.forge/logs` path was untracked this call. */
+  changed: boolean;
 }
 
 /** {@link GitResult} for {@link GitManager.mergeToMain}. */
@@ -398,6 +411,65 @@ export class GitManager {
   /** Switch to an existing branch. */
   checkout(branchName: string): GitResult {
     return this.run(['checkout', branchName]);
+  }
+
+  /**
+   * Make sure `.forge/logs/` can never block a `checkout` in this project. FORGE writes a
+   * persistent build log (`.forge/logs/build_<timestamp>.log`, `phase3-executor.ts`) that is
+   * appended to continuously for the whole build — including AFTER `commitAll`'s `git add -A`
+   * would otherwise stage it — so on a target project whose own `.gitignore` doesn't already
+   * cover `.forge/`, that file goes from "staged clean" to "modified" before the NEXT `checkout`
+   * (a new feature branch, or back to `mainBranch` for a merge), which then refuses with "local
+   * changes would be overwritten". Harmless — nothing in this file is ever read back — but noisy
+   * in every build's log (confirmed live: `steve-file-access`, prompt 2 'api-file').
+   *
+   * Idempotent and non-fatal (Iron Law 3): appends {@link FORGE_LOGS_GITIGNORE_ENTRY} to
+   * `.gitignore` only if no existing line already covers it, `git rm --cached`s the path only if
+   * git already has it tracked from before this fix, and commits only when one of those two steps
+   * actually changed something. Call ONCE per build, before the first feature-branch checkout —
+   * once ignored, `git add -A` never stages the log file in the first place, so later appends to
+   * it never dirty the tree.
+   */
+  ensureLogsIgnored(): EnsureLogsIgnoredResult {
+    const gitignorePath = join(this.cwd, '.gitignore');
+    let changed = false;
+
+    let existing = '';
+    try {
+      existing = readFileSync(gitignorePath, 'utf8');
+    } catch {
+      existing = '';
+    }
+    const alreadyCovered = existing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .some((line) => line === '.forge' || line === '.forge/' || line === '.forge/logs' || line === FORGE_LOGS_GITIGNORE_ENTRY);
+    if (!alreadyCovered) {
+      const header = '# FORGE build logs (machine-local, never part of project history)';
+      const block = existing.trim().length > 0 ? `${existing.replace(/\s*$/, '')}\n\n${header}\n${FORGE_LOGS_GITIGNORE_ENTRY}\n` : `${header}\n${FORGE_LOGS_GITIGNORE_ENTRY}\n`;
+      try {
+        writeFileSync(gitignorePath, block, 'utf8');
+        changed = true;
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.log(`FAILED to update .gitignore for ${FORGE_LOGS_GITIGNORE_ENTRY}: ${error}`);
+      }
+    }
+
+    const tracked = this.run(['ls-files', '--', '.forge/logs']);
+    if (tracked.success && tracked.stdout.trim().length > 0) {
+      const untrack = this.run(['rm', '-r', '--cached', '--', '.forge/logs']);
+      if (untrack.success) changed = true;
+    }
+
+    if (!changed) {
+      return { success: true, command: 'ensureLogsIgnored (no-op)', stdout: '', stderr: '', exitCode: 0, changed: false };
+    }
+
+    const add = this.run(['add', '--', '.gitignore']);
+    if (!add.success) return { ...add, changed };
+    const commit = this.commitStaged('[FORGE] chore: ignore .forge/logs (machine-local build logs)');
+    return { ...commit, changed };
   }
 
   /**
