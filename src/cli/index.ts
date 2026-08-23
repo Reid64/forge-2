@@ -38,10 +38,11 @@
  */
 
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { appendFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, statfsSync, unlinkSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSync, statfsSync, unlinkSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -113,7 +114,17 @@ import {
 } from '../ui-engine/index.js';
 import { createDesignPipeline, type DesignPipelinePromptEntry } from '../design-pipeline/index.js';
 import { createPlaywrightScreenshotter } from '../design-pipeline/screenshotter.js';
+import { createDesignReviewGate } from '../design-pipeline/review-gate.js';
 import { getDesignStoragePath, ensureStorageDirectories, getScreenshotPath } from '../design-pipeline/storage-config.js';
+import {
+  createDesignTournamentEngine,
+  applyTournamentChoice,
+  formatTournamentResult,
+  type DesignTournamentResult,
+  type DesignTournamentChoice,
+} from '../design-pipeline/design-tournament.js';
+import { validateVariance, fromDesignDirection, type VarianceValidationResult } from '../design-pipeline/variance-controller.js';
+import { buildComposite, type CompositeSectionSelection } from '../design-pipeline/composite-builder.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -3526,6 +3537,370 @@ async function cmdDesignHistory(pathArg: string, opts: { limit?: string }): Prom
 }
 
 // ---------------------------------------------------------------------------
+// `forge design tournament|compose` — Design Tournament + Composite Builder
+// (src/design-pipeline/design-tournament.ts, variance-controller.ts, composite-builder.ts)
+// ---------------------------------------------------------------------------
+
+/** `--brief` accepts either literal text or a path to a text file; whichever resolves to non-empty text. */
+function resolveBriefText(brief: string): string | null {
+  try {
+    if (existsSync(brief)) {
+      const text = readFileSync(brief, 'utf8').trim();
+      return text !== '' ? text : null;
+    }
+  } catch {
+    // not a readable file — fall through and treat `brief` as literal text
+  }
+  const trimmed = brief.trim();
+  return trimmed !== '' ? trimmed : null;
+}
+
+/**
+ * Build {@link VarianceCandidate}s from a tournament result's real, on-disk generated code (only
+ * `design-tournament.ts`'s `filePath`/`screenshotPaths` survive onto `DesignTournamentVariantResult`
+ * — the raw code itself is re-read from disk here for the token-level cross-check
+ * {@link validateVariance} performs when code is available). A variant whose file can't be read
+ * falls back to a structural-tags-only candidate (still real — just without the token check).
+ */
+function buildVarianceCandidates(result: DesignTournamentResult) {
+  return result.variants
+    .filter((v) => v.filePath !== null)
+    .map((v) => {
+      let code: string | undefined;
+      try {
+        code = readFileSync(v.filePath as string, 'utf8');
+      } catch {
+        code = undefined;
+      }
+      return fromDesignDirection(v.direction, code);
+    });
+}
+
+/** Write a human-readable comparison report for a completed tournament run, alongside its variants. */
+function writeTournamentComparisonReport(
+  projectPath: string,
+  result: DesignTournamentResult,
+  varianceResult: VarianceValidationResult
+): string {
+  const dir = join(projectPath, '.forge', 'design-tournament', result.id);
+  mkdirSync(dir, { recursive: true });
+  const reportPath = join(dir, 'comparison-report.md');
+
+  const lines: string[] = [];
+  lines.push(`# Design Tournament — ${result.componentName}`);
+  lines.push('');
+  lines.push(`Run: ${result.id}`);
+  lines.push(`Status: ${result.status}`);
+  lines.push('');
+  lines.push('## Variants');
+  for (const v of result.variants) {
+    const scoreText =
+      v.automatedSubtotal !== null ? `${v.automatedSubtotal.toFixed(1)}/20 (${v.dimensionsScored}/9 dims)` : 'unscored';
+    lines.push('');
+    lines.push(`### [${v.direction.id.toUpperCase()}] ${v.direction.name}`);
+    lines.push(`- Structural tags: ${v.direction.structuralTags.join(', ')}`);
+    lines.push(`- Density: ${v.direction.density}`);
+    lines.push(`- Score: ${scoreText}`);
+    lines.push(`- File: ${v.filePath ?? '(generation failed)'}`);
+    if (v.generationError) lines.push(`- Generation error: ${v.generationError}`);
+    if (v.screenshotPaths.length > 0) {
+      lines.push(`- Screenshots:`);
+      for (const p of v.screenshotPaths) lines.push(`  - ${p}`);
+    }
+  }
+  lines.push('');
+  lines.push('## Variance check (variance-controller.ts MINIMUM_VARIANCE)');
+  lines.push('');
+  lines.push(varianceResult.summary);
+  for (const c of varianceResult.comparisons) {
+    lines.push(
+      `- ${c.aId.toUpperCase()} vs ${c.bId.toUpperCase()}: structural similarity ${c.structuralSimilarity.toFixed(2)}` +
+        `${c.tokenSimilarity !== null ? `, token similarity ${c.tokenSimilarity.toFixed(2)}` : ''} — ${c.verdict.toUpperCase()}`
+    );
+  }
+  lines.push('');
+  lines.push('## Recommendation');
+  lines.push('');
+  lines.push(result.recommendation);
+  lines.push('');
+
+  writeFileSync(reportPath, lines.join('\n'), 'utf8');
+  return reportPath;
+}
+
+/**
+ * Interactive N-way approval prompt for a tournament result. `review-gate.ts`'s
+ * {@link DesignReviewGate.review} is deliberately NOT reused here — its contract is a binary
+ * approve/reject over ONE candidate's evidence, and a tournament's real choice is "which of N
+ * variants," not "approve or reject the one thing shown" (see `design-tournament.ts`'s own header:
+ * "there is no non-interactive auto-approve path for a tournament ... a MULTI-way choice has no
+ * single defensible automatic winner"). This is that same posture's interactive counterpart.
+ */
+async function promptTournamentChoice(result: DesignTournamentResult): Promise<DesignTournamentChoice> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const ids = result.variants.map((v) => v.direction.id.toUpperCase()).join('/');
+    const answer = (
+      await new Promise<string>((resolve) => rl.question(`  Approve which variant [${ids}], or [R]eject all? > `, resolve))
+    )
+      .trim()
+      .toLowerCase();
+
+    if (answer === 'r' || answer === 'reject') {
+      const feedback = (await new Promise<string>((resolve) => rl.question('  Feedback (required): > ', resolve))).trim();
+      return { approved: false, winningDirectionId: null, feedback: feedback || null };
+    }
+
+    const winner = result.variants.find((v) => v.direction.id.toLowerCase() === answer);
+    if (!winner) {
+      designLog('WARN', `'${answer}' does not match any variant id — treating as a deferral (no verdict recorded).`);
+      return { approved: false, winningDirectionId: null, feedback: null };
+    }
+    return { approved: true, winningDirectionId: winner.direction.id, feedback: null };
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `forge design tournament <project-path> --brief <text-or-file> [--name <ComponentName>]
+ * [--variants <n>] [--non-interactive]` — generates 2-4 structurally distinct competing design
+ * variants for one component via the real {@link DesignTournamentEngine} (real
+ * `UIComponentGenerator` calls, real `PlaywrightScreenshotter` captures), verifies every variant
+ * pair against `variance-controller.ts`'s {@link MINIMUM_VARIANCE} thresholds (regenerating up to
+ * once if a pair is flagged PROHIBITED — color/font/spacing-only variance), writes a comparison
+ * report, and runs the tournament's own N-way human approval gate.
+ */
+async function cmdDesignTournament(
+  pathArg: string,
+  opts: { brief?: string; name?: string; variants?: string; nonInteractive?: boolean }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  if (!opts.brief) {
+    designFail('forge design tournament requires --brief "<text>" or --brief <path-to-file>.');
+    return;
+  }
+  const briefText = resolveBriefText(opts.brief);
+  if (briefText === null) {
+    designFail(`forge design tournament could not read --brief '${opts.brief}' as text or an existing file.`);
+    return;
+  }
+
+  const componentName = opts.name?.trim() || 'TournamentComponent';
+  const variantCount = opts.variants ? Number.parseInt(opts.variants, 10) : undefined;
+  designLog('INFO', `forge design tournament — generating variants for '${componentName}' in ${projectPath}`);
+
+  const baseSpec: ComponentSpec = {
+    name: componentName,
+    description: briefText,
+    props: [],
+    dataSource: null,
+    interactions: [],
+    accessibility: [],
+  };
+
+  const screenshotter = createPlaywrightScreenshotter({ log: (m) => designLog('INFO', m) });
+  if (!(await screenshotter.isAvailable())) {
+    designFail('forge design tournament requires the "playwright" package — it is not installed/importable.');
+    return;
+  }
+
+  const engine = createDesignTournamentEngine({
+    log: (m) => designLog('INFO', m),
+    variantCount,
+    componentGenerator: new UIComponentGenerator(),
+    screenshotter,
+  });
+
+  const buildRunId = randomUUID();
+  const promptId = randomUUID();
+  const MAX_ATTEMPTS = 2;
+
+  let result: DesignTournamentResult | null = null;
+  let varianceResult: VarianceValidationResult | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    result = await withSpinner(`Design Tournament — generate variants (attempt ${attempt}/${MAX_ATTEMPTS})`, () =>
+      engine.run(baseSpec, projectPath, buildRunId, promptId)
+    );
+    varianceResult = validateVariance(buildVarianceCandidates(result));
+    if (varianceResult.status === 'ok' || attempt === MAX_ATTEMPTS) break;
+    designLog(
+      'WARN',
+      `variance check PROHIBITED (${varianceResult.summary}) — regenerating (attempt ${attempt + 1}/${MAX_ATTEMPTS})`
+    );
+  }
+
+  if (!result || !varianceResult) {
+    designFail('forge design tournament produced no result.');
+    return;
+  }
+
+  console.log(`\n${formatTournamentResult(result)}\n`);
+
+  const varianceOk = varianceResult.status === 'ok';
+  designLog(varianceOk ? 'PASS' : 'FAIL', `variance check: ${varianceResult.summary}`);
+
+  const reportPath = writeTournamentComparisonReport(projectPath, result, varianceResult);
+  designLog('PASS', `comparison report written → ${reportPath}`);
+
+  if (!varianceOk) {
+    designFail(
+      'forge design tournament: variants remain structurally too similar (color/font/spacing-only) after regeneration.'
+    );
+    return;
+  }
+
+  const successfulVariants = result.variants.filter((v) => v.filePath !== null);
+  if (successfulVariants.length === 0) {
+    designFail('forge design tournament: every variant failed to generate — nothing to review.');
+    return;
+  }
+
+  if (opts.nonInteractive) {
+    designLog(
+      'INFO',
+      'non-interactive run — tournament left AWAITING HUMAN DESIGN APPROVAL (no automatic winner for a multi-way choice).'
+    );
+    return;
+  }
+
+  const choice = await promptTournamentChoice(result);
+  const projectName = basename(projectPath) || 'project';
+  const decided = await applyTournamentChoice(result, choice, projectName);
+
+  if (decided.status === 'approved') {
+    designLog('PASS', `tournament APPROVED — winning variant: ${choice.winningDirectionId?.toUpperCase()}`);
+  } else {
+    designLog('FAIL', `tournament REJECTED${choice.feedback ? ` — ${choice.feedback}` : ''}`);
+    process.exitCode = 1;
+  }
+}
+
+/** Parse `--selections` (a JSON array of {@link CompositeSectionSelection}) from literal text or a file path. */
+function resolveComposeSelections(raw: string): CompositeSectionSelection[] | null {
+  let text: string;
+  try {
+    text = existsSync(raw) ? readFileSync(raw, 'utf8') : raw;
+  } catch {
+    text = raw;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const selections: CompositeSectionSelection[] = [];
+  for (const item of parsed as unknown[]) {
+    if (
+      typeof item !== 'object' ||
+      item === null ||
+      typeof (item as Record<string, unknown>)['sourceVariantId'] !== 'string' ||
+      typeof (item as Record<string, unknown>)['sectionName'] !== 'string' ||
+      typeof (item as Record<string, unknown>)['code'] !== 'string'
+    ) {
+      return null;
+    }
+    const entry = item as { sourceVariantId: string; sourceVariantLabel?: unknown; sectionName: string; code: string };
+    selections.push({
+      sourceVariantId: entry.sourceVariantId,
+      sourceVariantLabel: typeof entry.sourceVariantLabel === 'string' ? entry.sourceVariantLabel : undefined,
+      sectionName: entry.sectionName,
+      code: entry.code,
+    });
+  }
+  return selections;
+}
+
+/**
+ * `forge design compose <project-path> --selections <file-or-inline> [--name <ComponentName>]
+ * [--non-interactive]` — assembles a human's mix-and-match section picks (verbatim, via the real
+ * {@link buildComposite}) into one composite component, re-renders it through the real
+ * `PlaywrightScreenshotter` capture path when available, then runs the SAME single-candidate
+ * `review-gate.ts` approval gate every other `forge design` review already uses — a composite is
+ * exactly the single-candidate case that gate is built for (see `promptTournamentChoice` above for
+ * why a tournament's N-way choice deliberately does NOT reuse this gate).
+ */
+async function cmdDesignCompose(
+  pathArg: string,
+  opts: { selections?: string; name?: string; nonInteractive?: boolean }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  if (!opts.selections) {
+    designFail('forge design compose requires --selections "<json>" or --selections <path-to-json-file>.');
+    return;
+  }
+  const selections = resolveComposeSelections(opts.selections);
+  if (selections === null) {
+    designFail(
+      'forge design compose: --selections must be a JSON array of {sourceVariantId, sectionName, code} objects.'
+    );
+    return;
+  }
+  if (selections.length === 0) {
+    designFail('forge design compose requires at least one selection.');
+    return;
+  }
+
+  const componentName = opts.name?.trim() || 'ComponentComposite';
+  designLog(
+    'INFO',
+    `forge design compose — assembling '${componentName}' from ${selections.length} selection(s) in ${projectPath}`
+  );
+
+  const screenshotter = createPlaywrightScreenshotter({ log: (m) => designLog('INFO', m) });
+  const screenshotterAvailable = await screenshotter.isAvailable();
+  if (!screenshotterAvailable) {
+    designLog('WARN', 'the "playwright" package is not installed — composite will be built but not re-rendered.');
+  }
+
+  const buildRunId = randomUUID();
+  const promptId = randomUUID();
+
+  const result = await withSpinner(`Composite Builder — assemble '${componentName}'`, () =>
+    buildComposite({
+      componentName,
+      selections,
+      projectPath,
+      buildRunId,
+      promptId,
+      screenshotter: screenshotterAvailable ? screenshotter : null,
+      log: (m) => designLog('INFO', m),
+    })
+  );
+
+  if (result.filePath === null) {
+    designFail(`forge design compose failed: ${result.renderError ?? 'composite could not be written to disk'}`);
+    return;
+  }
+  designLog(
+    'PASS',
+    `composite '${result.componentName}' written → ${result.filePath} ` +
+      `(${result.sectionCount} section(s) from ${result.sourceVariantIds.length} source variant(s))`
+  );
+  if (result.renderError) designLog('WARN', `re-render: ${result.renderError}`);
+  for (const shot of result.screenshots) designLog('INFO', `  [${shot.viewport}] ${shot.filePath}`);
+
+  const reviewGate = createDesignReviewGate({ log: (m) => designLog('INFO', m) });
+  const reviewResult = await reviewGate.review(result.componentName, result.screenshots, null, {
+    nonInteractive: opts.nonInteractive ?? false,
+    buildRunId,
+    promptId,
+  });
+
+  if (reviewResult.approved) {
+    designLog('PASS', `composite review APPROVED${reviewResult.autoApproved ? ' (auto-approved)' : ''}`);
+  } else {
+    designLog('FAIL', `composite review NOT approved${reviewResult.feedback ? ` — ${reviewResult.feedback}` : ''}`);
+    process.exitCode = 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // forge vault — per-project encrypted credential storage (src/autonomy/credential-vault.ts)
 // ---------------------------------------------------------------------------
 
@@ -3905,7 +4280,7 @@ async function main(): Promise<void> {
     .description(
       'Run Phase 0 + 1 only (PRD + Architecture; stops at Gate 2), or use a UI Engine / Design ' +
         'Pipeline subcommand (component / tokens / storybook / audit / install-shadcn / screenshot / ' +
-        'review / storage / penpot-setup / history)'
+        'review / tournament / compose / storage / penpot-setup / history)'
     )
     .argument('<path>', 'target project directory')
     .option('--idea <text>', 'raw product idea (generates the PRD)')
@@ -3963,6 +4338,42 @@ async function main(): Promise<void> {
     .argument('<project-path>', 'target project directory')
     .option('--non-interactive', 'auto-decide via the accessibility-score threshold instead of prompting interactively', false)
     .action((pathArg: string, opts: { nonInteractive?: boolean }) => cmdDesignReview(pathArg, opts));
+
+  design
+    .command('tournament')
+    .description(
+      'Generate 2-4 structurally distinct competing design variants (Design Tournament), screenshot + ' +
+        'score each, verify real structural variance, and run the N-way human approval gate'
+    )
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--brief <text-or-file>', 'the design brief — literal text, or a path to a text file')
+    .option('--name <component-name>', 'component name for the generated variants', 'TournamentComponent')
+    .option('--variants <n>', 'number of variants to generate (2-4)')
+    .option(
+      '--non-interactive',
+      'never blocks on stdin; leaves the tournament AWAITING HUMAN DESIGN APPROVAL (no automatic multi-way winner)',
+      false
+    )
+    .action((pathArg: string, opts: { brief?: string; name?: string; variants?: string; nonInteractive?: boolean }) =>
+      cmdDesignTournament(pathArg, opts)
+    );
+
+  design
+    .command('compose')
+    .description(
+      "Assemble a human's mix-and-match section picks from different variants into one composite " +
+        '(Composite Builder), re-render it, and run the review gate'
+    )
+    .argument('<project-path>', 'target project directory')
+    .requiredOption(
+      '--selections <file-or-inline>',
+      'JSON array of {sourceVariantId, sectionName, code} selections, or a path to a JSON file'
+    )
+    .option('--name <component-name>', 'name for the resulting composite component', 'ComponentComposite')
+    .option('--non-interactive', 'auto-decide via the accessibility-score threshold instead of prompting interactively', false)
+    .action((pathArg: string, opts: { selections?: string; name?: string; nonInteractive?: boolean }) =>
+      cmdDesignCompose(pathArg, opts)
+    );
 
   design
     .command('storage')
