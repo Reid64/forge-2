@@ -191,6 +191,10 @@ import {
 import { detectStagnation, type StagnationVerdict } from '../governance/stagnation-detection.js';
 import { checkPermissions } from '../governance/permission-enforcer.js';
 import { runEphemeralPreviewStep, type EphemeralPreviewStepResult } from '../deploy/ephemeral-preview.js';
+import { validatePrompt } from '../validation/promptDensity.js';
+import { startDashboard, type DashboardHandle, type DashboardState, type PromptResult as DashboardPromptResult } from '../dashboard/index.js';
+import { getSlackConfig, notifyStart, notifyPromptPass, notifyPromptFail, notifyComplete, type SlackConfig } from '../notifications/slack.js';
+import { getProviderRouter } from '../engine/provider-router.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -366,6 +370,21 @@ export interface Phase3Result {
   /** Non-fatal observations (queue parse warnings, stateless degrade, â€¦). */
   warnings: string[];
   generatedAt: string;
+  /**
+   * Prompt-caching + notification accounting (optional â€” absent on the pre-loop early-abort
+   * returns, e.g. a density-validation or pre_run_checks failure, since nothing ran yet). All
+   * cache figures come from `src/engine/provider-router.ts`'s process-wide usage ledger â€” FORGE's
+   * own reasoning calls (Phase 1A/1B/5), NOT this Phase 3 build loop, which drives `claude -p` over
+   * the CLI and has no Anthropic API payload of its own to cache (see provider-router.ts's module
+   * note). A build that used only the CLI path will legitimately show all-zero cache figures here.
+   */
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_cache_creation_tokens?: number;
+  total_cache_read_tokens?: number;
+  estimated_cost_saved?: number;
+  /** Count of Slack webhook notifications successfully delivered this run (0 when unconfigured). */
+  slack_notifications_sent?: number;
 }
 
 /** A re-execution of the failed prompt for Autonomous Recovery (wraps claude + commit). */
@@ -459,6 +478,16 @@ export interface Phase3Options {
    * entirely by Sentinel/recovery before this step ever runs.
    */
   previewEnvironments?: boolean;
+  /**
+   * Live browser Dashboard (`src/dashboard/` â€” a NEW, separate subsystem from the existing
+   * terminal `forge dashboard` CLI command, `src/cli/dashboard-command.ts`): when true (default),
+   * starts an HTTP server on port 7734 (falling back to 7735/7736) serving a live-updating view
+   * of this build run, and stops it once the run report is written. The CLI's `--no-dashboard`
+   * flag sets this to `false`. Always a no-op for a dry run regardless of this flag (nothing
+   * executes for a dashboard to show). A bind failure (every candidate port already in use)
+   * degrades to no dashboard for this run rather than failing the build.
+   */
+  dashboard?: boolean;
   /** Override the ephemeral-preview step (tests). Default: {@link runEphemeralPreviewStep}. */
   runEphemeralPreviewImpl?: (input: {
     projectPath: string;
@@ -1648,6 +1677,14 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const replay = options.replay ?? null;
   const mainBranch = options.mainBranch ?? 'main';
   const maxBudgetUsd = options.maxBudgetUsd ?? null;
+  const dashboardEnabled = (options.dashboard ?? true) && !dryRun;
+  // Live Dashboard log tail (src/dashboard â€” a SEPARATE, new browser dashboard on port 7734, not
+  // the existing terminal `forge dashboard` CLI command): every line this build logs is also kept
+  // here, capped, for the dashboard's "last 10 lines" panel. Populated regardless of
+  // `dashboardEnabled` (cheap, in-memory only) so turning the dashboard on mid-debug never misses
+  // context; read only when the dashboard is actually enabled.
+  const dashboardLogTail: string[] = [];
+  const DASHBOARD_LOG_TAIL_MAX = 50;
   const generatedAt = nowIso();
   const warnings: string[] = [];
 
@@ -1678,6 +1715,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
         /* best-effort */
       }
     }
+    dashboardLogTail.push(message);
+    if (dashboardLogTail.length > DASHBOARD_LOG_TAIL_MAX) dashboardLogTail.shift();
   };
 
   // stdout must carry ONLY renderProgress's `[HH:mm:ss] [LEVEL]` lines during a build (matching
@@ -1804,6 +1843,27 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   // 1b. Dependency analysis (topological order + waves + parallel groups). Sequential = `order`.
   const schedule = analyzeSchedule(entries, { log: (m) => log(`scheduler: ${m}`) });
   warnings.push(...schedule.warnings);
+
+  // Prompt Density Enforcement (src/validation/promptDensity.ts): every queue prompt is checked
+  // BEFORE any prompt executes. Warnings are logged only; an error on ANY prompt blocks the whole
+  // queue from starting (mirrors the pre_run_checks gate below) â€” a prompt shaped to background a
+  // network fetch, or to bulk-ingest dozens of URLs disguised as one build step, is exactly the
+  // shape that has silently broken `claude -p` runs before (see claude-runner.ts's module note).
+  const densityErrors: string[] = [];
+  for (const entry of entries) {
+    const density = validatePrompt(entry.description, entry.id);
+    for (const w of density.warnings) log(`[DENSITY] prompt ${entry.id}: ${w}`);
+    for (const e of density.errors) {
+      log(`[DENSITY] ERROR prompt ${entry.id}: ${e} - queue will not start`);
+      densityErrors.push(`${entry.id}: ${e}`);
+    }
+  }
+  if (densityErrors.length > 0) {
+    const msg = `Prompt density validation failed for ${densityErrors.length} prompt(s) â€” queue will not start.`;
+    log(`ERROR: ${msg}`);
+    releaseStdoutQuietMode();
+    return { projectName, buildRunId: null, status: 'failed', schedule, outcomes: [], completedPrompts: 0, failedPrompts: 0, skippedPrompts: 0, totalTokens: 0, haltedAt: null, haltReason: msg, replayOf: null, simulation: null, warnings: [...warnings, msg, ...densityErrors], generatedAt };
+  }
 
   // --start-at validation: run before the log header so the error is the first thing the user sees.
   const startAt = options.startAt;
@@ -2077,6 +2137,51 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   let haltReason: string | null = null;
   let haltedAt: { index: number; id: string } | null = null;
 
+  // Live Dashboard + Slack notifications (src/dashboard, src/notifications/slack.ts). Both are
+  // guarded so a bind failure / webhook outage can never fail or slow the build (Contract 4 house
+  // rule). `dashboardHandle`/`slackConfig` stay harmless no-ops for a dry run or when disabled.
+  const slackConfig: SlackConfig | null = dashboardEnabled ? getSlackConfig() : null;
+  let slackNotificationsSent = 0;
+  const onSlackDelivered = (): void => {
+    slackNotificationsSent += 1;
+  };
+  const dashboardPromptRows: DashboardPromptResult[] = schedule.order.map((e) => ({
+    id: e.id,
+    name: e.name,
+    status: 'PENDING',
+    durationMs: null,
+  }));
+  let dashboardCurrentPrompt: { id: string; name: string; startedAt: number } | null = null;
+  /** Prompt-caching figures come from the process-wide Provider Router ledger â€” see the
+   * `Phase3Result` doc note: Phase 3 itself never calls the Anthropic API directly. */
+  const cacheStatsSnapshot = (): DashboardState['cacheStats'] => {
+    const summary = getProviderRouter().usageTracker.summary();
+    return {
+      saved: summary.totalCacheSavedUsd,
+      creationTokens: summary.totalCacheCreationTokens,
+      readTokens: summary.totalCacheReadTokens,
+    };
+  };
+  const buildDashboardState = (isComplete: boolean): DashboardState => ({
+    project: projectName,
+    totalPrompts: schedule.order.length,
+    passed: outcomes.filter((o) => o.disposition === 'completed').length,
+    failed: outcomes.filter((o) => o.disposition === 'failed').length,
+    prompts: dashboardPromptRows,
+    currentPromptId: dashboardCurrentPrompt?.id ?? null,
+    currentPromptName: dashboardCurrentPrompt?.name ?? null,
+    currentPromptStartedAt: dashboardCurrentPrompt?.startedAt ?? null,
+    isComplete,
+    cacheStats: cacheStatsSnapshot(),
+    logLines: dashboardLogTail,
+  });
+  const dashboardHandle: DashboardHandle = dashboardEnabled
+    ? await startDashboard(buildDashboardState(false), { log: (m) => log(`[DASHBOARD] ${m}`) })
+    : { update: () => {}, stop: () => {}, port: null };
+  if (dashboardEnabled) {
+    await notifyStart(slackConfig, projectName, schedule.order.length, { onDelivered: onSlackDelivered, log });
+  }
+
   // UI ENGINE (Task 1): ensure a consistent design-token baseline (tailwind.config.ts +
   // globals.css) exists before the FIRST prompt of every real build run. Never overwrites a
   // project's own tokens if either file already exists (design-token-manager.ts's own guard) â€”
@@ -2183,10 +2288,39 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       continue;
     }
 
+    if (dashboardEnabled) {
+      dashboardCurrentPrompt = { id: entry.id, name: entry.name, startedAt: Date.now() };
+      const running = dashboardPromptRows.find((p) => p.id === entry.id);
+      if (running) running.status = 'RUNNING';
+      dashboardHandle.update(buildDashboardState(false));
+    }
+
     const outcome = await runWithBuildContext({ promptId: entry.id }, () =>
       executePrompt(ctx, entryForExec, index, previousSentinel, schemaPromptsHaveRun)
     );
     outcomes.push(outcome);
+
+    if (dashboardEnabled) {
+      dashboardCurrentPrompt = null;
+      const row = dashboardPromptRows.find((p) => p.id === entry.id);
+      if (row) {
+        row.status = outcome.disposition === 'completed' ? 'PASS' : outcome.disposition === 'failed' ? 'FAIL' : 'PENDING';
+        row.durationMs = outcome.durationMs;
+      }
+      dashboardHandle.update(buildDashboardState(false));
+      if (outcome.disposition === 'completed') {
+        await notifyPromptPass(slackConfig, projectName, entry.id, entry.name, outcome.durationMs, {
+          onDelivered: onSlackDelivered,
+          log,
+        });
+      } else if (outcome.disposition === 'failed') {
+        await notifyPromptFail(slackConfig, projectName, entry.id, entry.name, outcome.recovery?.attempts.length ?? 0, {
+          onDelivered: onSlackDelivered,
+          log,
+        });
+      }
+    }
+
     const realTechStackTags = deriveStackTags(ctx.stackFingerprint);
     const changedThisPrompt = filesChanged(ctx);
     onPromptComplete({
@@ -2316,6 +2450,28 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const totalTokens = outcomes.reduce((sum, o) => sum + o.tokensEstimated, 0);
 
   const status: Phase3Status = dryRun ? 'dry_run' : halted ? 'halted' : failedPrompts > 0 ? 'failed' : 'completed';
+
+  const finalProviderUsage = getProviderRouter().usageTracker.summary();
+  const finalCacheStats: DashboardState['cacheStats'] = {
+    saved: finalProviderUsage.totalCacheSavedUsd,
+    creationTokens: finalProviderUsage.totalCacheCreationTokens,
+    readTokens: finalProviderUsage.totalCacheReadTokens,
+  };
+  if (dashboardEnabled) {
+    dashboardCurrentPrompt = null;
+    dashboardHandle.update(buildDashboardState(true));
+    await notifyComplete(
+      slackConfig,
+      projectName,
+      completedPrompts,
+      failedPrompts,
+      outcomes.filter((o) => o.disposition === 'failed').map((o) => o.id),
+      Date.now() - Date.parse(generatedAt),
+      finalCacheStats.saved,
+      { onDelivered: onSlackDelivered, log }
+    );
+    dashboardHandle.stop();
+  }
 
   if (buildRunId !== null && !dryRun) {
     try {
@@ -2476,6 +2632,12 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     simulation,
     warnings,
     generatedAt,
+    total_input_tokens: finalProviderUsage.totalInputTokens,
+    total_output_tokens: finalProviderUsage.totalOutputTokens,
+    total_cache_creation_tokens: finalCacheStats.creationTokens,
+    total_cache_read_tokens: finalCacheStats.readTokens,
+    estimated_cost_saved: finalCacheStats.saved,
+    slack_notifications_sent: slackNotificationsSent,
   };
   } finally {
     // Learning Engine: SessionEnd â€” always fires (including on unexpected throw).

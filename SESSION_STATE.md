@@ -1877,3 +1877,55 @@ request validation, rate limiting, structured error responses) targets route han
 internal `child_process` shell-invocation fix with no HTTP endpoint, so none apply. No hardcoded
 mock data — the change replaces one real shell-exec code path with another.
 
+## Session 2026-08-23 — Native features: prompt caching, live dashboard, Slack notifications, prompt density enforcement
+
+- Current phase: Phase 3 engine subsystems (not a queue run — direct feature implementation).
+- Current prompt: none (session complete).
+- Completed prompts: 4/4 parts (prompt caching, live dashboard, Slack notifications, prompt
+  density enforcement) + integration + verification.
+- Failed prompts: 0.
+
+**Files created:**
+- `src/dashboard/server.ts`, `src/dashboard/index.ts`
+- `src/notifications/slack.ts`
+- `src/validation/promptDensity.ts`
+- `tests/prompt-caching.test.ts`, `tests/slack-notifications.test.ts`, `tests/prompt-density.test.ts`
+- `tests/test-project/queue.yaml`
+
+**Files modified:**
+- `src/engine/provider-router.ts` — real Anthropic ephemeral prompt caching on the direct Messages
+  API path (`callAnthropicDirect`), the only place in this repo that builds one.
+- `src/phases/phase3-executor.ts` — density preflight gate; dashboard + Slack wiring around the
+  sequential prompt loop; six new optional `Phase3Result` report fields; `Phase3Options.dashboard`.
+- `src/cli/index.ts` — `--no-dashboard` flag; threaded `dashboard` option through all three
+  `Phase3Options` construction sites; `reportExecution` prints cache/Slack summary lines.
+- `package.json` — new test files added to the `test` script.
+- `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md` (this file) — this entry.
+
+**Architecture deviation flagged (see STATE_OF_THE_BUILD.md for the full explanation):** the task
+brief assumed a direct Anthropic Messages API call carries governance-doc content blocks for the
+Phase 3 build queue. Phase 3 actually pipes a flat string to the `claude -p` CLI (Contract 5) — no
+JSON payload FORGE controls, no `cache_control` surface. Real caching was implemented on the one
+genuine Anthropic Messages payload constructor that exists (`provider-router.ts`'s
+`callAnthropicDirect`, used for FORGE's own secondary reasoning calls), not invented against a code
+path that doesn't exist. This was a deliberate, disclosed engineering decision, not an oversight.
+
+**Verified (see STATE_OF_THE_BUILD.md for full detail):** `npx tsc --noEmit` clean; `npx tsc` full
+build clean (`dist/` emitted); `npm run test` 65/65 green (46 pre-existing + 19 new); pre-existing
+`tests/provider-router.test.ts` unchanged at 9 pass / 6 fail before and after (confirmed via `git
+stash` — a pre-existing test-environment issue, not a regression). All four features exercised
+live through their real exported functions: density validation against the real
+`tests/test-project/queue.yaml` (2 prompts — one clean, one deliberately density-violating) printed
+the exact `[DENSITY]`/`[DENSITY] ERROR` lines and correctly refused to start the queue; Slack
+no-op confirmed with no `FORGE_SLACK_WEBHOOK` set; the live dashboard bound to port 7735 (7734 was
+already reserved by the OS on this dev machine — a live confirmation of the fallback logic),
+served `GET /api/data` (200 with the real state snapshot), and stopped cleanly on `POST
+/api/stop`; a mocked `ProviderRouter.route()` call produced a real `cache_control:
+{"type":"ephemeral"}`-marked content block and correctly tracked `cache_creation_input_tokens`.
+
+## IDE STATUS
+
+- **VS Code path:** not re-checked this session.
+- **CHANGESET.md reviewed:** NO
+- **Last changeset date:** unchanged from the prior session entry.
+

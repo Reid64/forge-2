@@ -1,0 +1,29 @@
+- id: p1-schema
+  name: Users table schema
+  prompt_type: schema
+  dependencies: []
+  governance_refs: []
+  estimated_tokens: 500
+  context_injection:
+    schema_sections: []
+    behavioral_sections: []
+    interaction_maps: []
+  description: |
+    Create a users table with id, email, and created_at columns, with RLS enabled.
+
+- id: p2-ingest
+  name: Bulk document ingest
+  prompt_type: feature
+  dependencies: [p1-schema]
+  governance_refs: []
+  estimated_tokens: 500
+  context_injection:
+    schema_sections: []
+    behavioral_sections: []
+    interaction_maps: []
+  description: |
+    Use Start-Job to fetch and embed these documents in the background: https://a.example.com/1
+    https://a.example.com/2 https://a.example.com/3 https://a.example.com/4 https://a.example.com/5
+    https://a.example.com/6 https://a.example.com/7 https://a.example.com/8 https://a.example.com/9
+    https://a.example.com/10 https://a.example.com/11 https://a.example.com/12 https://a.example.com/13
+    https://a.example.com/14 https://a.example.com/15 https://a.example.com/16

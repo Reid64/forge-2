@@ -770,6 +770,7 @@ async function cmdBuild(
     allowHeadless?: boolean;
     maxBudgetUsd?: string;
     previewEnvironments?: boolean;
+    dashboard?: boolean;
   }
 ): Promise<void> {
   beginQuietLogging('.forge/build.log');
@@ -845,6 +846,7 @@ async function cmdBuild(
           allowHeadless: opts.allowHeadless ?? false,
           maxBudgetUsd,
           previewEnvironments,
+          dashboard: opts.dashboard ?? true,
           log,
         },
         startAt,
@@ -932,6 +934,7 @@ async function cmdBuild(
           allowHeadless: opts.allowHeadless ?? false,
           maxBudgetUsd,
           previewEnvironments,
+          dashboard: opts.dashboard ?? true,
           log,
         },
         startAt,
@@ -976,6 +979,7 @@ async function cmdBuild(
         allowHeadless: opts.allowHeadless ?? false,
         maxBudgetUsd,
         previewEnvironments,
+        dashboard: opts.dashboard ?? true,
         log,
       },
       startAt,
@@ -1029,6 +1033,17 @@ function reportExecution(exec: Phase3Result): void {
     if (sim.predictedErrors.length > 0) {
       console.log(chalk.yellow(`    ${sim.predictedErrors.length} prompt(s) predicted to need a rewrite.`));
     }
+  }
+  if ((exec.total_cache_creation_tokens ?? 0) > 0 || (exec.total_cache_read_tokens ?? 0) > 0) {
+    console.log(
+      chalk.yellow(
+        `  cache: ${exec.total_cache_creation_tokens ?? 0} creation tok, ${exec.total_cache_read_tokens ?? 0} read tok ` +
+          `— ≈$${(exec.estimated_cost_saved ?? 0).toFixed(4)} saved`
+      )
+    );
+  }
+  if ((exec.slack_notifications_sent ?? 0) > 0) {
+    console.log(chalk.dim(`  slack: ${exec.slack_notifications_sent} notification(s) delivered`));
   }
   printWarnings(exec.warnings);
 }
@@ -3844,6 +3859,10 @@ async function main(): Promise<void> {
       '--preview-environments',
       'optional per-prompt opt-in (mirrors manifest.yaml\'s previewEnvironments field): after Sentinel passes and a prompt merges, deploy an ephemeral Vercel preview, run the POST_PROMPT test suite against it, then tear it down. Requires VERCEL_TOKEN in the environment — cleanly skipped (logged, non-fatal) when absent. Default: off (no behavior change).',
       false
+    )
+    .option(
+      '--no-dashboard',
+      'disable the live browser dashboard (a lightweight HTTP server on port 7734, falling back to 7735/7736) that shows this build\'s progress in real time. On by default — this is a SEPARATE subsystem from the terminal `forge dashboard` command, which still works either way.'
     )
     .action(
       (

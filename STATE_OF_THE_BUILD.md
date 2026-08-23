@@ -3102,3 +3102,90 @@ both clean.
 - Timestamp: 2026-08-15T23:38:04.710Z
 
 > 2026-08-15T23:38:04.716Z [FORGE Phase 3] prompt 4 'wire-agent-approval-cli' (feature): FAILED â€" Sentinel FAIL(?).
+
+## Session 2026-08-23 — Native features: prompt caching, live dashboard, Slack notifications, prompt density enforcement
+
+Four native subsystems added in one session, on top of the Task 18/18 baseline (a0e56d3).
+
+**IMPORTANT ARCHITECTURE FINDING (Part 1, prompt caching):** the task brief assumed FORGE
+constructs an Anthropic Messages API request payload for the Phase 3 build queue and injects
+governance docs as content blocks in it. That is not how this codebase works: Phase 3
+(`src/phases/phase3-executor.ts`, via `src/engine/claude-runner.ts`) pipes a single flat-text
+prompt to the `claude -p --dangerously-skip-permissions` CLI over stdin (Contract 5) — there is no
+JSON API request FORGE constructs for a build prompt, so `cache_control` has no surface there at
+all. The ONLY place in this repo that builds a real Anthropic Messages payload is
+`callAnthropicDirect` in `src/engine/provider-router.ts` — used for FORGE's OWN secondary
+reasoning calls (Phase 1A PRD / Phase 1B Architecture / Phase 5 Agent Creator's `validation`,
+`simple_analysis`, `documentation`, `research_verification`, `code_review`, `pattern_matching`
+task types when their preferred provider fails over to `anthropic`; `complex_reasoning` — the
+design-phase primary — is pinned to the Claude Code CLI too, same as Phase 3). Real Anthropic
+ephemeral prompt caching was implemented there: it's real, tested (`tests/prompt-caching.test.ts`,
+3/3 green, mocked Anthropic API), and it accumulates genuine `cache_creation_input_tokens` /
+`cache_read_input_tokens` from the API response — but a build that never triggers that fallback
+path will legitimately show all-zero cache figures in its run report. This is documented in the
+code (`Phase3Result`'s new field comments) and surfaced honestly rather than faked.
+
+- `src/engine/provider-router.ts` (modified) — `CachedContentBlock`/`AnthropicContentBlock` types;
+  `enablePromptCaching` router option (default true); `callAnthropicDirect` sends `system` as a
+  single `cache_control: { type: 'ephemeral' }`-marked content block when caching is enabled and
+  non-empty; `ProviderDayUsage`/`ProviderUsageRollup`/`ProviderUsageSummary`/`RecordUsageInput`
+  gained `cacheCreationTokens`/`cacheReadTokens`/`cacheSavedUsd` (saved ≈ readTokens × 0.9 × base
+  input price/token); `[CACHE]` log lines on cache write and cache hit.
+- `src/dashboard/server.ts` + `src/dashboard/index.ts` (new) — a dependency-free `node:http`
+  server on port 7734 (falls back to 7735/7736; verified live — port 7734 is reserved by the OS
+  (PID 4) on this dev machine, confirming the fallback path for real), serving `GET /` (inline
+  dark-themed HTML dashboard: SVG progress ring, pass/fail/remaining counters, cache-savings card,
+  live-elapsed current-prompt timer, prompt history table with animated RUNNING badges, fading
+  live log tail, pass/fail completion banner — all auto-polling `GET /api/data` every 3s) and
+  `POST /api/stop`. This is a SEPARATE subsystem from the pre-existing terminal `forge dashboard`
+  command (`src/cli/dashboard-command.ts`, tails `.forge/runs/*.jsonl`) — neither was touched nor
+  merged into the other, per the task brief's explicit instruction.
+- `src/notifications/slack.ts` (new) — `getSlackConfig()` (reads `FORGE_SLACK_WEBHOOK`, `null`
+  when unset), `notifyStart`/`notifyPromptPass`/`notifyPromptFail`/`notifyComplete`, native
+  `fetch()` to the webhook, every network/HTTP-error path caught and swallowed (never throws,
+  never blocks a build). Tests: `tests/slack-notifications.test.ts`, 7/7 green.
+- `src/validation/promptDensity.ts` (new) — `validatePrompt(prompt, id)`: errors (block the queue)
+  on a backgrounding phrase (`background`/`nohup`/`Start-Job`/`Invoke-Expression`) combined with a
+  network-work phrase (`ingest`/`fetch`/`embed`/`download`), or >15 distinct URLs with no
+  `--dry-run` escape hatch; warnings (logged only) on an estimated >8000-token prompt or a
+  fetch/download + embed/vector combination. Tests: `tests/prompt-density.test.ts`, 9/9 green.
+- `src/phases/phase3-executor.ts` (modified) — new preflight block runs `validatePrompt` on every
+  queue entry right after the schedule is built (before `--start-at`/`pre_run_checks`), printing
+  `[DENSITY]`/`[DENSITY] ERROR ...` lines and returning a `status: 'failed'` result with zero
+  prompts run when any entry errors; a `dashboardEnabled = (options.dashboard ?? true) && !dryRun`
+  gate starts the live dashboard + fires Slack's `notifyStart` before the prompt loop, updates the
+  dashboard (RUNNING → PASS/FAIL) and fires `notifyPromptPass`/`notifyPromptFail` after each
+  sequential-path prompt (the `maxConcurrency > 1` git-worktree fan-out path is not wired for
+  per-prompt live updates — an accepted scope reduction given how rarely that path is used — but
+  still gets the final `notifyComplete`/dashboard-stop like every run), and `notifyComplete` +
+  `dashboardHandle.stop()` once `status` is known. `Phase3Options.dashboard?: boolean` (default
+  true) and six new optional `Phase3Result` fields (`total_input_tokens`, `total_output_tokens`,
+  `total_cache_creation_tokens`, `total_cache_read_tokens`, `estimated_cost_saved`,
+  `slack_notifications_sent`) were added — the cache/token fields read
+  `getProviderRouter().usageTracker.summary()` (see the architecture note above for why those are
+  frequently zero on a CLI-only build).
+- `src/cli/index.ts` (modified) — `--no-dashboard` flag on `forge build`; `dashboard: opts.dashboard
+  ?? true` threaded through all three `Phase3Options` construction sites (`--use-existing-queue`,
+  `--skip-design`, default); `reportExecution` prints cache-savings and Slack-delivery lines when
+  non-zero.
+- `tests/test-project/queue.yaml` (new) — the minimal 2-prompt test queue the task asked for; its
+  second prompt (`p2-ingest`) deliberately combines `Start-Job` + `fetch`/`embed` and 16 distinct
+  URLs to exercise both density-error rules against the real `parseQueueYaml` → `validatePrompt`
+  path (verified live — see SESSION_STATE.md for the exact output).
+- `package.json` (modified) — the three new test files added to the `test` script.
+
+**Verified:** `npx tsc --noEmit` → 0 errors. `npx tsc` (full build) → 0 errors, `dist/` emitted.
+`npm run test` → 65/65 green (46 pre-existing + 19 new: 3 caching + 7 Slack + 9 density).
+`tests/provider-router.test.ts` (pre-existing, not modified by this session): 9 pass / 6 fail
+before AND after this change (confirmed via `git stash`) — the 6 failures are a pre-existing
+test-environment issue (the real `claude.exe` on this machine's PATH answers `complex_reasoning`
+calls instead of the test's mocked `fetchImpl`), unrelated to and unchanged by this session's
+work. A standalone script exercised all four features live through their real exported functions
+(not fakes): density validation against the real `tests/test-project/queue.yaml` printed the exact
+`[DENSITY]`/`[DENSITY] ERROR` lines and correctly decided the queue would not start; `getSlackConfig()`
+returned `null` with no `FORGE_SLACK_WEBHOOK`; the dashboard bound to 7735 (7734 unavailable on
+this machine), served `GET /api/data` (200), and stopped cleanly; a mocked `ProviderRouter` call
+produced a `system` payload of `[{"type":"text","text":"...","cache_control":{"type":"ephemeral"}}]`
+with `cache_creation_input_tokens` correctly tracked. Did not run the full `runPhase3Executor`
+against a real project (would spawn real `claude`/`git` subprocesses against `tests/test-project`,
+out of proportion to what this verification needed).

@@ -243,6 +243,32 @@ export const DEFAULT_TIMEOUT_MS = 600_000;
 const ANTHROPIC_VERSION = '2023-06-01';
 
 // ---------------------------------------------------------------------------
+// Prompt caching (Anthropic ephemeral prompt caching, direct-path only)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single Anthropic Messages content block, as sent on the REQUEST side. FORGE's direct
+ * Anthropic path (`callAnthropicDirect`) only ever sends plain text blocks.
+ */
+export interface AnthropicContentBlock {
+  type: 'text';
+  text: string;
+}
+
+/**
+ * An {@link AnthropicContentBlock} marked for Anthropic's ephemeral prompt caching. Anthropic
+ * caches every content block up to and including the LAST block carrying `cache_control` (TTL 5
+ * minutes, refreshed on each cache hit) — a cache HIT re-reads that whole prefix at ~10% of the
+ * normal input-token price instead of paying full price again. Only `callAnthropicDirect`
+ * (the one place in FORGE that POSTs a real Anthropic Messages payload) uses this; the Claude
+ * Code CLI path (`callViaClaudeCode`, used for `complex_reasoning`) pipes a flat string over
+ * stdin with no JSON request FORGE constructs, so cache_control has no surface there.
+ */
+export interface CachedContentBlock extends AnthropicContentBlock {
+  cache_control: { type: 'ephemeral' };
+}
+
+// ---------------------------------------------------------------------------
 // Usage + cost ledger (free-tier awareness)
 // ---------------------------------------------------------------------------
 
@@ -255,6 +281,12 @@ export interface ProviderDayUsage {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Anthropic prompt-caching: input tokens spent WRITING a new cache entry (full price). */
+  cacheCreationTokens: number;
+  /** Anthropic prompt-caching: input tokens served from an existing cache entry (~10% price). */
+  cacheReadTokens: number;
+  /** Estimated USD saved by cache reads vs. paying full input price for the same tokens. */
+  cacheSavedUsd: number;
 }
 
 /** A per-provider rollup across the ledger's whole lifetime. */
@@ -264,6 +296,9 @@ export interface ProviderUsageRollup {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  cacheSavedUsd: number;
 }
 
 /** The ledger's full summary. */
@@ -272,6 +307,12 @@ export interface ProviderUsageSummary {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCostUsd: number;
+  /** Prompt-caching (`callAnthropicDirect` only) — total cache-write input tokens. */
+  totalCacheCreationTokens: number;
+  /** Prompt-caching (`callAnthropicDirect` only) — total cache-hit input tokens. */
+  totalCacheReadTokens: number;
+  /** Prompt-caching (`callAnthropicDirect` only) — estimated USD saved by cache hits. */
+  totalCacheSavedUsd: number;
   byProvider: ProviderUsageRollup[];
 }
 
@@ -281,6 +322,12 @@ export interface RecordUsageInput {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Prompt-caching (Anthropic direct path only). Default 0 for every non-caching call. */
+  cacheCreationTokens?: number;
+  /** Prompt-caching (Anthropic direct path only). Default 0 for every non-caching call. */
+  cacheReadTokens?: number;
+  /** Estimated USD saved by this call's cache reads. Default 0. */
+  cacheSavedUsd?: number;
 }
 
 /** Round a dollar figure to 6 decimals (sub-cent precision). */
@@ -317,11 +364,19 @@ export class ProviderUsageTracker {
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      cacheSavedUsd: 0,
     };
     current.calls += 1;
     current.inputTokens += safeTokens(input.inputTokens);
     current.outputTokens += safeTokens(input.outputTokens);
     current.costUsd = round6(current.costUsd + (Number.isFinite(input.costUsd) ? input.costUsd : 0));
+    current.cacheCreationTokens += safeTokens(input.cacheCreationTokens ?? 0);
+    current.cacheReadTokens += safeTokens(input.cacheReadTokens ?? 0);
+    current.cacheSavedUsd = round6(
+      current.cacheSavedUsd + (Number.isFinite(input.cacheSavedUsd) ? (input.cacheSavedUsd ?? 0) : 0)
+    );
     this._days.set(k, current);
     return current;
   }
@@ -336,6 +391,9 @@ export class ProviderUsageTracker {
         inputTokens: 0,
         outputTokens: 0,
         costUsd: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        cacheSavedUsd: 0,
       }
     );
   }
@@ -365,21 +423,31 @@ export class ProviderUsageTracker {
     let totalCalls = 0;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let totalCacheCreationTokens = 0;
+    let totalCacheReadTokens = 0;
     for (const d of this._days.values()) {
       totalCalls += d.calls;
       totalInputTokens += d.inputTokens;
       totalOutputTokens += d.outputTokens;
+      totalCacheCreationTokens += d.cacheCreationTokens;
+      totalCacheReadTokens += d.cacheReadTokens;
       const roll = byProvider.get(d.provider) ?? {
         provider: d.provider,
         calls: 0,
         inputTokens: 0,
         outputTokens: 0,
         costUsd: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        cacheSavedUsd: 0,
       };
       roll.calls += d.calls;
       roll.inputTokens += d.inputTokens;
       roll.outputTokens += d.outputTokens;
       roll.costUsd = round6(roll.costUsd + d.costUsd);
+      roll.cacheCreationTokens += d.cacheCreationTokens;
+      roll.cacheReadTokens += d.cacheReadTokens;
+      roll.cacheSavedUsd = round6(roll.cacheSavedUsd + d.cacheSavedUsd);
       byProvider.set(d.provider, roll);
     }
     const rollups = [...byProvider.values()];
@@ -388,6 +456,9 @@ export class ProviderUsageTracker {
       totalInputTokens,
       totalOutputTokens,
       totalCostUsd: round6(rollups.reduce((a, r) => a + r.costUsd, 0)),
+      totalCacheCreationTokens,
+      totalCacheReadTokens,
+      totalCacheSavedUsd: round6(rollups.reduce((a, r) => a + r.cacheSavedUsd, 0)),
       byProvider: rollups,
     };
   }
@@ -470,6 +541,15 @@ export interface ProviderRouterOptions {
   today?: () => string;
   /** Read an env var. Default `process.env`. Injected so routing is testable without the shell. */
   getEnv?: (name: string) => string | undefined;
+  /**
+   * Enable Anthropic ephemeral prompt caching on the direct Messages API path
+   * (`callAnthropicDirect` only — the CLI path has no request payload to mark). When true
+   * (default), `request.system` is sent as a `cache_control`-marked content block so a stable
+   * system prompt (e.g. governance/instruction context a caller assembled into `system`) is
+   * cached for 5 minutes and re-read at ~10% of the input-token price on every call that reuses
+   * it. Default true.
+   */
+  enablePromptCaching?: boolean;
   /** Progress reporter. Default a `[FORGE:provider-router]`-prefixed console line. */
   log?: (message: string) => void;
 }
@@ -497,6 +577,12 @@ export interface RoutedResponse extends ModelResponse {
   usedProxy: boolean;
   /** Every attempt made to satisfy this call, in order. */
   attempts: RouteAttempt[];
+  /** Prompt-caching (Anthropic direct path only) — input tokens spent writing a new cache entry. */
+  cacheCreationTokens: number;
+  /** Prompt-caching (Anthropic direct path only) — input tokens served from the cache. */
+  cacheReadTokens: number;
+  /** Estimated USD saved by this call's cache reads (cacheReadTokens × 0.9 × base input price). */
+  cacheSavedUsd: number;
 }
 
 /** Thrown when no provider in a task's chain could satisfy the call (callers catch + fall back). */
@@ -517,10 +603,28 @@ export class AllProvidersExhaustedError extends Error {
 // The router
 // ---------------------------------------------------------------------------
 
+/**
+ * What every provider-call method returns: the {@link ModelResponse} plus the model id actually
+ * requested, and (Anthropic direct path only) prompt-cache token counts — `undefined`/absent for
+ * every other path, read back as 0 by the caller.
+ */
+type ProviderCallResult = ModelResponse & {
+  model: string;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+};
+
 /** Internal parsed body shapes (only the fields the router reads). */
 interface AnthropicBody {
   content?: Array<{ type?: string; text?: string }>;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    /** Prompt caching (Anthropic Messages API) — input tokens spent writing a new cache entry. */
+    cache_creation_input_tokens?: number;
+    /** Prompt caching (Anthropic Messages API) — input tokens served from the cache. */
+    cache_read_input_tokens?: number;
+  };
 }
 interface OpenAIBody {
   choices?: Array<{ message?: { content?: string | null } }>;
@@ -558,6 +662,7 @@ export class ProviderRouter {
   private readonly now: () => number;
   private readonly today: () => string;
   private readonly getEnv: (name: string) => string | undefined;
+  private readonly enablePromptCaching: boolean;
   private readonly log: (message: string) => void;
   /** Optional free-first (or other) chain reorderer; null = identity. */
   private readonly prioritizeChain: ((chain: ProviderName[], day: string) => ProviderName[]) | null;
@@ -594,6 +699,7 @@ export class ProviderRouter {
     this.claudeCliTimeoutMs = options.claudeCliTimeoutMs;
     this.now = options.now ?? (() => Date.now());
     this.today = options.today ?? (() => nowIso().slice(0, 10));
+    this.enablePromptCaching = options.enablePromptCaching ?? true;
     this.log = options.log ?? logLine('provider-router');
     this.prioritizeChain = options.prioritizeChain ?? null;
   }
@@ -667,11 +773,35 @@ export class ProviderRouter {
         const costUsd = useClaudeCli
           ? 0
           : estimateProviderCost(cfg.pricing, result.tokensInput, result.tokensOutput);
+        const cacheCreationTokens = result.cacheCreationTokens ?? 0;
+        const cacheReadTokens = result.cacheReadTokens ?? 0;
+        // Anthropic's documented ephemeral-cache discount: a cache HIT costs ~10% of the normal
+        // input-token price, i.e. ~90% cheaper — estimated against this provider's base input rate.
+        const cacheSavedUsd = round6((cacheReadTokens / 1_000_000) * cfg.pricing.inputPerMTok * 0.9);
         this.usage.record(
-          { provider: name, inputTokens: result.tokensInput, outputTokens: result.tokensOutput, costUsd },
+          {
+            provider: name,
+            inputTokens: result.tokensInput,
+            outputTokens: result.tokensOutput,
+            costUsd,
+            cacheCreationTokens,
+            cacheReadTokens,
+            cacheSavedUsd,
+          },
           day
         );
         attempts.push({ provider: name, outcome: 'called', status: 200 });
+        if (cacheCreationTokens > 0) {
+          this.log(
+            `[CACHE] Anthropic prompt cache created (${cacheCreationTokens} tokens) — subsequent calls ` +
+              'reusing this prefix read from cache (~90% cheaper).'
+          );
+        }
+        if (cacheReadTokens > 0) {
+          this.log(
+            `[CACHE] Cache hit — ${cacheReadTokens} tokens read from cache (≈$${cacheSavedUsd.toFixed(4)} saved).`
+          );
+        }
         this.log(
           `${taskType} → ${name}/${result.model}` +
             `${useClaudeCli ? ' (Claude Code CLI — Max plan)' : this.proxyUrl ? ' (proxy)' : ''} ` +
@@ -687,6 +817,9 @@ export class ProviderRouter {
           costUsd,
           usedProxy: !useClaudeCli && this.proxyUrl !== null,
           attempts,
+          cacheCreationTokens,
+          cacheReadTokens,
+          cacheSavedUsd,
         };
       } catch (error) {
         const status = error instanceof ProviderHttpError ? error.status : undefined;
@@ -731,7 +864,7 @@ export class ProviderRouter {
     cfg: ProviderConfig,
     apiKey: string | null,
     request: ModelRequest
-  ): Promise<ModelResponse & { model: string }> {
+  ): Promise<ProviderCallResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -759,7 +892,7 @@ export class ProviderRouter {
   private async callViaClaudeCode(
     cfg: ProviderConfig,
     request: ModelRequest
-  ): Promise<ModelResponse & { model: string }> {
+  ): Promise<ProviderCallResult> {
     const prompt = request.system.trim() !== '' ? `${request.system}\n\n${request.user}` : request.user;
     const result = await runClaude(prompt, {
       cwd: this.claudeCliCwd,
@@ -793,8 +926,17 @@ export class ProviderRouter {
     apiKey: string,
     request: ModelRequest,
     signal: AbortSignal
-  ): Promise<ModelResponse & { model: string }> {
+  ): Promise<ProviderCallResult> {
     const model = this.modelIdFor(cfg, request);
+    // Prompt caching: when enabled and there's a non-empty system prompt, send it as a single
+    // cache_control-marked content block (the LAST — and only — governance/instruction block)
+    // instead of a plain string. Anthropic then caches everything up to and including this block
+    // (TTL 5 min, refreshed per hit); every subsequent call that resends the SAME system text
+    // hits the cache instead of paying full input price for it again.
+    const system: string | CachedContentBlock[] =
+      this.enablePromptCaching && request.system.trim() !== ''
+        ? [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }]
+        : request.system;
     const res = await this.fetchImpl(cfg.endpoint, {
       method: 'POST',
       headers: {
@@ -805,7 +947,7 @@ export class ProviderRouter {
       body: JSON.stringify({
         model,
         max_tokens: request.maxTokens,
-        system: request.system,
+        system,
         messages: [{ role: 'user', content: request.user }],
       }),
       signal,
@@ -830,6 +972,8 @@ export class ProviderRouter {
       tokensInput: body.usage?.input_tokens ?? 0,
       tokensOutput: body.usage?.output_tokens ?? 0,
       model,
+      cacheCreationTokens: body.usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: body.usage?.cache_read_input_tokens ?? 0,
     };
   }
 
@@ -839,7 +983,7 @@ export class ProviderRouter {
     apiKey: string,
     request: ModelRequest,
     signal: AbortSignal
-  ): Promise<ModelResponse & { model: string }> {
+  ): Promise<ProviderCallResult> {
     const model = this.modelIdFor(cfg, request);
     const res = await this.fetchImpl(cfg.endpoint, {
       method: 'POST',
@@ -866,7 +1010,7 @@ export class ProviderRouter {
     cfg: ProviderConfig,
     request: ModelRequest,
     signal: AbortSignal
-  ): Promise<ModelResponse & { model: string }> {
+  ): Promise<ProviderCallResult> {
     const url = normalizeProxyUrl(this.proxyUrl as string);
     const bareModel = this.modelIdFor(cfg, request);
     const litellmModel = `${cfg.litellmPrefix}${bareModel}`;
