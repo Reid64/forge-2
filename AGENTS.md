@@ -1,6 +1,9 @@
 # FORGE 2.0 — Agents Registry
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-08-22 (Task 18/18 session wrap-up — added ForgeDashboard, 12 new
+`src/testing/runners/` entries, Design Intelligence extension, ProjectOntology,
+AgentPermissionEnforcer, EphemeralPreviewEnvironments, ForgeBenchmark, ShadowModeGate, BudgetCap —
+see entries below; see `STATE_OF_THE_BUILD.md`/`SESSION_STATE.md` for full session detail)
 **Maintained by:** FORGE build system (auto-updated each run)
 
 ---
@@ -779,6 +782,145 @@ Generated `queue.yaml` is ordered by dependency tier:
 | `src/testing/runners/unit-runner.ts`, `integration-runner.ts`, `api-runner.ts`, `e2e-runner.ts`, `security-runner.ts`, `performance-runner.ts`, `dependency-runner.ts` | The 7 batch runners `TestOrchestrator.runTests` dispatches to |
 | `src/testing/runners/unit.ts`, `integration.ts`, `api.ts`, `e2e.ts`, `security.ts`, `performance.ts`, `dependency.ts` | Single-suite direct-call wrappers (`runUnitTests` etc.) around the same runner + `persist.ts` path — confirmed zero importers anywhere in `src/` this session; removed as orphaned pre-`vitest-shared.ts` draft entry points (see `STATE_OF_THE_BUILD.md` § Systems 1-4) |
 | `src/memory/test-results.ts` | CRUD for `test_run_results`/`test_coverage_snapshots` |
+
+### Files (Enterprise Test Suite — Task 18 session additions, src/testing/runners/)
+
+| File | Purpose |
+|------|---------|
+| `iac-runner.ts` | Infrastructure-as-Code security scan (checkov) — gated MILESTONE/PRE-DEPLOYMENT |
+| `sbom-runner.ts` | Software Bill of Materials (`trivy fs --format cyclonedx`) — same gate |
+| `license-runner.ts` | Dependency license compliance (`trivy fs --scanners license`) — same gate |
+| `python-property-runner.ts` | Python property-based testing (pytest + Hypothesis) — gated same as UNIT |
+| `fastcheck-runner.ts` | JS/TS property-based testing (fast-check) — gated same as UNIT |
+| `mutation-runner.ts` | Mutation testing (Stryker Mutator JS/TS) |
+| `chaos-runner.ts` | Chaos engineering probes — gated ENTERPRISE_RELEASE only |
+| `recovery-runner.ts` | Disaster-recovery drill — gated ENTERPRISE_RELEASE only |
+| `backup-restore-runner.ts` | Backup/restore verification — gated ENTERPRISE_RELEASE only |
+| `idempotency-runner.ts` | Idempotency probes against a live throwaway dev server — gated ENTERPRISE_RELEASE only |
+| `concurrency-runner.ts` | Concurrency/race-condition probes against a live throwaway dev server — gated ENTERPRISE_RELEASE only |
+| `flaky-detector.ts` | Analysis utility over historical `test_run_results` — flags flaky tests; NOT in the `RUNNERS` dispatch table |
+| `test-order-detector.ts` | Opt-in test-execution-order-sensitivity check; NOT in the `RUNNERS` dispatch table |
+
+Each of the 11 dispatch-table runners above is registered in `orchestrator.ts`'s `RUNNERS` map and
+mapped to its own dedicated `TestSuiteDb` value in `persist.ts`'s `TEST_SUITE_DB` map (PYTHON_PROPERTY
+and FASTCHECK both map to the shared `PROPERTY_BASED` value; the other 10 are 1:1). As of this
+session, `TestSuiteDb` has 26 total values: 21 have a real wired runner, 5 remain schema-only (LOAD,
+STRESS, SOAK, CROSS_BROWSER, CROSS_DEVICE — accepted by the type/CHECK constraint, never produced by
+any runner).
+
+---
+
+## Agent: ForgeDashboard (src/cli/dashboard-command.ts)
+
+- **Purpose:** Read-only live telemetry viewer for an in-progress or completed build run — surfaces
+  the same data `src/telemetry/run-recorder.ts` writes to `.forge/runs/<run-id>/` (events, prompts,
+  tests, failures, metrics) as a terminal view, without mutating any state.
+- **Status:** COMPLETE
+- **CLI:** `forge dashboard [run-id]` — defaults to the most recent run when `run-id` is omitted.
+- **Dependencies:** `src/telemetry/run-recorder.ts` (reads `.forge/runs/<run-id>/*.jsonl`/`metrics.json`)
+- **Database tables:** none — reads only the on-disk run-recorder artifacts, no Build Memory writes.
+
+---
+
+## Agent: Design Intelligence Extensions (src/design-pipeline/)
+
+- **Purpose:** Eight new modules extending the pre-existing Design Pipeline (App Profiler/Design
+  Router/Design Tournament/Design Memory, 2026-08-15) and Design Pipeline (Screenshotter/Penpot/
+  Review Gate, 2026-07-22) with brand-aware, persona-aware, and multi-variant composition
+  capabilities, plus a real enforced pre-deploy design-approval gate.
+- **Status:** COMPLETE
+- **Files:**
+
+| File | Purpose |
+|------|---------|
+| `brand-intelligence.ts` | Derives a brand profile (palette/type/voice signals) from project inputs |
+| `persona-profiler.ts` | Derives target-user persona signals feeding design decisions |
+| `aesthetic-reference.ts` | Reference-image/style-corpus lookup for design generation |
+| `variance-controller.ts` | Controls how much stylistic variance is allowed across generated variants |
+| `composite-builder.ts` | Composes multiple design outputs into one final artifact |
+| `design-system-extractor.ts` | Extracts a reusable design-token/system spec from generated output |
+| `token-consolidator.ts` | Consolidates/de-duplicates design tokens across extraction runs |
+| `deployment-gate.ts` | `checkDesignApproval` — real, blocking pre-deploy check for an approved `design_reviews` record; wired into `src/deploy/pre-deploy-gate.ts` (fails CLOSED, unlike most Contract-4-style neutral-degrade checks elsewhere in this codebase, since blocking IS the point of this gate) |
+
+- **Database tables:** `design_reviews` (read, `deployment-gate.ts`) — other modules operate on
+  in-memory/derived profiles, no dedicated new tables added this session.
+
+---
+
+## Agent: ProjectOntology (src/governance/ontology.ts)
+
+- **Purpose:** Typed cross-reference layer over existing Build Memory tables (requirements, prompts,
+  artifacts, tests) — does not introduce new storage, just a typed traversal API over what already
+  exists. Adds bidirectional `traceRequirement` (requirement → artifacts → tests, and back).
+- **Status:** COMPLETE
+- **CLI:** `forge trace --reverse` (artifact/test → requirement), `forge trace --untested`
+  (requirements with no traced test coverage) — extends the pre-existing `forge trace` command.
+- **Entry Point:** `src/governance/ontology.ts` → `traceRequirement(...)`
+- **Database tables:** reads existing requirement/artifact/test tables only; no schema change.
+
+---
+
+## Agent: AgentPermissionEnforcer (src/governance/agent-contracts.ts, src/governance/permission-enforcer.ts)
+
+- **Purpose:** Static write-scope contracts (glob-pattern allow-lists) registered for 12 real
+  subsystems — Build Agent, Recovery Agent, Sentinel, Sentinel Prime, Git Manager, Native
+  Orchestrator, Design Pipeline, Testing Orchestrator, Architecture Guardian, Supabase Migrator, Gap
+  Auditor, Integration Bus. Every Build Agent write is checked post-hoc against its subsystem's
+  registered contract before merge; an unregistered subsystem is **denied by default** (deny-by-default,
+  not allow-by-default). A violation forces Sentinel to read as failed (new `agent_permission`
+  check), routing into Autonomous Recovery/halt rather than silently merging.
+- **Status:** COMPLETE
+- **Wired into:** Phase 3 (`src/phases/phase3-executor.ts`), pre-write.
+- **Database tables:** none new — enforcement is in-process against the write set of the current prompt.
+
+---
+
+## Agent: EphemeralPreviewEnvironments (src/deploy/ephemeral-preview.ts)
+
+- **Purpose:** Opt-in per-prompt Vercel preview deploy + automatic teardown, gated behind
+  `manifest.yaml`'s `previewEnvironments` flag (default `false`). When the flag is absent/false this
+  is a strict no-op — zero behavior change, not even an env-var check.
+- **Status:** COMPLETE
+- **Dependencies:** Vercel CLI/API (opt-in only, never invoked when the flag is off)
+
+---
+
+## Agent: ForgeBenchmark (benchmarks/manifest.json, benchmarks/benchmark-runner.ts, benchmarks/fixtures/)
+
+- **Purpose:** FORGE self-benchmark suite — 5 fixed, disposable-fixture scenarios (simple-crud,
+  multi-tenant-check, legacy-resurrection, broken-migration-fix, security-remediation) exercised
+  end-to-end through FORGE itself to produce a comparable completion/defect/cost/latency scorecard.
+  `broken-migration-fix` and `security-remediation` contain scripted, intentional defects and are
+  DESIGNED to halt — a halt on those two is the correct/expected result, not a failure.
+- **Status:** COMPLETE
+- **CLI:** `forge benchmark` — runs all 5 fixtures, prints a summary table (status/completion/
+  defects/cost/latency per scenario plus aggregate means).
+- **Consumers:** `src/learning/shadow-mode.ts` (runs this suite for both the existing and a
+  candidate strategy before auto-promotion).
+
+---
+
+## Agent: ShadowModeGate (src/learning/shadow-mode.ts)
+
+- **Purpose:** Runs the FORGE Self-Benchmark Suite for both the existing strategy and a candidate
+  strategy before any auto-promotion, and wires the comparison result as a new required precondition
+  in `src/learning/evolution-promoter.ts`'s `promoteEligible`. A candidate strategy — even at
+  confidence >= 0.90 — may NOT be auto-promoted unless `runShadowComparison` proves it strictly
+  outperforms the existing strategy on the benchmark suite with zero per-scenario completion-rate
+  regression.
+- **Status:** COMPLETE
+- **Dependencies:** `benchmarks/benchmark-runner.ts` (runs both strategies), `src/learning/evolution-promoter.ts` (`promoteEligible`)
+- **Database tables:** `evolution_promotions` (write, via `evolution-promoter.ts`'s existing audit path — no new table)
+
+---
+
+## Agent: BudgetCap (src/phases/phase3-executor.ts — maxBudgetUsd)
+
+- **Purpose:** Opt-in run-wide cost cap. When `manifest.yaml` sets `maxBudgetUsd`, Phase 3 halts
+  cleanly BETWEEN prompts (never mid-prompt) once the accumulated cost estimate reaches or exceeds
+  it. Unset (`null`, the default) is a strict no-op — zero behavior change.
+- **Status:** COMPLETE
+- **Wired into:** `src/phases/phase3-executor.ts`'s per-prompt loop, checked at prompt boundaries only.
 
 ---
 

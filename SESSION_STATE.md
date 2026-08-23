@@ -1,9 +1,73 @@
 # FORGE 2.0 — SESSION STATE
 
-## Current Session: Security/Quality Gate Expansion (Semgrep SAST + OWASP ZAP DAST + Schemathesis API contract testing) — COMPLETE
-## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE + Deferred Concurrent Execution: COMPLETE + Design Intelligence: COMPLETE + Security/Quality Gate Expansion: COMPLETE
+## Current Session: Task 18/18 Session Wrap-Up (benchmark suite, shadow-mode gate, agent permission contracts, design intelligence, 12 test runners, ontology/trace, ephemeral previews, budget cap, dashboard) — COMPLETE
+## 4-SESSION REBUILD: COMPLETE (Sessions 1-4) + Session 5 Field Hardening: COMPLETE + Session 5.1 Hotfix: COMPLETE + Session 5.2 Vacuous-Build Fix: COMPLETE + Systems 1-4: COMPLETE + System 5 + Native Orchestrator: COMPLETE + Enhanced Retrofit: COMPLETE + Skills Library: COMPLETE + Autonomy Upgrades: COMPLETE + Token Optimization: COMPLETE + UI Engine: COMPLETE + Architecture Guardian: COMPLETE + Elite Skills Library: COMPLETE + Design Pipeline: COMPLETE + Readiness-Level Engine / Definition of Done: COMPLETE + Requirements Traceability / Invariant Engine: COMPLETE + Build State Machine / Blast-Radius Analysis: COMPLETE + Governance Provenance Ledgers: COMPLETE + Dead-Loop / Stagnation Detection: COMPLETE + Control Plane Run Telemetry: COMPLETE + Deferred Concurrent Execution: COMPLETE + Design Intelligence: COMPLETE + Security/Quality Gate Expansion: COMPLETE + 18-task chained session (benchmark suite, shadow-mode gate, agent permission contracts, ontology/trace, ephemeral previews, 12 test runners, design intelligence, budget cap, dashboard): COMPLETE
 ## Machine: reid@repvg.com workstation (Windows 11, Node v20+)
-## Last Updated: 2026-08-15 (Security/Quality Gate Expansion: extended Sentinel's Ring 2/Ring 3 tool gates — the existing Trivy/Gitleaks/Lighthouse pattern (fast-path installed-check, boot dev server if needed, run tool, parse report, tear down, skip-never-false-fail) — with an OWASP-focused Semgrep ruleset upgrade (`--config=p/owasp-top-ten` added alongside `auto`) and two brand-new Ring 3 checks: OWASP ZAP DAST (`runRing3ZapCheck`, port 3098, `zap-baseline.py` baseline scan, 0 High-risk-alert threshold) and Schemathesis API contract testing (`runRing3SchemathesisCheck`, port 3097, discovers the app's OpenAPI schema at 6 well-known paths, `schemathesis run --checks all`, 0 failing/erroring JUnit test-case threshold). Added matching TestOrchestrator runners (`semgrep-runner.ts`/`zap-runner.ts`/`schemathesis-runner.ts`, all DRY reuse of the Sentinel check functions) and `RunnerType`/`TEST_SUITE_DB` entries (mapped to the existing `STATIC_ANALYSIS`/`DYNAMIC_ANALYSIS`/`API` categories — no new DB enum values, no migration). `pnpm run build` — 0 errors; `node --import tsx --test tests/sentinel.test.ts` — 30/34 pass (4 pre-existing failures confirmed via `git stash` to predate this session, unrelated to these changes — every test this session added passes). Neither new check is wired to fire automatically in a real Phase 3 build yet — like Trivy/Gitleaks/Lighthouse before them, `phase3-executor.ts` never sets `ring2`/`ring3` on `SentinelOptions`; all six tools currently only run via the standalone `forge sentinel --ring 2|3` CLI command — a pre-existing gap, not introduced or closed here.)
+## Last Updated: 2026-08-22 (Task 18/18 session wrap-up — 15 commits landed this session, see dated entry below for full detail: `29e6708` scratch-promote concurrency test, `d834254` maxBudgetUsd cost cap, `39d2c0d` forge dashboard CLI, `aba791e` IAC/SBOM/LICENSE runners, `79536ba` Python-property/fast-check runners, `7b49aaf` MUTATION runner, `7e85b1c` CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE runners, `b966b3b` IDEMPOTENCY/CONCURRENCY runners + flaky/test-order detectors, `af714af` Brand Intelligence/Persona Profiler/Aesthetic Reference/Variance Controller, `f9c283e` Composite Builder/Design System Extractor/Token Consolidator/Deployment Gate, `7aa70d1` ontology.ts + bidirectional trace, `71a5e92` AgentContract registry + permission-enforcer, `8589e19` ephemeral Vercel preview environments, `f1ddb06` FORGE self-benchmark suite + forge benchmark CLI (also fixed a real onSentinelFailure non-TTY readline hang), `440c5a7` shadow-mode benchmark gate wired into EvolutionPromoter. `pnpm run build` 0 errors; `pnpm test` 46/46; full suite (excl. executor.test.ts) 523 tests, 460 pass/63 fail, all 63 failures confirmed byte-for-byte pre-existing against the pre-session baseline; TestSuiteDb metric: 21/26 values have a real wired runner, 5 remain schema-only (LOAD/STRESS/SOAK/CROSS_BROWSER/CROSS_DEVICE). Plus 1 related commit `1075530` in the separate FORGE 1.0 repo. Prior session below unchanged:)
+## Last Updated (prior session, 2026-08-15): (Security/Quality Gate Expansion: extended Sentinel's Ring 2/Ring 3 tool gates — the existing Trivy/Gitleaks/Lighthouse pattern (fast-path installed-check, boot dev server if needed, run tool, parse report, tear down, skip-never-false-fail) — with an OWASP-focused Semgrep ruleset upgrade (`--config=p/owasp-top-ten` added alongside `auto`) and two brand-new Ring 3 checks: OWASP ZAP DAST (`runRing3ZapCheck`, port 3098, `zap-baseline.py` baseline scan, 0 High-risk-alert threshold) and Schemathesis API contract testing (`runRing3SchemathesisCheck`, port 3097, discovers the app's OpenAPI schema at 6 well-known paths, `schemathesis run --checks all`, 0 failing/erroring JUnit test-case threshold). Added matching TestOrchestrator runners (`semgrep-runner.ts`/`zap-runner.ts`/`schemathesis-runner.ts`, all DRY reuse of the Sentinel check functions) and `RunnerType`/`TEST_SUITE_DB` entries (mapped to the existing `STATIC_ANALYSIS`/`DYNAMIC_ANALYSIS`/`API` categories — no new DB enum values, no migration). `pnpm run build` — 0 errors; `node --import tsx --test tests/sentinel.test.ts` — 30/34 pass (4 pre-existing failures confirmed via `git stash` to predate this session, unrelated to these changes — every test this session added passes). Neither new check is wired to fire automatically in a real Phase 3 build yet — like Trivy/Gitleaks/Lighthouse before them, `phase3-executor.ts` never sets `ring2`/`ring3` on `SentinelOptions`; all six tools currently only run via the standalone `forge sentinel --ring 2|3` CLI command — a pre-existing gap, not introduced or closed here.)
+
+---
+
+## Task 18/18 Session Wrap-Up — Benchmark Suite, Shadow-Mode Gate, Agent Permission Contracts, Design Intelligence, 12 Test Runners, Ontology, Ephemeral Previews, Budget Cap, Dashboard (2026-08-22T23:46:39-05:00) — COMPLETE
+
+**Objective:** Final task (18 of 18) in a chained session. Pure documentation/wrap-up — no code
+changes in this task. Records the 15 commits made across the prior 17 tasks of this chain in this
+repo, plus 1 related commit in the separate FORGE 1.0 repo, and the already-run/already-confirmed
+build/test verification for the session as a whole.
+
+**Commits this session (oldest to newest), all in `forge-2`:**
+1. `29e6708` test(scratch-promote): concurrent scratch-lock + promote_scratch collision integration test
+2. `d834254` feat(engine): opt-in `maxBudgetUsd` run-wide cost cap, halts cleanly between prompts
+3. `39d2c0d` feat(cli): read-only `forge dashboard` command for live build-run telemetry
+4. `aba791e` feat(testing): IAC/SBOM/LICENSE runners (checkov, trivy-cyclonedx, trivy-license), gated MILESTONE/PRE-DEPLOYMENT
+5. `79536ba` feat(testing): Python property-based (pytest+Hypothesis) + fast-check runners
+6. `7b49aaf` feat(testing): MUTATION runner (Stryker Mutator JS/TS)
+7. `7e85b1c` feat(testing): CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE runners, gated ENTERPRISE_RELEASE
+8. `b966b3b` feat(testing): IDEMPOTENCY/CONCURRENCY runners, flaky-test detector, opt-in test-order check
+9. `af714af` feat(design-pipeline): Brand Intelligence, Persona Profiler, Aesthetic Reference, Variance Controller
+10. `f9c283e` feat(design-pipeline): Composite Builder, Design System Extractor, Token Consolidator, Deployment Gate
+11. `7aa70d1` feat(governance): ontology.ts, bidirectional trace, `forge trace --reverse`/`--untested`
+12. `71a5e92` feat(governance): AgentContract registry + permission-enforcer, wired into Phase 3
+13. `8589e19` feat(deploy): ephemeral Vercel preview environments, opt-in via `manifest.yaml`'s `previewEnvironments`
+14. `f1ddb06` feat(benchmark): FORGE self-benchmark suite (5 fixed scenarios) + `forge benchmark` CLI — also fixed a real pre-existing bug (`src/integration/bus.ts`'s `onSentinelFailure` missing `nonInteractive: true`, causing a non-TTY readline hang)
+15. `440c5a7` feat(learning): shadow-mode benchmark gate wired as a new `EvolutionPromoter` precondition
+
+Plus, in the **separate** FORGE 1.0 repo (`C:\Users\manag\Documents\FORGE`): `1075530` —
+`path_class: shared_canonical` retrofitted onto 9 prompts across 9 Tarritrix library queue YAML
+files.
+
+**New first-class subsystems this session:** `forge dashboard` CLI
+(`src/cli/dashboard-command.ts`); 12 new `src/testing/runners/` runners (iac, sbom, license,
+python-property, fastcheck, mutation, chaos, recovery, backup-restore, idempotency, concurrency)
+plus flaky-detector.ts and test-order-detector.ts (both non-dispatch-table utilities); Design
+Intelligence (`src/design-pipeline/brand-intelligence.ts`, `persona-profiler.ts`,
+`aesthetic-reference.ts`, `variance-controller.ts`, `composite-builder.ts`,
+`design-system-extractor.ts`, `token-consolidator.ts`, `deployment-gate.ts`); Project Ontology
+(`src/governance/ontology.ts`) + bidirectional trace; Agent Contracts + Permission Enforcer
+(`src/governance/agent-contracts.ts`, `permission-enforcer.ts`, 12 registered subsystems,
+deny-by-default); Ephemeral Preview Environments (`src/deploy/ephemeral-preview.ts`, opt-in); FORGE
+Self-Benchmark Suite (`benchmarks/`) + `forge benchmark`; Shadow-Mode Evaluation Gate
+(`src/learning/shadow-mode.ts`); `maxBudgetUsd` cost cap.
+
+**Verification (already run/confirmed by the coordinating session; not re-run by this task):**
+`pnpm run build` — 0 TypeScript errors. `pnpm test` — 46/46 (5 files). Full suite excluding
+`tests/executor.test.ts` — 523 tests, 460 pass / 63 fail, **all 63 confirmed byte-for-byte
+identical to the pre-session baseline** (`5713fd3` worktree) — zero regressions, every new test
+this session added passes. `tests/executor.test.ts` — all pass except one pre-existing flaky test
+("Autonomous Recovery restores green → completed"), root-caused to real accumulated
+`error_patterns` history (`"fail: typescript"` occurrence_count 35+ since 2026-07-07) correctly
+tripping the dead-loop threshold — test-isolation debt, not a regression. `forge benchmark` — all 5
+fixtures ran; simple-crud/multi-tenant-check/legacy-resurrection completed 100%; broken-migration-fix/
+security-remediation halted at 33% as designed (intentional scripted defects); mean completion 73%,
+total cost $0.1399.
+
+**Measurable metric — TestSuiteDb coverage (re-verified directly against source this task):**
+TestSuiteDb has 26 total values; 21 have a real, wired `RunnerType` (registered in
+`orchestrator.ts`'s `RUNNERS` map AND `persist.ts`'s `TEST_SUITE_DB` map); 5 remain schema-only
+(LOAD, STRESS, SOAK, CROSS_BROWSER, CROSS_DEVICE).
+
+**Files touched by this task:** `STATE_OF_THE_BUILD.md`, `SESSION_STATE.md`, `AGENTS.md`,
+`BEHAVIORAL_CONTRACTS.md` only — documentation, no source changes.
 
 ---
 

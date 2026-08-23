@@ -736,3 +736,69 @@ viewport captures per component. A caller MAY request additional viewports via `
 but the default sweep every `ui`/`feature` prompt receives through `DesignPipeline.run` MUST NEVER
 be fewer than these four, so a component's responsive behavior is never judged from a single
 screen size alone.
+
+### Contract DP-6: Design Approval Blocks Deploy, and Fails CLOSED
+`checkDesignApproval` (`src/design-pipeline/deployment-gate.ts`), wired into
+`src/deploy/pre-deploy-gate.ts`, MUST block deploy when the project has no approved `design_reviews`
+record. This is a REAL, enforced check, not an informational one. Unlike most Contract-4-style checks
+in this codebase — which degrade to a smaller/emptier result and let the build continue when their
+own data source is unreachable (Penpot per Contract DP-4, Build Memory per Contract 4 itself) — this
+gate fails CLOSED: an unreachable or absent `design_reviews` record is treated as "not approved," not
+as "skip the check," because blocking an unapproved deploy IS the point of this gate. Added this
+session (`f9c283e`).
+
+## Cost Control Contracts
+
+Source: `src/phases/phase3-executor.ts`'s `maxBudgetUsd` handling (added this session, commit
+`d834254`).
+
+### Contract BUD-1: The Budget Cap Halts Only Between Prompts, and Is a No-Op When Unset
+When `manifest.yaml` sets `maxBudgetUsd`, Phase 3 MUST halt cleanly at a prompt BOUNDARY — never
+mid-prompt — once the accumulated cost estimate for the run reaches or exceeds it; a prompt already
+in flight when the cap is crossed MUST be allowed to finish before the halt takes effect. When
+`maxBudgetUsd` is unset (`null`, the default), this MUST be a strict no-op: zero behavior change
+from the pre-session build, not even a comparison against a default ceiling.
+
+## Agent Permission Contracts
+
+Source: `src/governance/agent-contracts.ts` (the `AgentContract` registry) +
+`src/governance/permission-enforcer.ts`, wired into Phase 3 (added this session, commit `71a5e92`).
+
+### Contract PERM-1: Every Build Agent Write Is Checked Against a Registered, Deny-by-Default Contract
+Every file write a Build Agent produces during Phase 3 MUST be checked post-hoc against its
+originating subsystem's registered `AgentContract` write-scope glob patterns before that prompt's
+changes are merged. The 12 subsystems registered this session — Build Agent, Recovery Agent,
+Sentinel, Sentinel Prime, Git Manager, Native Orchestrator, Design Pipeline, Testing Orchestrator,
+Architecture Guardian, Supabase Migrator, Gap Auditor, Integration Bus — are each scoped to the
+paths they legitimately write. A subsystem with NO registered contract MUST be denied by default
+(deny-by-default), never allowed by default. A violation of a subsystem's write scope MUST force
+Sentinel to read as failed via a new `agent_permission` check, routing the build into Autonomous
+Recovery (Contract 14) or a halt — never a silent merge of an out-of-scope write.
+
+## Evolution Shadow-Mode Contracts
+
+Source: `src/learning/shadow-mode.ts`, wired into `src/learning/evolution-promoter.ts`'s
+`promoteEligible` (added this session, commit `440c5a7`). This extends, and does not duplicate,
+Contract 16 (Template Evolution is proposal/evidence/human-approval for governance template
+changes specifically) and Contract 17 (Self-Created Agents' 3-build/no-existing-handler/test-
+validation gate is a different precondition for a different promotion path) — shadow-mode is a new,
+additional precondition specifically for the AUTO-promotion path `promoteEligible` already governed.
+
+### Contract EVO-1: Auto-Promotion Requires a Winning Shadow-Mode Comparison, Not Just Confidence
+`evolution-promoter.ts` MUST NOT auto-promote a candidate strategy — even one at or above the
+pre-existing 0.90 confidence threshold — unless `runShadowComparison` first runs the FORGE
+Self-Benchmark Suite (`benchmarks/`) for both the existing strategy and the candidate, and proves the
+candidate strictly outperforms the existing strategy with ZERO per-scenario completion-rate
+regression. A candidate that regresses even one benchmark scenario's completion rate, relative to
+the existing strategy, MUST NOT be auto-promoted, regardless of its confidence score.
+
+## Ephemeral Preview Environment Contracts
+
+Source: `src/deploy/ephemeral-preview.ts` (added this session, commit `8589e19`).
+
+### Contract PREVIEW-1: Ephemeral Previews Are a Strict No-Op When Disabled
+Ephemeral Vercel preview deploy + teardown per prompt MUST run only when `manifest.yaml`'s
+`previewEnvironments` flag is explicitly `true`. When the flag is absent or `false` (the default),
+this MUST be a strict no-op — zero behavior change, not even an environment-variable check or a
+skipped-log line — matching the same opt-in posture already established for Supabase migration
+(Contract AUT-3) and Vercel deployment (Contract AUT-4) elsewhere in the Autonomy Upgrades series.

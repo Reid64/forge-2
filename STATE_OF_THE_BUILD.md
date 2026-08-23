@@ -1,6 +1,6 @@
 # FORGE 2.0 — STATE OF THE BUILD
 
-**Last Updated:** 2026-08-15 (promote_scratch gate type + concurrent-session scratch lock — `src/engine/scratch-lock.ts` (sha256-keyed, atomic `wx`-create, time-based staleness reclaim) + `src/engine/scratch-promote.ts` (`promote_scratch` gate: `git pull` then direct-copy-and-commit-and-push or conflict-to-`_pending-review`) wired into `phase3-executor.ts` (lock acquired per `shared_canonical` redirect before execution, released after the scratch write, promotion runs after Sentinel passes and before merge) — COMPLETE, on top of Security/Quality Gate Expansion — Semgrep SAST (OWASP Top Ten ruleset) + OWASP ZAP DAST + Schemathesis API contract testing wired into Sentinel Ring 2/Ring 3 — COMPLETE, on top of Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory — COMPLETE, on top of Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
+**Last Updated:** 2026-08-22 (Task 18/18 session wrap-up — 15 commits: FORGE Self-Benchmark Suite + `forge benchmark` CLI, Shadow-Mode Evaluation Gate wired as a new EvolutionPromoter precondition, Agent Contracts + Permission Enforcer (12 subsystems, deny-by-default), Project Ontology + bidirectional `forge trace --reverse`/`--untested`, Ephemeral Vercel Preview Environments (opt-in), Design Intelligence additions (Brand Intelligence/Persona Profiler/Aesthetic Reference/Variance Controller/Composite Builder/Design System Extractor/Token Consolidator/Deployment Gate), 12 new TestOrchestrator runners (IAC/SBOM/LICENSE/PYTHON_PROPERTY/FASTCHECK/MUTATION/CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE/IDEMPOTENCY/CONCURRENCY + flaky/test-order detectors), `maxBudgetUsd` run-wide cost cap, `forge dashboard` read-only telemetry CLI — see dated entry below for full detail — COMPLETE, on top of promote_scratch gate type + concurrent-session scratch lock — `src/engine/scratch-lock.ts` (sha256-keyed, atomic `wx`-create, time-based staleness reclaim) + `src/engine/scratch-promote.ts` (`promote_scratch` gate: `git pull` then direct-copy-and-commit-and-push or conflict-to-`_pending-review`) wired into `phase3-executor.ts` (lock acquired per `shared_canonical` redirect before execution, released after the scratch write, promotion runs after Sentinel passes and before merge) — COMPLETE, on top of Security/Quality Gate Expansion — Semgrep SAST (OWASP Top Ten ruleset) + OWASP ZAP DAST + Schemathesis API contract testing wired into Sentinel Ring 2/Ring 3 — COMPLETE, on top of Design Intelligence — App Profiler + Design Router + Design Tournament + Design Memory — COMPLETE, on top of Deferred Concurrent Execution — parallel-scheduler.ts wired into phase3-executor.ts — COMPLETE, on top of Consensus Engine Upgrade — independent proposals + peer critique round + Perplexity — COMPLETE, on top of Control Plane Run Telemetry — COMPLETE, on top of Dead-Loop / Stagnation Detection — COMPLETE, on top of Governance Provenance Ledgers — ADR log, assumption registry, risk register, tech-debt ledger — COMPLETE, on top of Build State Machine + Change-Impact/Blast-Radius Analysis — COMPLETE, on top of Requirements Traceability + Invariant Engine — COMPLETE, on top of Readiness-Level Engine + machine-verifiable Definition of Done — COMPLETE, on top of Systems 1-4 Agent Registry + Runner Cleanup — governance reconciliation, on top of Design Pipeline — COMPLETE, on top of Elite Skills Library — COMPLETE, on top of Architecture Guardian — COMPLETE, on top of UI Engine — COMPLETE, on top of Token Optimization — COMPLETE, on top of Autonomy Upgrades — COMPLETE, on top of Skills Library — COMPLETE, on top of Enhanced Retrofit — COMPLETE)
 **Build Status:** COMPLETE (original build) + REBUILD COMPLETE (4-session Memory/Design/Autonomy/Intelligence plan) + Session 5 Field Hardening COMPLETE + Session 5.1 Hotfix COMPLETE + Session 5.2 Vacuous-Build Fix COMPLETE + Systems 1-4 (Resurrection/Learning/Testing/Integration Bus) COMPLETE + Systems 1-5 plus Native Orchestrator COMPLETE + Enhanced Retrofit COMPLETE + Skills Library COMPLETE + Autonomy Upgrades COMPLETE + Token Optimization COMPLETE + UI Engine COMPLETE + Architecture Guardian COMPLETE + Elite Skills Library COMPLETE + Design Pipeline COMPLETE + Readiness-Level Engine / Definition of Done COMPLETE + Requirements Traceability + Invariant Engine COMPLETE + Build State Machine + Change-Impact/Blast-Radius Analysis COMPLETE + Governance Provenance Ledgers COMPLETE + **Dead-Loop / Stagnation Detection COMPLETE — `src/governance/dead-loop-detection.ts` (error-family/remediation-class thresholds against the existing `error_patterns`/`resolutions` tables, wired into `phase3-executor.ts`'s h1 failure-handling block to skip further Build Brain/autonomous-recovery attempts and escalate once tripped) and `src/governance/stagnation-detection.ts` (elapsed-time-vs-progress heuristic against `build_runs`/`prompt_executions`, wired in as a per-prompt observational check that appends one STATE_OF_THE_BUILD.md WARNING per build) plus `forge deadloop` / `forge stagnation` CLI commands** + **Control Plane Run Telemetry COMPLETE — `src/telemetry/run-recorder.ts` (`RunRecorder`: `.forge/runs/<run-id>/events.jsonl`/`prompts.jsonl`/`tests.jsonl`/`failures.jsonl`/`metrics.json`/`final-report.md`), wired into `phase3-executor.ts` (mirrors every `renderProgress` line, per-prompt start/gate/end, build-end metrics) and `phase5-learner.ts` (final-report.md) and `src/testing/runners/persist.ts` (tests.jsonl)** + **Deferred Concurrent Execution COMPLETE — `src/phases/phase3-executor.ts`'s `runPromptsConcurrently` (the `maxConcurrency > 1` counterpart to the sequential prompt loop, driving `src/engine/parallel-scheduler.ts`'s pre-existing `executeSchedule` to fan each dependency-satisfied wave out onto its own linked git worktree via `src/engine/git-manager.ts`'s `createWorktree`/`mergeDelegate`, plus a new `tagDelegate` option so a linked worktree's checkpoint tag lands on the primary's real merge commit instead of the worktree's own stale HEAD)** + **Design Intelligence COMPLETE — `src/design-pipeline/app-profiler.ts` (App Profiler: deterministic `AppDesignProfile` derivation from queue corpus + `package.json`), `design-router.ts` (Design Capability Registry + Design Tool Router: spec-formula weighted scoring across `taste_skill`/`impeccable`/`awesome_design`/`img2threejs`, `playwright` always validation-only), `design-memory.ts` (cross-project prefer/reject tag ledger fed by real rejection feedback + tournament outcomes), `design-tournament.ts` (Design Tournament Engine: 2-4 structurally-distinct variants through the real `UIComponentGenerator`, scored on the 2/9 rubric dimensions with a real automated evaluator, never auto-selects a winner) — App Profiler + Design Router wired as a non-blocking step 0a into `design-pipeline/index.ts`'s `DesignPipeline.run()`; Design Tournament is complete, tested, standalone infrastructure not yet wired into the default per-prompt pipeline (opt-in, not called on every component)**
 **Current Run:** RUN-9 COMPLETE (final) + post-build capability additions + Rebuild Sessions 1-4 + Session 5 Field Hardening + Session 5.1 Hotfix + Session 5.2 Vacuous-Build Fix + Systems 1-4 + System 5 (Sentinel Prime) + Native Orchestrator + Enhanced Retrofit + Skills Library + Autonomy Upgrades + Token Optimization + UI Engine + Architecture Guardian + Elite Skills Library + Design Pipeline + Readiness-Level Engine + Requirements Traceability + Invariant Engine + Build State Machine + Blast-Radius Analysis + Governance Provenance Ledgers + Dead-Loop / Stagnation Detection + Deferred Concurrent Execution + Design Intelligence + **Security/Quality Gate Expansion (Semgrep SAST + OWASP ZAP DAST + Schemathesis, ALL COMPLETE)**
 **Schema version:** **3.3.0** — bumped from 3.2.0 by Design Intelligence: `app_design_profiles`, `design_router_decisions`, `design_preferences`, `design_tournament_runs`, `design_tournament_variants` (all added to `ALL_FORGE_TABLES` in `src/learning/database.ts`).
@@ -8,6 +8,117 @@
 **Total Prompts Planned:** 175-245 (across 4-7 runs)
 
 **Note on naming:** "Autonomy Upgrades" (this section, `src/autonomy/`) is a distinct body of work from REBUILD **Session 3's** "Autonomy" milestone (`forge compile`/`--auto-resume`/re-anchoring, `src/engine/auto-resume.ts` — long-run *build-execution* autonomy across Claude Code session resets). This session's Autonomy Upgrades are about FORGE operating with less human intervention *around* a build — credentials, environment validation, deployment, database migration, and gap-resolution — not about surviving a session reset. Both are real, both are COMPLETE, and both legitimately use the word "autonomy" for different things; this note exists so the two are never conflated when read out of context.
+
+---
+
+## Session Wrap-Up — Task 18/18: Benchmark Suite, Shadow-Mode Gate, Agent Permission Contracts, Design Intelligence, 12 Test Runners, Ontology, Ephemeral Previews, Budget Cap, Dashboard (2026-08-22T23:46:39-05:00) — COMPLETE
+
+Final task of an 18-task chained session. This entry is the wrap-up/documentation record for the
+15 commits made in this repo (`forge-2`) plus 1 related commit in the separate FORGE 1.0 repo
+(`C:\Users\manag\Documents\FORGE`). No code was changed by this wrap-up task — build/test
+verification below was already run and confirmed by the coordinating session prior to this entry.
+
+**Commits, oldest to newest:**
+1. `29e6708` test(scratch-promote): add integration test for concurrent scratch-lock + promote_scratch collision
+2. `d834254` feat(engine): add opt-in maxBudgetUsd run-wide cost cap, halts cleanly between prompts
+3. `39d2c0d` feat(cli): add read-only `forge dashboard` command for live build-run telemetry
+4. `aba791e` feat(testing): add IAC/SBOM/LICENSE runners (checkov, trivy-cyclonedx, trivy-license), gated to MILESTONE/PRE-DEPLOYMENT
+5. `79536ba` feat(testing): add Python property-based (pytest+Hypothesis) and fast-check runners
+6. `7b49aaf` feat(testing): add MUTATION runner (Stryker Mutator JS/TS mutation testing)
+7. `7e85b1c` feat(testing): add CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE runners, gated to ENTERPRISE_RELEASE
+8. `b966b3b` feat(testing): add IDEMPOTENCY/CONCURRENCY runners, flaky-test detector, opt-in test-order check
+9. `af714af` feat(design-pipeline): add Brand Intelligence, Persona Profiler, Aesthetic Reference, Variance Controller
+10. `f9c283e` feat(design-pipeline): add Composite Builder, Design System Extractor, Token Consolidator, Deployment Gate
+11. `7aa70d1` feat(governance): add ontology.ts, bidirectional trace, forge trace --reverse/--untested
+12. `71a5e92` feat(governance): add AgentContract registry + permission-enforcer, wire into Phase 3
+13. `8589e19` feat(deploy): add ephemeral Vercel preview environments, opt-in via manifest.yaml previewEnvironments
+14. `f1ddb06` feat(benchmark): add FORGE self-benchmark suite (5 fixed scenarios, forge benchmark CLI) — also fixed a real pre-existing bug: `src/integration/bus.ts`'s `onSentinelFailure` called `runGapAudit` without `nonInteractive: true`, causing a real interactive readline prompt hang on non-TTY Sentinel-failure-triggered gap audits; fixed by passing `nonInteractive: true`.
+15. `440c5a7` feat(learning): add shadow-mode benchmark gate, wire as new EvolutionPromoter precondition
+
+Plus, in the **separate** FORGE 1.0 repo (`C:\Users\manag\Documents\FORGE`, not this repo):
+`1075530` — retrofitted `path_class: shared_canonical` onto 9 prompts across 9 Tarritrix library
+queue YAML files (queue-01-a43-trust-signal.yaml, queue-02-a45-backlink-intelligence.yaml,
+queue-03-a40-external-signal.yaml.BLOCKED-pending-operator-decision, queue-04-a29-performance-learning.yaml,
+queue-09-tld-mismatch.yaml, queue-10-rls-confirmation.yaml, queue-11-escalate-signal-decision.yaml,
+queue-12-ux-technical-seo.yaml, queue-24-canonical-dashboards.yaml).
+
+Note: Task 1 of the 18 (ANSI color parity) required NO code change — `phase3-executor.ts`'s
+`renderProgress` already exactly matched FORGE 1.0's `forge.ps1` colors (verified, not fixed).
+
+**New first-class subsystems added this session:**
+- `forge dashboard` CLI command (`src/cli/dashboard-command.ts`) — read-only live build-run telemetry viewer
+- 12 new test runners in `src/testing/runners/`: iac-runner.ts, sbom-runner.ts, license-runner.ts,
+  python-property-runner.ts, fastcheck-runner.ts, mutation-runner.ts, chaos-runner.ts,
+  recovery-runner.ts, backup-restore-runner.ts, idempotency-runner.ts, concurrency-runner.ts, plus
+  flaky-detector.ts (analysis utility, not a dispatch-table runner) and test-order-detector.ts
+  (opt-in execution-mode toggle, not a dispatch-table runner)
+- Design Intelligence subsystem (`src/design-pipeline/`): brand-intelligence.ts, persona-profiler.ts,
+  aesthetic-reference.ts, variance-controller.ts, composite-builder.ts, design-system-extractor.ts,
+  token-consolidator.ts, deployment-gate.ts
+- Project Ontology (`src/governance/ontology.ts`) — typed cross-reference layer over existing Build
+  Memory tables, plus bidirectional `traceRequirement`, `forge trace --reverse`/`--untested`
+- Agent Contracts + Permission Enforcer (`src/governance/agent-contracts.ts`,
+  `src/governance/permission-enforcer.ts`) — static write-scope contracts for 12 real subsystems
+  (Build Agent, Recovery Agent, Sentinel, Sentinel Prime, Git Manager, Native Orchestrator, Design
+  Pipeline, Testing Orchestrator, Architecture Guardian, Supabase Migrator, Gap Auditor, Integration
+  Bus), enforced pre-write in Phase 3
+- Ephemeral Preview Environments (`src/deploy/ephemeral-preview.ts`) — opt-in Vercel preview deploy +
+  teardown per prompt, gated behind `manifest.yaml`'s `previewEnvironments` flag (default false)
+- FORGE Self-Benchmark Suite (`benchmarks/manifest.json`, `benchmarks/benchmark-runner.ts`,
+  `benchmarks/fixtures/*`) + `forge benchmark` CLI command — 5 fixed disposable-fixture scenarios
+  (simple-crud, multi-tenant-check, legacy-resurrection, broken-migration-fix, security-remediation)
+- Shadow-Mode Evaluation Gate (`src/learning/shadow-mode.ts`) — runs the benchmark suite for both
+  existing and candidate strategy before any auto-promotion in `evolution-promoter.ts`'s
+  `promoteEligible`, wired as a new required precondition
+- `maxBudgetUsd` opt-in run-wide cost cap (manifest.yaml → Phase 3, halts cleanly between prompts)
+
+**Verification (already run and confirmed by the coordinating session; not re-run by this wrap-up task):**
+- `pnpm run build` (tsc): 0 TypeScript errors, confirmed as the final state after all 15 commits.
+- `pnpm test`: 46/46 passing (5 files, now including `tests/evolution-promoter.test.ts` added by `440c5a7`).
+- Full suite excluding `tests/executor.test.ts` (36 other test files run together): 523 tests total,
+  460 passed, 63 failed. **All 63 failures verified byte-for-byte identical to a pre-session baseline**
+  (temporary git worktree at `5713fd3`, the last commit before this session, node_modules symlinked
+  in) — none of the 63 were introduced by any of this session's 15 commits; they are pre-existing
+  debt in files this session never touched (sentinel.test.ts, visual-regression.test.ts,
+  seo-validator.test.ts, security-scanner.test.ts, accessibility-auditor.test.ts,
+  provider-router.test.ts, pdf-generator.test.ts, free-tier-manager.test.ts,
+  prompt-decomposer.test.ts, analysis.test.ts, engine.test.ts, doc-generator.test.ts,
+  schema-validator.test.ts, queue-generator.test.ts, live-preview-gate.test.ts). Every new test
+  added by this session's 15 commits passes (delta of 523 now vs. 421 at baseline is entirely new,
+  entirely passing).
+- `tests/executor.test.ts` (run separately): all pass except one **pre-existing, unrelated flaky
+  test**, "Autonomous Recovery restores green → completed" — root-caused via direct SQL inspection
+  of `~/.forge/forge_memory.db`'s `error_patterns` table to real accumulated history: signature
+  `"fail: typescript"` has `occurrence_count: 35`+ dating to 2026-07-07 (weeks before this session),
+  correctly tripping `src/governance/dead-loop-detection.ts`'s dead-loop threshold (>=4) and skipping
+  Autonomous Recovery as designed — pure test-isolation debt (the suite reads/writes the real shared
+  `~/.forge/forge_memory.db` instead of an isolated fixture), not a code regression. Separately (not
+  investigated further this session, partially fixed by `f1ddb06` above): `src/resurrection/human-gate.ts`
+  has a real interactive `readline` prompt that can still hang some Sentinel-failure paths on
+  non-TTY runs where `nonInteractive` isn't threaded through — only the `bus.ts` `onSentinelFailure`
+  call site was confirmed fixed; other call sites were not audited for the same issue this session.
+- `forge benchmark` run against all 5 disposable fixtures via the built CLI:
+  ```
+  scenario                 status    completion  defects       cost    latency
+  simple-crud              completed       100%        0    $0.0309    13621ms
+  multi-tenant-check       completed       100%        0    $0.0316    13132ms
+  legacy-resurrection      completed       100%        0    $0.0335    13454ms
+  broken-migration-fix     halted           33%        1    $0.0220    12129ms
+  security-remediation     halted           33%        1    $0.0219     9283ms
+  5 scenario(s) — mean completion 73%, mean defect rate 13%, total cost $0.1399, total latency 61619ms
+  ```
+  (broken-migration-fix and security-remediation are DESIGNED to halt — their fixtures contain
+  scripted, intentional defects per this session's benchmark spec — expected/correct, not a bug.)
+
+**Measurable metric — TestSuiteDb coverage (verified directly against source, this task):**
+**TestSuiteDb has 26 total values. 21 of the 26 have a real, wired runner** (a `RunnerType`
+registered in `src/testing/orchestrator.ts`'s `RUNNERS` dispatch map AND mapped to that
+`TestSuiteDb` value in `src/testing/runners/persist.ts`'s `TEST_SUITE_DB` map): UNIT, INTEGRATION,
+API, E2E, SECURITY, PERFORMANCE, DEPENDENCY_SCAN, ACCESSIBILITY, VISUAL_REGRESSION,
+DYNAMIC_ANALYSIS, STATIC_ANALYSIS, IAC, SBOM, LICENSE, PROPERTY_BASED, MUTATION, CHAOS,
+DISASTER_RECOVERY, BACKUP_RESTORE, IDEMPOTENCY, CONCURRENCY. **5 of the 26 remain schema-only**
+(accepted by the `TestSuiteDb` type/DB CHECK constraint, but no `RunnerType`/runner implementation
+ever produces one): **LOAD, STRESS, SOAK, CROSS_BROWSER, CROSS_DEVICE**.
 
 ---
 
