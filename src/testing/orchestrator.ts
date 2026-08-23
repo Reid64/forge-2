@@ -33,6 +33,8 @@ import { run as runMutation } from './runners/mutation-runner.js';
 import { run as runChaos } from './runners/chaos-runner.js';
 import { run as runRecovery } from './runners/recovery-runner.js';
 import { run as runBackupRestore } from './runners/backup-restore-runner.js';
+import { run as runIdempotency } from './runners/idempotency-runner.js';
+import { run as runConcurrency } from './runners/concurrency-runner.js';
 import { run as runGitleaks } from './runners/gitleaks-runner.js';
 import { run as runLighthouse } from './runners/lighthouse-runner.js';
 import { run as runAccessibility } from './runners/accessibility-runner.js';
@@ -72,6 +74,8 @@ const RUNNERS: Record<RunnerType, RunnerFn> = {
   [RunnerType.CHAOS]: runChaos,
   [RunnerType.DISASTER_RECOVERY]: runRecovery,
   [RunnerType.BACKUP_RESTORE]: runBackupRestore,
+  [RunnerType.IDEMPOTENCY]: runIdempotency,
+  [RunnerType.CONCURRENCY]: runConcurrency,
 };
 
 /** TriggerType -> test_run_results.trigger. The schema has no POST_DEPLOY value (F9/DeployVerifier

@@ -106,6 +106,12 @@ export interface RunVitestOptions {
   reportFile: string;
   /** Whether to pass `--coverage` and read `coverage-summary.json` afterward. */
   coverage?: boolean;
+  /** OPT-IN, DEFAULT UNSET (= deterministic/default order — no behavior change for normal callers).
+   *  When set, passes Vitest's own `--sequence.shuffle` flag plus `--sequence.seed=<n>` so a caller
+   *  (test-order-detector.ts) can run the same suite multiple times in a different, but
+   *  reproducible, order. Every existing call site (unit-runner.ts/integration-runner.ts/
+   *  api-runner.ts) omits this — this option exists solely for test-order-detector.ts's opt-in mode. */
+  sequenceShuffleSeed?: number;
   runner?: ShellRunner;
   timeoutMs?: number;
 }
@@ -132,7 +138,9 @@ export async function runVitestSuite(input: RunnerInput, opts: RunVitestOptions)
 
   const configArg = opts.configFile ? ` --config ${opts.configFile}` : '';
   const coverageArg = opts.coverage ? ' --coverage' : '';
-  const command = `pnpm exec vitest run${configArg}${coverageArg} --reporter=json --outputFile=${opts.reportFile}`;
+  const shuffleArg =
+    typeof opts.sequenceShuffleSeed === 'number' ? ` --sequence.shuffle --sequence.seed=${opts.sequenceShuffleSeed}` : '';
+  const command = `pnpm exec vitest run${configArg}${coverageArg}${shuffleArg} --reporter=json --outputFile=${opts.reportFile}`;
   input.log(`vitest: ${command}`);
 
   const result = await run(command, input.projectPath, opts.timeoutMs ?? input.timeoutMs ?? DEFAULT_VITEST_TIMEOUT_MS);

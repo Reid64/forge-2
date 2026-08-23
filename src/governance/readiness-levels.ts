@@ -32,6 +32,12 @@
  *    (PRE-DEPLOYMENT) tier, unlike IAC/SBOM/LICENSE's cumulative-from-MILESTONE introduction,
  *    because mutation testing re-runs the whole suite per surviving-mutant candidate and is by far
  *    the most expensive suite in the runner set — it must run only at the top of the ladder.
+ *    IDEMPOTENCY/CONCURRENCY (idempotency-runner.ts / concurrency-runner.ts — schema 3.7.0) follow
+ *    CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE's placement exactly: ENTERPRISE_RELEASE
+ *    (MISSION_CRITICAL, and HYPERSCALE by verbatim reuse) ONLY, via `ALL_TEST_SUITES` below, never
+ *    at MILESTONE or PRE-DEPLOYMENT — both probes fire real concurrent/duplicate request load at a
+ *    live throwaway dev server, the same risk/cost profile as CHAOS's live-target probing, so they
+ *    belong at the same top-of-the-ladder tier rather than being pulled forward.
  *  - `requiredSecurityObservabilityItems` are free-text labels drawn verbatim from
  *    CAPABILITIES_MEMO.md's own enumerated Enterprise-Grade requirement list (lines ~933-997) —
  *    no item below was invented outside that list.
@@ -98,7 +104,7 @@ const ALL_ARTIFACTS: ArtifactName[] = [
   'TESTING',
 ];
 
-/** All 24 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
+/** All 26 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
 const ALL_TEST_SUITES: TestSuiteDb[] = [
   'UNIT',
   'PROPERTY_BASED',
@@ -124,6 +130,8 @@ const ALL_TEST_SUITES: TestSuiteDb[] = [
   'SBOM',
   'LICENSE',
   'MUTATION',
+  'IDEMPOTENCY',
+  'CONCURRENCY',
 ];
 
 /**
@@ -372,7 +380,8 @@ export const READINESS_TIERS: ReadinessTier[] = [
     description:
       'CAPABILITIES_MEMO.md: "Mission-Critical introduces even more stringent requirements" — no ' +
       'additional discrete checklist item is named, so the Enterprise-Grade checklist is enforced ' +
-      'in full, plus the ENTERPRISE RELEASE test gate (stress/soak/disaster-recovery/chaos).',
+      'in full, plus the ENTERPRISE RELEASE test gate (stress/soak/disaster-recovery/chaos/' +
+      'idempotency/concurrency).',
     requiredGovernanceArtifacts: ALL_ARTIFACTS,
     requiredTestSuites: ALL_TEST_SUITES,
     requiredSecurityObservabilityItems: ENTERPRISE_GRADE_CHECKLIST,

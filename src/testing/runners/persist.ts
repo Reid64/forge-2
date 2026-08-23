@@ -55,7 +55,11 @@ const MAX_FAILURE_SUMMARY = 20;
  *  the CHECK constraint since before schema 3.4.0 — no new migration needed) — one-to-one rather
  *  than a shared category, matching MUTATION's reasoning: each is gated to ENTERPRISE_RELEASE ONLY
  *  in the RunnerType doc comments above, and a dedicated value is what keeps that withholding
- *  expressible. */
+ *  expressible.
+ *
+ *  IDEMPOTENCY/CONCURRENCY (idempotency-runner.ts/concurrency-runner.ts — schema 3.7.0) are two
+ *  more dedicated, new TestSuiteDb values, same one-to-one reasoning as CHAOS/DISASTER_RECOVERY/
+ *  BACKUP_RESTORE immediately above — both are gated ENTERPRISE_RELEASE ONLY. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -83,6 +87,8 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.CHAOS]: 'CHAOS',
   [RunnerType.DISASTER_RECOVERY]: 'DISASTER_RECOVERY',
   [RunnerType.BACKUP_RESTORE]: 'BACKUP_RESTORE',
+  [RunnerType.IDEMPOTENCY]: 'IDEMPOTENCY',
+  [RunnerType.CONCURRENCY]: 'CONCURRENCY',
 };
 
 const ANSI_RESET = '\x1b[0m';

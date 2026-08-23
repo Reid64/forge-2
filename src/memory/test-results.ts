@@ -14,7 +14,7 @@ const TEST_COVERAGE_SNAPSHOTS_TABLE = 'test_coverage_snapshots';
 
 export type TestRunTrigger = 'POST_PROMPT' | 'SCHEDULED' | 'MANUAL' | 'PRE_DEPLOY' | 'CI';
 
-/** 23-value CHECK-constrained enum (`src/learning/database.ts` › `test_run_results.test_suite`
+/** 26-value CHECK-constrained enum (`src/learning/database.ts` › `test_run_results.test_suite`
  *  CHECK clause — must match this union EXACTLY, both edited together). IAC/SBOM/LICENSE (schema
  *  3.4.0) were added as new values rather than folding into STATIC_ANALYSIS/DEPENDENCY_SCAN
  *  specifically so `src/governance/readiness-levels.ts` can gate them to the MILESTONE
@@ -27,7 +27,13 @@ export type TestRunTrigger = 'POST_PROMPT' | 'SCHEDULED' | 'MANUAL' | 'PRE_DEPLO
  *  `runner`" reuse pattern `persist.ts`'s TEST_SUITE_DB map already uses for DEPENDENCY_SCAN
  *  (shared by the `pnpm-audit` and `trivy` runners). A single value is correct here (unlike
  *  IAC/SBOM/LICENSE) because both property-based runners are meant to be gated identically —
- *  alongside UNIT, at every tier — so there is no tier-gating reason to keep them apart. */
+ *  alongside UNIT, at every tier — so there is no tier-gating reason to keep them apart.
+ *
+ *  IDEMPOTENCY/CONCURRENCY (schema 3.7.0, idempotency-runner.ts/concurrency-runner.ts) are two
+ *  more dedicated values, back to the IAC/SBOM/LICENSE-style reasoning: both probe a live throwaway
+ *  dev server under real request load, the same risk/cost profile as CHAOS/DISASTER_RECOVERY, and
+ *  are gated to ENTERPRISE_RELEASE ONLY (`src/governance/readiness-levels.ts`) — a dedicated value
+ *  per concern is what keeps that withholding expressible, exactly as it does for CHAOS et al. */
 export type TestSuiteDb =
   | 'UNIT'
   | 'INTEGRATION'
@@ -52,7 +58,9 @@ export type TestSuiteDb =
   | 'SBOM'
   | 'LICENSE'
   | 'PROPERTY_BASED'
-  | 'MUTATION';
+  | 'MUTATION'
+  | 'IDEMPOTENCY'
+  | 'CONCURRENCY';
 
 export type TestRunStatus = 'running' | 'passed' | 'failed' | 'partial' | 'skipped' | 'error';
 
@@ -199,6 +207,32 @@ export function listLatestTestRunResults(projectName: string): Promise<TestRunRe
          ORDER BY t.test_suite`
       )
       .all(projectName, projectName) as TestRunResultDbRow[];
+    return rows.map(rowToTestRunResult);
+  });
+}
+
+/** Recent `test_run_results` rows for one project + test_suite, oldest first (`created_at ASC`),
+ *  capped at `limit` (default 20). Added for `flaky-detector.ts`'s Build-Memory-history mode — a
+ *  narrow, single-purpose read function rather than a generic "list everything" query, following
+ *  this module's existing style (`listLatestTestRunResults` is likewise scoped to one specific
+ *  caller need). Returns null on failure, same "degrade honestly, never fabricate" convention as
+ *  every other query in this module. */
+export function listTestRunResultHistory(
+  projectName: string,
+  testSuite: TestSuiteDb,
+  limit = 20
+): Promise<TestRunResultRow[] | null> {
+  return runQuery<TestRunResultRow[]>(TEST_RUN_RESULTS_TABLE + '.listTestRunResultHistory', (db) => {
+    const rows = db
+      .prepare(
+        `SELECT * FROM (
+           SELECT * FROM test_run_results
+           WHERE project_name = ? AND test_suite = ?
+           ORDER BY created_at DESC
+           LIMIT ?
+         ) ORDER BY created_at ASC`
+      )
+      .all(projectName, testSuite, limit) as TestRunResultDbRow[];
     return rows.map(rowToTestRunResult);
   });
 }

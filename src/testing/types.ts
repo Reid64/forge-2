@@ -62,6 +62,17 @@ export enum RunnerType {
    *  project has documented a backup/restore policy; never performs an actual backup or restore.
    *  Same ENTERPRISE_RELEASE-ONLY gate as CHAOS/DISASTER_RECOVERY above. */
   BACKUP_RESTORE = 'BACKUP_RESTORE',
+  /** Idempotency probing — sends a duplicate request pair against a live throwaway dev server
+   *  (idempotency-runner.ts's own dev server, reusing the chaos/recovery-runner dev-server-spawn
+   *  convention) and checks the second identical request is handled cleanly rather than crashing.
+   *  Same ENTERPRISE_RELEASE (MISSION_CRITICAL/HYPERSCALE) ONLY gate as CHAOS/DISASTER_RECOVERY/
+   *  BACKUP_RESTORE above — it hits a real running instance with real request load. */
+  IDEMPOTENCY = 'IDEMPOTENCY',
+  /** Concurrency probing — fires N simultaneous requests against a live throwaway dev server
+   *  (concurrency-runner.ts's own dev server, same convention) and checks for race-condition
+   *  symptoms (5xx under concurrent load, duplicate identifiers in the responses). Same
+   *  ENTERPRISE_RELEASE ONLY gate as IDEMPOTENCY above. */
+  CONCURRENCY = 'CONCURRENCY',
 }
 
 export interface TestRunResult {
