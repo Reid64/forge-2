@@ -42,6 +42,14 @@ export interface LibraryManifest {
   description: string;
   created: string;
   queues: QueueEntry[];
+  /**
+   * Optional run-wide dollar cap (opt-in — Phase 3's `Phase3Options.maxBudgetUsd`,
+   * `src/phases/phase3-executor.ts`): when set, each queue run started via the orchestrator
+   * carries this cap into Phase 3, which halts cleanly BETWEEN prompts once its accumulated
+   * per-prompt cost estimate reaches it. Absent/`null` on manifests written before this field
+   * existed — those keep running with no cap, exactly as before.
+   */
+  maxBudgetUsd?: number | null;
 }
 
 export interface OrchestratorOptions {
@@ -53,6 +61,13 @@ export interface OrchestratorOptions {
   only: string | null;
   resetStatus: boolean;
   governanceSyncPath: string;
+  /**
+   * Mirrors the loaded manifest's {@link LibraryManifest.maxBudgetUsd} (OrchestratorEngine sets
+   * this once the manifest is read, before delegating to {@link QueueRunner}) — optional/`null`
+   * when the manifest declares no cap. QueueRunner forwards it to each spawned `forge build`
+   * subprocess as `--max-budget-usd` so Phase 3 can enforce it per queue run.
+   */
+  maxBudgetUsd?: number | null;
 }
 
 export interface OrchestratorResult {

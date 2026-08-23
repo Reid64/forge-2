@@ -355,6 +355,52 @@ test('runPhase3Executor: Sentinel failure with no recovery halts the build (Cont
   });
 });
 
+test('runPhase3Executor: maxBudgetUsd cap halts cleanly between prompts (opt-in, no cap = unchanged)', async () => {
+  await withTmp(async (dir) => {
+    const entries = [entry({ id: 'a', prompt_type: 'schema' }), entry({ id: 'b', dependencies: ['a'] })];
+    let haltReport = '';
+    let stateProgressLine = '';
+    const result = await runPhase3Executor(
+      baseOptions(dir, entries, {
+        // Any real per-prompt cost estimate exceeds this — prompt 'a' still runs (spent starts
+        // at $0), but the cap is blown by the time the loop reaches 'b'.
+        maxBudgetUsd: 0.000001,
+        writeHaltReport: async (r) => {
+          haltReport = r;
+        },
+        updateStateProgress: async (line) => {
+          stateProgressLine = line;
+        },
+      })
+    );
+
+    assert.equal(result.status, 'halted');
+    assert.equal(result.completedPrompts, 1);
+    assert.equal(result.failedPrompts, 0);
+    // The loop halts BEFORE dispatching 'b' — no outcome is recorded for it (mirrors the
+    // Sentinel-halt convention: the loop simply breaks, it never pushes a 'halted' outcome).
+    assert.equal(result.outcomes.length, 1);
+    assert.equal(result.outcomes[0]?.disposition, 'completed');
+    assert.equal(result.haltedAt?.index, 2);
+    assert.equal(result.haltedAt?.id, 'b');
+    assert.ok(result.haltReason?.includes('Budget cap exceeded'));
+    assert.ok(haltReport.includes('HALT (budget cap)'));
+    assert.ok(stateProgressLine.includes('budget cap'));
+  });
+});
+
+test('runPhase3Executor: maxBudgetUsd unset (default) never halts on cost — identical to before the option existed', async () => {
+  await withTmp(async (dir) => {
+    const entries = [entry({ id: 'a', prompt_type: 'schema' }), entry({ id: 'b', dependencies: ['a'] })];
+    const result = await runPhase3Executor(baseOptions(dir, entries));
+
+    assert.equal(result.status, 'completed');
+    assert.equal(result.completedPrompts, 2);
+    assert.equal(result.haltedAt, null);
+    assert.equal(result.haltReason, null);
+  });
+});
+
 test('runPhase3Executor: Autonomous Recovery restores green → completed', async () => {
   await withTmp(async (dir) => {
     const entries = [entry({ id: 'a', prompt_type: 'schema' })];

@@ -87,6 +87,14 @@ export class OrchestratorEngine {
     );
     const manifestRowId = this.insertManifestRunningRow(manifest, manifestPath);
 
+    // Carry the manifest's optional budget cap into every queue run this orchestrator invocation
+    // spawns (QueueRunner -> `forge build --max-budget-usd`) — absent/null when the manifest
+    // declares none, which keeps every existing manifest.yaml running with no cap, unchanged.
+    if (manifest.maxBudgetUsd !== undefined && manifest.maxBudgetUsd !== null) {
+      options = { ...options, maxBudgetUsd: manifest.maxBudgetUsd };
+      renderProgress('INFO', `[ORCHESTRATOR] manifest maxBudgetUsd cap: $${manifest.maxBudgetUsd.toFixed(2)} per queue run`);
+    }
+
     let queuesRun = 0;
     let queuesComplete = 0;
     let queuesFailed = 0;

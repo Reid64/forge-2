@@ -205,6 +205,19 @@ export class ManifestResolver {
       throw new Error(`ManifestResolver: "${manifestPath}" field "queues" must be an array`);
     }
 
+    // `maxBudgetUsd` is optional and opt-in (default null/undefined — no cap, unchanged
+    // behavior). When present it must be a positive finite number; a malformed value fails
+    // loudly here rather than silently producing a cap Phase 3 could never sensibly compare
+    // against (e.g. NaN/0/negative would trip the halt before the first prompt ever ran).
+    if (manifest.maxBudgetUsd !== undefined && manifest.maxBudgetUsd !== null) {
+      const raw = manifest.maxBudgetUsd;
+      if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+        throw new Error(
+          `ManifestResolver: "${manifestPath}" field "maxBudgetUsd" must be a positive number when present (got ${JSON.stringify(raw)})`
+        );
+      }
+    }
+
     const seenIds = new Set<string>();
     (manifest.queues as unknown[]).forEach((rawQueue, index) => {
       if (typeof rawQueue !== 'object' || rawQueue === null) {

@@ -50,6 +50,14 @@ autonomy:
   # before it. No CLI default (unset = start from prompt 1).
   start_at: null
 
+  # --max-budget-usd <usd> — optional run-wide dollar cap (default: null = no cap).
+  # Checked before each Phase 3 prompt starts against the per-prompt cost-estimate
+  # tracker (src/engine/model-router.ts's ModelCostTracker); once the accumulated
+  # estimate reaches this cap, the build halts cleanly BETWEEN prompts — already-
+  # completed/merged work is left untouched. Also honored by the native orchestrator
+  # (library-manifest.yaml's own `maxBudgetUsd` field) per queue run.
+  max_budget_usd: null
+
 # Both of these are the ONLY overrides for their respective halts — deliberately kept
 # separate per the module docstring in src/cli/index.ts (Session 5 findings #2/#3 and the
 # Session 5.1 hotfix): neither autonomy.autonomous_recovery nor auto_resume bypasses either

@@ -427,6 +427,20 @@ export interface Phase3Options {
   /** The main branch merges target / rollback resets. Default `'main'`. */
   mainBranch?: string;
   /**
+   * Optional run-wide dollar cap (opt-in, mirrors `manifest.yaml`'s `maxBudgetUsd` field —
+   * `src/orchestrator/types.ts`'s `LibraryManifest`). Checked BEFORE each prompt starts (never
+   * mid-prompt) against `ModelCostTracker.totalCostUsd()` (`src/engine/model-router.ts`) — the
+   * same per-prompt cost-ESTIMATE accumulator (token-count/model-tier heuristic, not a billed-API
+   * figure; no real per-call spend is tracked anywhere in the executor today) the live-status
+   * totals and the final `Model cost estimate` log line already read. When the accumulated
+   * estimate is >= this cap, the run halts cleanly between prompts (Contract-13-style: logged,
+   * `STATE_OF_THE_BUILD.md` + the halt report are written, `status` becomes `'halted'`) rather
+   * than starting the next prompt — the already-completed/merged work is left untouched (no
+   * rollback; nothing failed). Default `null`/`undefined`: no cap, behavior identical to before
+   * this option existed.
+   */
+  maxBudgetUsd?: number | null;
+  /**
    * Max prompts run concurrently WITHIN one dependency wave (parallel-scheduler.ts's deferred
    * `executeSchedule` capability, now enabled). `1` (the default) preserves the exact classic
    * SEQUENTIAL path (`schedule.order` walked one prompt at a time) with zero behavioural change.
@@ -1556,6 +1570,7 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
   const dryRun = options.dryRun ?? false;
   const replay = options.replay ?? null;
   const mainBranch = options.mainBranch ?? 'main';
+  const maxBudgetUsd = options.maxBudgetUsd ?? null;
   const generatedAt = nowIso();
   const warnings: string[] = [];
 
@@ -2036,6 +2051,30 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
       outcomes.push(skippedOutcome(entry, index, note));
       log(`prompt ${index}/${schedule.order.length} '${entry.id}': ${note}`);
       continue;
+    }
+
+    // a2. Budget cap (opt-in, manifest.yaml's `maxBudgetUsd`) â€” checked BEFORE this prompt starts,
+    //     never mid-prompt, so a run always halts BETWEEN prompts (the currently-running prompt is
+    //     never the current prompt here â€” nothing has been dispatched for `index` yet). Skipped for
+    //     a dry run: F11 must always simulate the FULL plan, and dry runs never record real cost
+    //     estimates into `ctx.costTracker` in the first place. A clean, intentional stop mirroring
+    //     the dead-loop/stagnation halt convention (log + STATE_OF_THE_BUILD.md + halt report +
+    //     halted/haltedAt/haltReason) â€” NOT a rollback, since nothing failed and the prior prompt's
+    //     merge must stand untouched.
+    if (!dryRun && maxBudgetUsd !== null) {
+      const spentUsd = ctx.costTracker.totalCostUsd();
+      if (spentUsd >= maxBudgetUsd) {
+        const reason =
+          `Budget cap exceeded before prompt ${index} '${entry.id}': spent $${spentUsd.toFixed(4)} >= ` +
+          `maxBudgetUsd $${maxBudgetUsd.toFixed(2)} (manifest.yaml). Halting cleanly between prompts â€” ` +
+          `every previously completed prompt stays merged on '${mainBranch}'.`;
+        log(`prompt ${index} '${entry.id}': ${reason}`);
+        halted = true;
+        haltedAt = { index, id: entry.id };
+        haltReason = reason;
+        await writeBudgetHaltReport(ctx, index, entry, spentUsd, maxBudgetUsd);
+        break;
+      }
     }
 
     // Skill injection: when the entry declares skills, read each <skillsDir>/<name>/SKILL.md and
@@ -4738,6 +4777,44 @@ async function appendStagnationWarning(governanceDir: string, verdict: Stagnatio
     await appendFile(join(governanceDir, 'STATE_OF_THE_BUILD.md'), toAsciiGovernanceText(block), 'utf8');
   } catch {
     /* non-fatal -- a warning write failure must never affect any prompt's disposition */
+  }
+}
+
+/**
+ * Budget-cap halt (opt-in `maxBudgetUsd`, manifest.yaml / {@link Phase3Options.maxBudgetUsd}):
+ * write the halt report + STATE_OF_THE_BUILD.md entry for a clean, BETWEEN-prompts stop, mirroring
+ * {@link rollbackAndReport}'s halt-report shape â€” except there is NO git rollback here (unlike a
+ * Sentinel-failure halt, nothing failed; the prompt at `index` never started, and every prior
+ * prompt's merge to main must stand exactly as it is). Guarded â€” a write failure here must never
+ * throw back into the loop (Contract 4 posture, same as every other STATE_OF_THE_BUILD writer).
+ */
+async function writeBudgetHaltReport(
+  ctx: LoopContext,
+  index: number,
+  entry: QueueEntry,
+  spentUsd: number,
+  maxBudgetUsd: number
+): Promise<void> {
+  const report = [
+    '# FORGE Phase 3 â€” HALT (budget cap)',
+    '',
+    `- **Halted at:** prompt ${index} '${entry.id}' (${entry.prompt_type}) â€” not started`,
+    `- **Reason:** maxBudgetUsd cap exceeded â€” spent $${spentUsd.toFixed(4)} >= cap $${maxBudgetUsd.toFixed(2)}`,
+    `- **Prior work:** every previously completed prompt stays merged on '${ctx.mainBranch}' â€” nothing was rolled back.`,
+    `- **When:** ${nowIso()}`,
+    '',
+  ].join('\n');
+  try {
+    await ctx.writeHaltReport(report);
+  } catch {
+    /* non-fatal â€” Contract 4 */
+  }
+  try {
+    await ctx.updateStateProgress(
+      `[FORGE Phase 3] HALTED (budget cap) before prompt ${index} '${entry.id}': spent $${spentUsd.toFixed(4)} >= maxBudgetUsd $${maxBudgetUsd.toFixed(2)}.`
+    );
+  } catch {
+    /* non-fatal â€” Contract 4 */
   }
 }
 

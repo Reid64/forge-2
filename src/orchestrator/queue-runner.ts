@@ -256,6 +256,12 @@ export class QueueRunner {
     const forgeRoot = join(dirname(cliPath), '..', '..');
     const args = [cliPath, 'build', options.projectPath, '--use-existing-queue'];
     if (options.dryRun) args.push('--dry-run');
+    // Forward the manifest's optional budget cap (OrchestratorEngine merges it onto `options`
+    // from `LibraryManifest.maxBudgetUsd` before delegating here) — absent when the manifest
+    // declares none, so this queue run is spawned with no cap, exactly as before.
+    if (typeof options.maxBudgetUsd === 'number' && Number.isFinite(options.maxBudgetUsd)) {
+      args.push('--max-budget-usd', String(options.maxBudgetUsd));
+    }
 
     renderProgress(
       'INFO',

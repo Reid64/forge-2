@@ -764,6 +764,7 @@ async function cmdBuild(
     acceptBlockers?: boolean;
     autoApproveGates?: boolean;
     allowHeadless?: boolean;
+    maxBudgetUsd?: string;
   }
 ): Promise<void> {
   beginQuietLogging('.forge/build.log');
@@ -784,6 +785,16 @@ async function cmdBuild(
       return;
     }
     process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan(`--start-at ${startAt}: prompts 1–${startAt - 1} will be skipped.`)}\n`);
+  }
+  // --max-budget-usd: parse and validate early, same posture as --start-at above.
+  let maxBudgetUsd: number | undefined;
+  if (opts.maxBudgetUsd !== undefined) {
+    maxBudgetUsd = Number.parseFloat(opts.maxBudgetUsd);
+    if (!Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0) {
+      fail('--max-budget-usd must be a positive number.');
+      return;
+    }
+    process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan(`--max-budget-usd $${maxBudgetUsd.toFixed(2)}: Phase 3 halts cleanly between prompts once its cost estimate reaches this cap.`)}\n`);
   }
 
   const projectPath = resolveProjectPath(pathArg);
@@ -821,6 +832,7 @@ async function cmdBuild(
           autonomousRecoveryMode: opts.autonomousRecovery ?? false,
           dryRun: opts.dryRun ?? false,
           allowHeadless: opts.allowHeadless ?? false,
+          maxBudgetUsd,
           log,
         },
         startAt,
@@ -906,6 +918,7 @@ async function cmdBuild(
           autonomousRecoveryMode: opts.autonomousRecovery ?? false,
           dryRun: opts.dryRun ?? false,
           allowHeadless: opts.allowHeadless ?? false,
+          maxBudgetUsd,
           log,
         },
         startAt,
@@ -948,6 +961,7 @@ async function cmdBuild(
         autonomousRecoveryMode: opts.autonomousRecovery ?? false,
         dryRun: opts.dryRun ?? false,
         allowHeadless: opts.allowHeadless ?? false,
+        maxBudgetUsd,
         log,
       },
       startAt,
@@ -3618,6 +3632,10 @@ async function main(): Promise<void> {
       'permit Phase 3 to start with a backgrounded/non-interactive terminal (process.stdout.isTTY false). Without this, FORGE refuses to start Phase 3 at all rather than run claude Code with silent output — a backgrounded run (e.g. Start-Job piping stdin to a spawned claude process) was found to hang for 15+ hours with zero visible output and no error. Pass this ONLY if you will monitor progress via .forge/runs/*.jsonl instead of the terminal.',
       false
     )
+    .option(
+      '--max-budget-usd <usd>',
+      'optional run-wide dollar cap (opt-in). Checked before each Phase 3 prompt starts against the per-prompt cost-estimate tracker; once the accumulated estimate reaches this cap, the build halts cleanly BETWEEN prompts (already-completed work stays merged). Default: no cap.'
+    )
     .action(
       (
         pathArg: string,
@@ -3636,6 +3654,7 @@ async function main(): Promise<void> {
           acceptBlockers?: boolean;
           autoApproveGates?: boolean;
           allowHeadless?: boolean;
+          maxBudgetUsd?: string;
         }
       ) => cmdBuild(pathArg, opts)
     );
