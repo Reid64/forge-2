@@ -25,6 +25,13 @@
  *    opposite approach: it is required at every tier UNIT is required at (property-based tests run
  *    alongside regular unit tests, not as a later-milestone gate), so it is listed next to 'UNIT' in
  *    every `requiredTestSuites` array below rather than being introduced partway up the ladder.
+ *    MUTATION (mutation-runner.ts / Stryker Mutator — schema 3.6.0) is narrower than either
+ *    pattern above: it is required ONLY at ENTERPRISE_READY (the MILESTONE gate) and at
+ *    MISSION_CRITICAL (the ENTERPRISE RELEASE gate, via `ALL_TEST_SUITES` below, which HYPERSCALE
+ *    also reuses verbatim) — deliberately withheld even from the intermediate ENTERPRISE_GRADE
+ *    (PRE-DEPLOYMENT) tier, unlike IAC/SBOM/LICENSE's cumulative-from-MILESTONE introduction,
+ *    because mutation testing re-runs the whole suite per surviving-mutant candidate and is by far
+ *    the most expensive suite in the runner set — it must run only at the top of the ladder.
  *  - `requiredSecurityObservabilityItems` are free-text labels drawn verbatim from
  *    CAPABILITIES_MEMO.md's own enumerated Enterprise-Grade requirement list (lines ~933-997) —
  *    no item below was invented outside that list.
@@ -91,7 +98,7 @@ const ALL_ARTIFACTS: ArtifactName[] = [
   'TESTING',
 ];
 
-/** All 23 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
+/** All 24 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
 const ALL_TEST_SUITES: TestSuiteDb[] = [
   'UNIT',
   'PROPERTY_BASED',
@@ -116,6 +123,7 @@ const ALL_TEST_SUITES: TestSuiteDb[] = [
   'IAC',
   'SBOM',
   'LICENSE',
+  'MUTATION',
 ];
 
 /**
@@ -302,6 +310,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'IAC',
       'SBOM',
       'LICENSE',
+      'MUTATION',
     ],
     requiredSecurityObservabilityItems: [
       'code review',
@@ -322,7 +331,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'monitoring',
       'observability',
     ],
-    source: `${CAPABILITIES_MEMO_SOURCE}, tier 6 — "6. ENTERPRISE-READY"; ${QA_FRAMEWORK_SOURCE} "MILESTONE" (also introduces IAC/SBOM/LICENSE, gated to start here)`,
+    source: `${CAPABILITIES_MEMO_SOURCE}, tier 6 — "6. ENTERPRISE-READY"; ${QA_FRAMEWORK_SOURCE} "MILESTONE" (also introduces IAC/SBOM/LICENSE, gated to start here; and MUTATION, gated ONLY here and at ENTERPRISE RELEASE — see module doc comment)`,
   },
   {
     id: 'ENTERPRISE_GRADE',

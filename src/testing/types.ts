@@ -41,6 +41,13 @@ export enum RunnerType {
    *  project's own Vitest install; never generates new tests. Same UNIT-mirrored gate as
    *  PYTHON_PROPERTY above. */
   FASTCHECK = 'FASTCHECK',
+  /** JS/TS mutation testing (Stryker Mutator, `npx stryker run --reporters json`) — gated to
+   *  MILESTONE (ENTERPRISE_READY) and ENTERPRISE_RELEASE (MISSION_CRITICAL, and by extension
+   *  HYPERSCALE, which reuses MISSION_CRITICAL's suite list verbatim) tiers ONLY
+   *  (`src/governance/readiness-levels.ts`) — deliberately skips the intermediate ENTERPRISE_GRADE
+   *  (PRE-DEPLOYMENT) tier too, unlike IAC/SBOM/LICENSE's cumulative introduction, because mutation
+   *  testing is far slower/more expensive than any other suite and must run as rarely as possible. */
+  MUTATION = 'MUTATION',
 }
 
 export interface TestRunResult {

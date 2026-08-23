@@ -43,7 +43,12 @@ const MAX_FAILURE_SUMMARY = 20;
  *  PYTHON_PROPERTY (pytest+Hypothesis) and FASTCHECK (fast-check) BOTH map to the new PROPERTY_BASED
  *  value (schema 3.5.0) — back to the DEPENDENCY_SCAN-style reuse pattern, since these two runners
  *  are meant to be gated identically (alongside UNIT, at every tier) rather than kept apart the way
- *  IAC/SBOM/LICENSE needed to be. */
+ *  IAC/SBOM/LICENSE needed to be.
+ *
+ *  MUTATION (Stryker Mutator — schema 3.6.0) is its own dedicated TestSuiteDb value, back to the
+ *  IAC/SBOM/LICENSE-style reasoning: mutation findings are not folded into STATIC_ANALYSIS or UNIT
+ *  because both are required starting at much lower readiness tiers, and a dedicated value is what
+ *  lets `readiness-levels.ts` withhold it until MILESTONE/ENTERPRISE_RELEASE specifically. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -67,6 +72,7 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.LICENSE]: 'LICENSE',
   [RunnerType.PYTHON_PROPERTY]: 'PROPERTY_BASED',
   [RunnerType.FASTCHECK]: 'PROPERTY_BASED',
+  [RunnerType.MUTATION]: 'MUTATION',
 };
 
 const ANSI_RESET = '\x1b[0m';

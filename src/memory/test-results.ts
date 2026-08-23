@@ -51,7 +51,8 @@ export type TestSuiteDb =
   | 'IAC'
   | 'SBOM'
   | 'LICENSE'
-  | 'PROPERTY_BASED';
+  | 'PROPERTY_BASED'
+  | 'MUTATION';
 
 export type TestRunStatus = 'running' | 'passed' | 'failed' | 'partial' | 'skipped' | 'error';
 

@@ -29,6 +29,7 @@ import { run as runSbom } from './runners/sbom-runner.js';
 import { run as runLicense } from './runners/license-runner.js';
 import { run as runPythonProperty } from './runners/python-property-runner.js';
 import { run as runFastcheck } from './runners/fastcheck-runner.js';
+import { run as runMutation } from './runners/mutation-runner.js';
 import { run as runGitleaks } from './runners/gitleaks-runner.js';
 import { run as runLighthouse } from './runners/lighthouse-runner.js';
 import { run as runAccessibility } from './runners/accessibility-runner.js';
@@ -64,6 +65,7 @@ const RUNNERS: Record<RunnerType, RunnerFn> = {
   [RunnerType.LICENSE]: runLicense,
   [RunnerType.PYTHON_PROPERTY]: runPythonProperty,
   [RunnerType.FASTCHECK]: runFastcheck,
+  [RunnerType.MUTATION]: runMutation,
 };
 
 /** TriggerType -> test_run_results.trigger. The schema has no POST_DEPLOY value (F9/DeployVerifier

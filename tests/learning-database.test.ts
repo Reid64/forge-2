@@ -239,6 +239,89 @@ describe('Learning Engine — Database', () => {
     });
   });
 
+  describe('test_run_results CHECK-constraint migration (MUTATION, schema 3.6.0)', () => {
+    const migTestDb3 = join(tmpdir(), `forge_db_migration_test_3_${Date.now()}.db`);
+
+    after(() => {
+      closeConnection(migTestDb3);
+      if (existsSync(migTestDb3)) unlinkSync(migTestDb3);
+    });
+
+    it('rebuilds a pre-3.6.0-shape test_run_results table in place, preserves existing rows, and accepts MUTATION afterward', () => {
+      // 1. Build a fresh db at the current (already-migrated) schema.
+      initializeForgeMemory(migTestDb3);
+      const db = getConnection(migTestDb3);
+
+      // 2. Degrade test_run_results back to its pre-3.6.0 shape (the 23-value CHECK, no
+      //    MUTATION — i.e. the shape left behind by the 3.5.0 PROPERTY_BASED migration) to
+      //    simulate an existing user's on-disk db from before this change, then seed it with a real
+      //    row — the exact scenario CURRENT_SCHEMA_VERSION's migration guard must handle without
+      //    losing data.
+      db.exec(`
+        CREATE TABLE test_run_results_old_shape (
+          id                    TEXT PRIMARY KEY,
+          build_run_id          TEXT,
+          project_name          TEXT NOT NULL,
+          trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
+          test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE','PROPERTY_BASED')),
+          runner                TEXT NOT NULL DEFAULT 'vitest',
+          status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
+          prompt_index          INTEGER,
+          tests_total           INTEGER NOT NULL DEFAULT 0,
+          tests_passed          INTEGER NOT NULL DEFAULT 0,
+          tests_failed          INTEGER NOT NULL DEFAULT 0,
+          tests_skipped         INTEGER NOT NULL DEFAULT 0,
+          duration_ms           INTEGER NOT NULL DEFAULT 0,
+          failure_summary       TEXT,
+          report_path           TEXT,
+          exit_code             INTEGER,
+          started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at          TEXT,
+          machine_id            TEXT NOT NULL,
+          created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        DROP TABLE test_run_results;
+        ALTER TABLE test_run_results_old_shape RENAME TO test_run_results;
+      `);
+      db.prepare(
+        `INSERT INTO test_run_results (id, project_name, trigger, test_suite, status, machine_id)
+         VALUES ('preexisting-row-3', 'demo-project', 'MANUAL', 'PROPERTY_BASED', 'passed', 'test-machine-id')`
+      ).run();
+      db.prepare("UPDATE forge_meta SET value = '3.5.0' WHERE key = 'schema_version'").run();
+
+      // 3. Re-run initializeForgeMemory — it must detect the old-shape CHECK, rebuild the table,
+      //    and carry the pre-existing row across unchanged.
+      initializeForgeMemory(migTestDb3);
+
+      const preserved = db.prepare("SELECT * FROM test_run_results WHERE id = 'preexisting-row-3'").get() as
+        | { test_suite: string; status: string }
+        | undefined;
+      assert.ok(preserved, 'pre-existing row should survive the CHECK-constraint rebuild');
+      assert.equal(preserved!.test_suite, 'PROPERTY_BASED');
+      assert.equal(preserved!.status, 'passed');
+
+      // 4. MUTATION must now be insertable where it previously would have violated the CHECK.
+      assert.doesNotThrow(() => {
+        db.prepare(
+          `INSERT INTO test_run_results (id, project_name, trigger, test_suite, runner, status, machine_id)
+           VALUES ('mutation-row', 'demo-project', 'MANUAL', 'MUTATION', 'stryker', 'passed', 'test-machine-id')`
+        ).run();
+      }, 'MUTATION should be accepted by the rebuilt CHECK constraint');
+
+      const schemaVersion = db.prepare("SELECT value FROM forge_meta WHERE key = 'schema_version'").get() as {
+        value: string;
+      };
+      assert.equal(schemaVersion.value, CURRENT_SCHEMA_VERSION);
+    });
+
+    it('is a no-op on a db that already has the new-shape table (idempotent across repeated init calls)', () => {
+      assert.doesNotThrow(() => initializeForgeMemory(migTestDb3));
+      const db = getConnection(migTestDb3);
+      const count = db.prepare('SELECT COUNT(*) as c FROM test_run_results').get() as { c: number };
+      assert.ok(count.c >= 2, 'rows inserted in the previous test should still be present');
+    });
+  });
+
   describe('getConnection', () => {
     it('should return a working database object', () => {
       const db = getConnection(testDb);
