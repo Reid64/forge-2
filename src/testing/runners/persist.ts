@@ -38,7 +38,12 @@ const MAX_FAILURE_SUMMARY = 20;
  *  deliberately NOT folded into STATIC_ANALYSIS or DEPENDENCY_SCAN, because those two categories
  *  are already required starting at a lower readiness tier (PRODUCTION_READY_MVP / COMMERCIAL_SAAS
  *  respectively); a dedicated value is what lets `readiness-levels.ts` withhold them until the
- *  MILESTONE/PRE-DEPLOYMENT tiers instead. */
+ *  MILESTONE/PRE-DEPLOYMENT tiers instead.
+ *
+ *  PYTHON_PROPERTY (pytest+Hypothesis) and FASTCHECK (fast-check) BOTH map to the new PROPERTY_BASED
+ *  value (schema 3.5.0) — back to the DEPENDENCY_SCAN-style reuse pattern, since these two runners
+ *  are meant to be gated identically (alongside UNIT, at every tier) rather than kept apart the way
+ *  IAC/SBOM/LICENSE needed to be. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -60,6 +65,8 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.IAC]: 'IAC',
   [RunnerType.SBOM]: 'SBOM',
   [RunnerType.LICENSE]: 'LICENSE',
+  [RunnerType.PYTHON_PROPERTY]: 'PROPERTY_BASED',
+  [RunnerType.FASTCHECK]: 'PROPERTY_BASED',
 };
 
 const ANSI_RESET = '\x1b[0m';

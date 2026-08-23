@@ -33,6 +33,14 @@ export enum RunnerType {
   SBOM = 'SBOM',
   /** Dependency license compliance (trivy fs --scanners license) — same MILESTONE/PRE-DEPLOYMENT gate. */
   LICENSE = 'LICENSE',
+  /** Python property-based testing (pytest + Hypothesis) — gated the same as UNIT (every tier that
+   *  requires UNIT also requires this), since property-based tests are run alongside regular unit
+   *  tests rather than at a later milestone. */
+  PYTHON_PROPERTY = 'PYTHON_PROPERTY',
+  /** JS/TS property-based testing — runs ONLY existing tests that import 'fast-check' via the
+   *  project's own Vitest install; never generates new tests. Same UNIT-mirrored gate as
+   *  PYTHON_PROPERTY above. */
+  FASTCHECK = 'FASTCHECK',
 }
 
 export interface TestRunResult {

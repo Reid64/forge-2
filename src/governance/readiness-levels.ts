@@ -12,7 +12,7 @@
  *    (`src/resurrection/types.ts` › `ARTIFACT_NAMES`), the real 9-value set System 1 (GapAuditor)
  *    already scores — not a fabricated artifact list.
  *  - `requiredTestSuites` values are drawn exclusively from `TestSuiteDb`
- *    (`src/memory/test-results.ts`), the real 22-value CHECK-constrained enum `test_run_results`
+ *    (`src/memory/test-results.ts`), the real 23-value CHECK-constrained enum `test_run_results`
  *    is persisted against, and are ordered to match the progressive-gate escalation described in
  *    `upgrades/QA_TESTING_FRAMEWORK.md` § "progressive gates" (PROMPT COMPLETION → FEATURE
  *    COMPLETION → QUEUE YAML COMPLETION → MILESTONE → PRE-DEPLOYMENT → ENTERPRISE RELEASE).
@@ -21,6 +21,10 @@
  *    STATIC_ANALYSIS/DEPENDENCY_SCAN first appear: they are their own TestSuiteDb values
  *    specifically so they can be withheld until MILESTONE/PRE-DEPLOYMENT instead of being pulled
  *    forward to a lower tier by an existing, already-required category.
+ *    PROPERTY_BASED (python-property-runner.ts / fastcheck-runner.ts — schema 3.5.0) takes the
+ *    opposite approach: it is required at every tier UNIT is required at (property-based tests run
+ *    alongside regular unit tests, not as a later-milestone gate), so it is listed next to 'UNIT' in
+ *    every `requiredTestSuites` array below rather than being introduced partway up the ladder.
  *  - `requiredSecurityObservabilityItems` are free-text labels drawn verbatim from
  *    CAPABILITIES_MEMO.md's own enumerated Enterprise-Grade requirement list (lines ~933-997) —
  *    no item below was invented outside that list.
@@ -87,9 +91,10 @@ const ALL_ARTIFACTS: ArtifactName[] = [
   'TESTING',
 ];
 
-/** All 22 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
+/** All 23 `TestSuiteDb` values (`src/memory/test-results.ts`) — the maximal regime. */
 const ALL_TEST_SUITES: TestSuiteDb[] = [
   'UNIT',
+  'PROPERTY_BASED',
   'INTEGRATION',
   'API',
   'E2E',
@@ -169,7 +174,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'A throwaway or exploratory build. No governance or test regime is required beyond the ' +
       'live build-status record FORGE always writes.',
     requiredGovernanceArtifacts: ['STATE_OF_THE_BUILD'],
-    requiredTestSuites: ['UNIT'],
+    requiredTestSuites: ['UNIT', 'PROPERTY_BASED'],
     requiredSecurityObservabilityItems: [],
     source: `${CAPABILITIES_MEMO_SOURCE}, tier 1 — "1. PROTOTYPE"`,
   },
@@ -179,7 +184,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
     label: 'MVP',
     description: 'A minimal viable product — the architecture must be recorded, and unit + integration coverage exists.',
     requiredGovernanceArtifacts: ['BLUEPRINT', 'STATE_OF_THE_BUILD'],
-    requiredTestSuites: ['UNIT', 'INTEGRATION'],
+    requiredTestSuites: ['UNIT', 'PROPERTY_BASED', 'INTEGRATION'],
     requiredSecurityObservabilityItems: ['code review'],
     source: `${CAPABILITIES_MEMO_SOURCE}, tier 2 — "2. MVP"`,
   },
@@ -191,7 +196,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'An MVP hardened enough to run in production: a real PRD and TESTING plan exist, and the ' +
       'QUEUE YAML COMPLETION gate (full unit + integration + E2E + static analysis) is green.',
     requiredGovernanceArtifacts: ['PRD', 'BLUEPRINT', 'TESTING', 'STATE_OF_THE_BUILD'],
-    requiredTestSuites: ['UNIT', 'INTEGRATION', 'E2E', 'STATIC_ANALYSIS'],
+    requiredTestSuites: ['UNIT', 'PROPERTY_BASED', 'INTEGRATION', 'E2E', 'STATIC_ANALYSIS'],
     requiredSecurityObservabilityItems: ['code review', 'CI/CD', 'integration testing', 'E2E testing'],
     source: `${CAPABILITIES_MEMO_SOURCE}, tier 3 — "3. PRODUCTION-READY MVP"; ${QA_FRAMEWORK_SOURCE} "QUEUE YAML COMPLETION"`,
   },
@@ -203,7 +208,17 @@ export const READINESS_TIERS: ReadinessTier[] = [
       'A billable product: schema and toolchain are formally recorded, and the API/dependency/' +
       'accessibility/security surface has a passing baseline.',
     requiredGovernanceArtifacts: ['PRD', 'BLUEPRINT', 'TESTING', 'SCHEMA_REGISTRY', 'TOOLCHAIN', 'STATE_OF_THE_BUILD'],
-    requiredTestSuites: ['UNIT', 'INTEGRATION', 'E2E', 'STATIC_ANALYSIS', 'API', 'SECURITY', 'DEPENDENCY_SCAN', 'ACCESSIBILITY'],
+    requiredTestSuites: [
+      'UNIT',
+      'PROPERTY_BASED',
+      'INTEGRATION',
+      'E2E',
+      'STATIC_ANALYSIS',
+      'API',
+      'SECURITY',
+      'DEPENDENCY_SCAN',
+      'ACCESSIBILITY',
+    ],
     requiredSecurityObservabilityItems: [
       'code review',
       'CI/CD',
@@ -234,6 +249,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
     ],
     requiredTestSuites: [
       'UNIT',
+      'PROPERTY_BASED',
       'INTEGRATION',
       'E2E',
       'STATIC_ANALYSIS',
@@ -270,6 +286,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
     requiredGovernanceArtifacts: ALL_ARTIFACTS,
     requiredTestSuites: [
       'UNIT',
+      'PROPERTY_BASED',
       'INTEGRATION',
       'E2E',
       'STATIC_ANALYSIS',
@@ -317,6 +334,7 @@ export const READINESS_TIERS: ReadinessTier[] = [
     requiredGovernanceArtifacts: ALL_ARTIFACTS,
     requiredTestSuites: [
       'UNIT',
+      'PROPERTY_BASED',
       'INTEGRATION',
       'E2E',
       'STATIC_ANALYSIS',

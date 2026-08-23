@@ -14,7 +14,7 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'forge_memory.db');
  * truth — bump this (and add a schema block + migration step) when the schema changes; nothing
  * else, including tests, should hardcode a version literal.
  */
-export const CURRENT_SCHEMA_VERSION = '3.4.0';
+export const CURRENT_SCHEMA_VERSION = '3.5.0';
 
 let cachedMachineId: string | null = null;
 const connectionCache = new Map<string, Database.Database>();
@@ -440,7 +440,7 @@ const SYSTEMS_1_3_SCHEMA_SQL = `
       build_run_id          TEXT,
       project_name          TEXT NOT NULL,
       trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
-      test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE')),
+      test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE','PROPERTY_BASED')),
       runner                TEXT NOT NULL DEFAULT 'vitest',
       status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
       prompt_index          INTEGER,
@@ -1323,6 +1323,46 @@ export function initializeForgeMemory(dbPath?: string): void {
       ALTER TABLE test_run_results__migrating_3_4_0 RENAME TO test_run_results;
     `);
   }
+  // 3.4.0 -> 3.5.0 (python-property-runner.ts / fastcheck-runner.ts): test_run_results.test_suite's
+  // CHECK constraint gains 'PROPERTY_BASED' — same rebuild-in-place technique as the 3.3.0 -> 3.4.0
+  // step immediately above (SQLite has no ALTER TABLE ... MODIFY CHECK), detected the same way: if
+  // sqlite_master.sql for test_run_results is missing the new 'PROPERTY_BASED' literal, rebuild
+  // under the new CHECK, copy every row across unchanged (every existing test_suite value is a
+  // strict subset of the new 23-value set), drop, rename. A freshly-created db never enters this
+  // branch — SYSTEMS_1_3_SCHEMA_SQL's own `CREATE TABLE IF NOT EXISTS` immediately below already
+  // carries the updated CHECK.
+  const testRunResultsRowV2 = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'test_run_results'")
+    .get() as { sql: string } | undefined;
+  if (testRunResultsRowV2 && !testRunResultsRowV2.sql.includes("'PROPERTY_BASED'")) {
+    db.exec(`
+      CREATE TABLE test_run_results__migrating_3_5_0 (
+        id                    TEXT PRIMARY KEY,
+        build_run_id          TEXT,
+        project_name          TEXT NOT NULL,
+        trigger               TEXT NOT NULL CHECK(trigger IN ('POST_PROMPT','SCHEDULED','MANUAL','PRE_DEPLOY','CI')),
+        test_suite            TEXT NOT NULL CHECK(test_suite IN ('UNIT','INTEGRATION','API','E2E','VISUAL_REGRESSION','PERFORMANCE','LOAD','STRESS','SOAK','SECURITY','ACCESSIBILITY','CHAOS','DISASTER_RECOVERY','BACKUP_RESTORE','DEPENDENCY_SCAN','STATIC_ANALYSIS','DYNAMIC_ANALYSIS','CROSS_BROWSER','CROSS_DEVICE','IAC','SBOM','LICENSE','PROPERTY_BASED')),
+        runner                TEXT NOT NULL DEFAULT 'vitest',
+        status                TEXT NOT NULL CHECK(status IN ('running','passed','failed','partial','skipped','error')),
+        prompt_index          INTEGER,
+        tests_total           INTEGER NOT NULL DEFAULT 0,
+        tests_passed          INTEGER NOT NULL DEFAULT 0,
+        tests_failed          INTEGER NOT NULL DEFAULT 0,
+        tests_skipped         INTEGER NOT NULL DEFAULT 0,
+        duration_ms           INTEGER NOT NULL DEFAULT 0,
+        failure_summary       TEXT,
+        report_path           TEXT,
+        exit_code             INTEGER,
+        started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at          TEXT,
+        machine_id            TEXT NOT NULL,
+        created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO test_run_results__migrating_3_5_0 SELECT * FROM test_run_results;
+      DROP TABLE test_run_results;
+      ALTER TABLE test_run_results__migrating_3_5_0 RENAME TO test_run_results;
+    `);
+  }
   db.exec(SYSTEMS_1_3_SCHEMA_SQL);
   // 2.3.0 -> 2.5.0 (System 5 — Sentinel Prime — and the Orchestrator): sentinel_prime_runs,
   // validation_events, orchestrator_manifests, orchestrator_queue_runs.
@@ -1354,6 +1394,8 @@ export function initializeForgeMemory(dbPath?: string): void {
   // 3.3.0 -> 3.4.0 (IaC/SBOM/License runners): test_run_results.test_suite CHECK gains
   // 'IAC','SBOM','LICENSE' — see the table-rebuild migration above (CHECK constraints can't be
   // ALTERed in SQLite) and SYSTEMS_1_3_SCHEMA_SQL's CREATE TABLE just below for the new CHECK.
+  // 3.4.0 -> 3.5.0 (python-property-runner.ts / fastcheck-runner.ts): test_run_results.test_suite
+  // CHECK gains 'PROPERTY_BASED' — see the table-rebuild migration above.
 
   if (currentVersion !== targetVersion) {
     db.prepare("INSERT OR REPLACE INTO forge_meta (key, value) VALUES ('schema_version', ?)").run(targetVersion);

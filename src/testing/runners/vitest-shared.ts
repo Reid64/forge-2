@@ -110,8 +110,10 @@ export interface RunVitestOptions {
   timeoutMs?: number;
 }
 
-/** Detect whether Vitest is a resolvable dependency of the TARGET project (never FORGE's own). */
-function vitestInstalled(projectPath: string): boolean {
+/** Detect whether Vitest is a resolvable dependency of the TARGET project (never FORGE's own).
+ *  Exported for reuse by fastcheck-runner.ts, which needs the same check but drives its own
+ *  file-scoped Vitest invocation rather than `runVitestSuite`'s full-suite one. */
+export function vitestInstalled(projectPath: string): boolean {
   const bin = join(projectPath, 'node_modules', '.bin', process.platform === 'win32' ? 'vitest.cmd' : 'vitest');
   return existsSync(bin) || existsSync(join(projectPath, 'node_modules', 'vitest'));
 }

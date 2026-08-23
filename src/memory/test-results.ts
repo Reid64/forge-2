@@ -14,13 +14,20 @@ const TEST_COVERAGE_SNAPSHOTS_TABLE = 'test_coverage_snapshots';
 
 export type TestRunTrigger = 'POST_PROMPT' | 'SCHEDULED' | 'MANUAL' | 'PRE_DEPLOY' | 'CI';
 
-/** 22-value CHECK-constrained enum (`src/learning/database.ts` › `test_run_results.test_suite`
+/** 23-value CHECK-constrained enum (`src/learning/database.ts` › `test_run_results.test_suite`
  *  CHECK clause — must match this union EXACTLY, both edited together). IAC/SBOM/LICENSE (schema
  *  3.4.0) were added as new values rather than folding into STATIC_ANALYSIS/DEPENDENCY_SCAN
  *  specifically so `src/governance/readiness-levels.ts` can gate them to the MILESTONE
  *  (ENTERPRISE_READY) and PRE-DEPLOYMENT (ENTERPRISE_GRADE) readiness tiers only — reusing an
  *  existing value already required starting at a lower tier (STATIC_ANALYSIS at tier 3,
- *  DEPENDENCY_SCAN at tier 4) would have made that tier-gating impossible to express. */
+ *  DEPENDENCY_SCAN at tier 4) would have made that tier-gating impossible to express.
+ *
+ *  PROPERTY_BASED (schema 3.5.0) is ONE new value shared by BOTH the Python (pytest+Hypothesis) and
+ *  JS/TS (fast-check) property-based runners — the same "coarser category, distinguished by
+ *  `runner`" reuse pattern `persist.ts`'s TEST_SUITE_DB map already uses for DEPENDENCY_SCAN
+ *  (shared by the `pnpm-audit` and `trivy` runners). A single value is correct here (unlike
+ *  IAC/SBOM/LICENSE) because both property-based runners are meant to be gated identically —
+ *  alongside UNIT, at every tier — so there is no tier-gating reason to keep them apart. */
 export type TestSuiteDb =
   | 'UNIT'
   | 'INTEGRATION'
@@ -43,7 +50,8 @@ export type TestSuiteDb =
   | 'CROSS_DEVICE'
   | 'IAC'
   | 'SBOM'
-  | 'LICENSE';
+  | 'LICENSE'
+  | 'PROPERTY_BASED';
 
 export type TestRunStatus = 'running' | 'passed' | 'failed' | 'partial' | 'skipped' | 'error';
 
