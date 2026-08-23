@@ -60,8 +60,14 @@ export async function run(input: RunnerInput): Promise<RunnerOutcome> {
   }
 
   const command = `pnpm exec playwright test --reporter=json`;
-  input.log(`playwright: ${command}`);
-  const result = await defaultShellRunner(command, input.projectPath, input.timeoutMs ?? DEFAULT_E2E_TIMEOUT_MS);
+  input.log(`playwright: ${command}${input.baseUrl ? ` (BASE_URL=${input.baseUrl})` : ''}`);
+  // Optional target base URL (an ephemeral preview URL, `src/deploy/ephemeral-preview.ts`) —
+  // exported under both names since Playwright configs commonly read either `BASE_URL` (a
+  // project's own convention) or `PLAYWRIGHT_TEST_BASE_URL` (Playwright's own env var, honored by
+  // `use.baseURL` when a config reads `process.env.PLAYWRIGHT_TEST_BASE_URL` — see Playwright's
+  // docs). Absent by default (no behavior change for every caller that never sets `input.baseUrl`).
+  const env = input.baseUrl ? { BASE_URL: input.baseUrl, PLAYWRIGHT_TEST_BASE_URL: input.baseUrl } : undefined;
+  const result = await defaultShellRunner(command, input.projectPath, input.timeoutMs ?? DEFAULT_E2E_TIMEOUT_MS, env);
   const durationMs = Date.now() - started;
 
   let raw = result.stdout.trim();

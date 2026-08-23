@@ -118,4 +118,11 @@ export interface TestOrchestratorOptions {
   promptId: string | null;
   triggers: TriggerType[];
   runners: RunnerType[];
+  /**
+   * Optional target base URL for URL-aware runners (API/E2E — see `RunnerInput.baseUrl`,
+   * `src/testing/runners/types.ts`). Forwarded verbatim to every requested runner; runners that
+   * don't care about a target URL ignore it. Absent by default — a complete no-op for every
+   * existing caller (`src/phases/phase4-sentinel.ts`'s POST_PROMPT hook omits it, unchanged).
+   */
+  baseUrl?: string;
 }

@@ -467,6 +467,37 @@ export class VercelDeployer {
       return false;
     }
   }
+  /**
+   * Delete a deployment via `DELETE /v13/deployments/{id}` (e.g. an ephemeral preview torn down
+   * once `src/deploy/ephemeral-preview.ts` is done testing against it). Returns `true` on a
+   * confirmed 200/204, and also on a 404 (already gone — deleting twice is not a failure);
+   * `false` on a missing token/project link, any other non-2xx status, or a network failure.
+   * Never throws.
+   */
+  async deleteDeployment(projectPath: string, deploymentId: string): Promise<boolean> {
+    const token = await resolveToken(projectPath, this.vault);
+    if (!token) {
+      log.warn({ projectPath }, 'deleteDeployment: no VERCEL_TOKEN available.');
+      return false;
+    }
+    const link = await readProjectLink(projectPath);
+    const teamQuery = link?.orgId.startsWith('team_') ? `?teamId=${encodeURIComponent(link.orgId)}` : '';
+    try {
+      const res = await fetch(`${VERCEL_API_BASE}/v13/deployments/${encodeURIComponent(deploymentId)}${teamQuery}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok && res.status !== 404) {
+        const body = await res.text().catch(() => '');
+        log.warn({ projectPath, deploymentId, status: res.status, body }, 'deleteDeployment: Vercel API returned a non-2xx status.');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      logMemoryWarning('vercel-deployer.deleteDeployment', error);
+      return false;
+    }
+  }
 }
 
 /** Construct a {@link VercelDeployer}, optionally over an explicit {@link CredentialVault} (tests). */

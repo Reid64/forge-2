@@ -50,6 +50,16 @@ export interface LibraryManifest {
    * existed — those keep running with no cap, exactly as before.
    */
   maxBudgetUsd?: number | null;
+  /**
+   * Optional run-wide opt-in (default `false` — a complete no-op, not even a `VERCEL_TOKEN`
+   * check, when absent/`false`): when `true`, each queue run started via the orchestrator carries
+   * this into Phase 3 (`Phase3Options.previewEnvironments`, `src/phases/phase3-executor.ts`),
+   * which — per prompt, after Sentinel passes and the branch merges — deploys an ephemeral Vercel
+   * preview (`src/deploy/ephemeral-preview.ts`), runs the POST_PROMPT test suite against it, then
+   * tears it down. Absent/`null` on manifests written before this field existed — those keep
+   * running with no preview step, exactly as before. Mirrors {@link maxBudgetUsd}'s pattern.
+   */
+  previewEnvironments?: boolean | null;
 }
 
 export interface OrchestratorOptions {
@@ -68,6 +78,12 @@ export interface OrchestratorOptions {
    * subprocess as `--max-budget-usd` so Phase 3 can enforce it per queue run.
    */
   maxBudgetUsd?: number | null;
+  /**
+   * Mirrors the loaded manifest's {@link LibraryManifest.previewEnvironments} — optional/`false`
+   * when the manifest declares none. QueueRunner forwards it to each spawned `forge build`
+   * subprocess as `--preview-environments` so Phase 3 can run the ephemeral-preview step per prompt.
+   */
+  previewEnvironments?: boolean;
 }
 
 export interface OrchestratorResult {

@@ -190,6 +190,7 @@ import {
 } from '../governance/dead-loop-detection.js';
 import { detectStagnation, type StagnationVerdict } from '../governance/stagnation-detection.js';
 import { checkPermissions } from '../governance/permission-enforcer.js';
+import { runEphemeralPreviewStep, type EphemeralPreviewStepResult } from '../deploy/ephemeral-preview.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -441,6 +442,29 @@ export interface Phase3Options {
    * this option existed.
    */
   maxBudgetUsd?: number | null;
+  /**
+   * Optional per-prompt opt-in (mirrors `manifest.yaml`'s `previewEnvironments` field —
+   * `src/orchestrator/types.ts`'s `LibraryManifest`, threaded through the CLI's
+   * `--preview-environments` flag). Default `false` â€” a COMPLETE no-op: not even a
+   * `VERCEL_TOKEN` presence check happens, `src/deploy/ephemeral-preview.ts` is never imported
+   * into the hot path, zero behavior change for every existing manifest/CLI invocation. When
+   * `true`: after Sentinel passes and a prompt's branch merges to `mainBranch` (the SAME point
+   * `mergeAndTag` already runs at â€” Contracts 10/11 are unaffected, this never gates the merge
+   * decision), the executor deploys an ephemeral Vercel preview of the now-merged project state,
+   * runs the POST_PROMPT API/E2E test suite against that live preview URL (reusing
+   * `src/testing/orchestrator.ts`'s `runTests` â€” the same dispatcher Sentinel's own
+   * `postPromptTests` hook uses), then tears the preview down. Every step degrades to a clean
+   * `'skipped'` (logged, non-fatal, Contract 4) when `VERCEL_TOKEN` is absent from the
+   * environment â€” never a build-blocking error, and the prompt's `disposition` is decided
+   * entirely by Sentinel/recovery before this step ever runs.
+   */
+  previewEnvironments?: boolean;
+  /** Override the ephemeral-preview step (tests). Default: {@link runEphemeralPreviewStep}. */
+  runEphemeralPreviewImpl?: (input: {
+    projectPath: string;
+    buildRunId: string;
+    promptId: string | null;
+  }) => Promise<EphemeralPreviewStepResult>;
   /**
    * Max prompts run concurrently WITHIN one dependency wave (parallel-scheduler.ts's deferred
    * `executeSchedule` capability, now enabled). `1` (the default) preserves the exact classic
@@ -1734,6 +1758,12 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     options.updatePromptExecution ?? ((id, patch) => BuildMemory.prompts.updatePromptExecution(id, patch));
   const runDecomposedPromptImpl: NonNullable<Phase3Options['runDecomposedPromptImpl']> =
     options.runDecomposedPromptImpl ?? ((parent, assembledPrompt, deps) => runDecomposedPrompt(parent, assembledPrompt, deps));
+  // Opt-in (default false, `manifest.yaml`'s `previewEnvironments`) â€” the collaborator default is
+  // only ever CALLED when `previewEnvironments` is true (see `mergeAndTag`), so resolving it here
+  // unconditionally costs nothing when the flag is off.
+  const previewEnvironments = options.previewEnvironments ?? false;
+  const runEphemeralPreviewImpl: NonNullable<Phase3Options['runEphemeralPreviewImpl']> =
+    options.runEphemeralPreviewImpl ?? ((input) => runEphemeralPreviewStep(input));
 
   // 1. Resolve the queue (supplied entries, else parse queue.yaml).
   let entries: QueueEntry[] = options.entries ?? [];
@@ -2035,6 +2065,8 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     guardian: architectureGuardian,
     designPipeline,
     queueEntries: schedule.order,
+    previewEnvironments,
+    runEphemeralPreviewImpl,
   };
 
   const outcomes: PromptOutcome[] = [];
@@ -2591,6 +2623,14 @@ interface LoopContext {
   guardian: ArchitectureGuardian;
   /** Design Pipeline (screenshot capture + optional Penpot push + visual review gate). */
   designPipeline: DesignPipeline;
+  /** Opt-in ephemeral-preview step (`manifest.yaml`'s `previewEnvironments`). Default `false`. */
+  previewEnvironments: boolean;
+  /** Injectable ephemeral-preview step runner. Default: {@link runEphemeralPreviewStep}. */
+  runEphemeralPreviewImpl: (input: {
+    projectPath: string;
+    buildRunId: string;
+    promptId: string | null;
+  }) => Promise<EphemeralPreviewStepResult>;
   /**
    * The full ordered queue (`schedule.order`) â€” threaded through to `designPipeline.run()` so
    * `app-profiler.ts` profiles the WHOLE project's corpus rather than one prompt at a time.
@@ -3371,7 +3411,7 @@ async function executePrompt(
         note = promotion.noteSuffix.trim();
       } else {
         // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
-        mergeAndTag(ctx, index);
+        await mergeAndTag(ctx, entry, index, promptExecutionId);
         disposition = 'completed';
         note = `Sentinel passed â€” merged to main and checkpointed.${promotion.noteSuffix}`;
       }
@@ -3421,7 +3461,7 @@ async function executePrompt(
             disposition = 'failed';
             note = promotion.noteSuffix.trim();
           } else {
-            mergeAndTag(ctx, index);
+            await mergeAndTag(ctx, entry, index, promptExecutionId);
             disposition = 'completed';
             note = `Design review rejected, then recovered after a feedback re-run â€” merged to main and checkpointed.${promotion.noteSuffix}`;
           }
@@ -3483,7 +3523,7 @@ async function executePrompt(
           disposition = 'failed';
           note = promotion.noteSuffix.trim();
         } else {
-          mergeAndTag(ctx, index);
+          await mergeAndTag(ctx, entry, index, promptExecutionId);
           disposition = 'completed';
           note = (recovery.recovered ? `Auto-recovered: ${recovery.reason}` : 'Sentinel passed after recovery â€” merged to main and checkpointed.') + promotion.noteSuffix;
         }
@@ -4358,8 +4398,15 @@ function buildIdOf(ctx: LoopContext): string {
   return ctx.buildRunId ?? `local-${ctx.machineId}`;
 }
 
-/** Merge the current feature branch to main and create the Contract-11 checkpoint tag. */
-function mergeAndTag(ctx: LoopContext, index: number): void {
+/**
+ * Merge the current feature branch to main and create the Contract-11 checkpoint tag, then â€” only
+ * when `ctx.previewEnvironments` is `true` (opt-in, `manifest.yaml`) â€” run the ephemeral-preview
+ * step (`src/deploy/ephemeral-preview.ts`) against the now-merged project state. The preview step
+ * runs AFTER the merge/tag has already landed, so it can never affect the merge decision itself
+ * (Contracts 10/11 are decided purely by Sentinel, exactly as before this option existed); a
+ * preview/test/teardown failure is logged and swallowed, never thrown back to the caller.
+ */
+async function mergeAndTag(ctx: LoopContext, entry: QueueEntry, index: number, promptExecutionId: string | null): Promise<void> {
   const merge = ctx.git.mergeToMain();
   if (!merge.success) {
     ctx.log(`prompt ${index}: merge to ${merge.targetBranch} failed â€” ${merge.error ?? 'unknown'}`);
@@ -4367,6 +4414,30 @@ function mergeAndTag(ctx: LoopContext, index: number): void {
   }
   const tag = ctx.git.tagCheckpoint(buildIdOf(ctx), index);
   if (!tag.success) ctx.log(`prompt ${index}: checkpoint tag failed â€” ${tag.error ?? 'unknown'}`);
+
+  if (!ctx.previewEnvironments) return; // default false â€” complete no-op, not even a VERCEL_TOKEN check.
+  try {
+    const preview = await ctx.runEphemeralPreviewImpl({
+      projectPath: ctx.projectPath,
+      buildRunId: buildIdOf(ctx),
+      promptId: promptExecutionId ?? entry.id,
+    });
+    if (preview.preview.status === 'skipped') {
+      ctx.log(`prompt ${index} '${entry.id}': ephemeral preview skipped â€” ${preview.preview.reason ?? 'no reason given'}`);
+    } else if (preview.preview.status === 'failed') {
+      ctx.log(`prompt ${index} '${entry.id}': ephemeral preview failed â€” ${preview.preview.reason ?? 'no reason given'}`);
+    } else {
+      const summary = preview.testResults
+        .map((r) => `${r.testSuite}:${r.status}`)
+        .join(', ');
+      ctx.log(
+        `prompt ${index} '${entry.id}': ephemeral preview ready at ${preview.preview.url ?? '(unknown url)'} â€” ` +
+          `POST_PROMPT tests [${summary || 'none run'}], teardown ${preview.teardown?.status ?? 'skipped'}.`
+      );
+    }
+  } catch (error) {
+    ctx.log(`prompt ${index} '${entry.id}': ephemeral preview step threw (${describe(error)}) â€” not evaluated, never blocks the build.`);
+  }
 }
 
 /**

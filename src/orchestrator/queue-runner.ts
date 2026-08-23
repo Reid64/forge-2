@@ -262,6 +262,12 @@ export class QueueRunner {
     if (typeof options.maxBudgetUsd === 'number' && Number.isFinite(options.maxBudgetUsd)) {
       args.push('--max-budget-usd', String(options.maxBudgetUsd));
     }
+    // Forward the manifest's optional ephemeral-preview opt-in (OrchestratorEngine merges it onto
+    // `options` from `LibraryManifest.previewEnvironments` before delegating here) — absent/false
+    // means this queue run is spawned with no preview step, exactly as before.
+    if (options.previewEnvironments === true) {
+      args.push('--preview-environments');
+    }
 
     renderProgress(
       'INFO',

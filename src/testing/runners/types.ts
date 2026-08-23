@@ -12,6 +12,16 @@ export interface RunnerInput {
   log: (message: string) => void;
   /** Optional timeout override (ms). Runners fall back to their own sane default. */
   timeoutMs?: number;
+  /**
+   * Optional target base URL for runners that hit a live server (API/E2E). When set — e.g. an
+   * ephemeral Vercel preview URL, `src/deploy/ephemeral-preview.ts` — the URL-aware runners
+   * (api-runner.ts, e2e-runner.ts, via vitest-shared.ts's `runVitestSuite`) export it to the
+   * spawned test process as `BASE_URL` (and, for Playwright, `PLAYWRIGHT_TEST_BASE_URL`) so the
+   * target project's own test config can point at it. Absent by default: every runner that does
+   * not care about a target URL (UNIT, SECURITY, DEPENDENCY, ...) simply ignores this field, so
+   * omitting it is a complete no-op — exactly today's behavior.
+   */
+  baseUrl?: string;
 }
 
 /** One failed assertion/finding, normalized across every tool's native output shape. */

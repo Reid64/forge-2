@@ -95,6 +95,14 @@ export class OrchestratorEngine {
       renderProgress('INFO', `[ORCHESTRATOR] manifest maxBudgetUsd cap: $${manifest.maxBudgetUsd.toFixed(2)} per queue run`);
     }
 
+    // Same carry-through for the opt-in ephemeral-preview step (QueueRunner -> `forge build
+    // --preview-environments`) — absent/false keeps every existing manifest.yaml running with no
+    // preview step, unchanged.
+    if (manifest.previewEnvironments === true) {
+      options = { ...options, previewEnvironments: true };
+      renderProgress('INFO', '[ORCHESTRATOR] manifest previewEnvironments: true — ephemeral preview step enabled per queue run');
+    }
+
     let queuesRun = 0;
     let queuesComplete = 0;
     let queuesFailed = 0;

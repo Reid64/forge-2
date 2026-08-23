@@ -766,6 +766,7 @@ async function cmdBuild(
     autoApproveGates?: boolean;
     allowHeadless?: boolean;
     maxBudgetUsd?: string;
+    previewEnvironments?: boolean;
   }
 ): Promise<void> {
   beginQuietLogging('.forge/build.log');
@@ -796,6 +797,12 @@ async function cmdBuild(
       return;
     }
     process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan(`--max-budget-usd $${maxBudgetUsd.toFixed(2)}: Phase 3 halts cleanly between prompts once its cost estimate reaches this cap.`)}\n`);
+  }
+  // --preview-environments: opt-in, default false — no parsing/validation needed (a plain boolean
+  // flag), same posture as every other Commander boolean option above.
+  const previewEnvironments = opts.previewEnvironments ?? false;
+  if (previewEnvironments) {
+    process.stdout.write(`${tsPrefix('INFO')} ${chalk.cyan('--preview-environments: Phase 3 will deploy + test an ephemeral Vercel preview after each prompt merges (requires VERCEL_TOKEN; cleanly skipped otherwise).')}\n`);
   }
 
   const projectPath = resolveProjectPath(pathArg);
@@ -834,6 +841,7 @@ async function cmdBuild(
           dryRun: opts.dryRun ?? false,
           allowHeadless: opts.allowHeadless ?? false,
           maxBudgetUsd,
+          previewEnvironments,
           log,
         },
         startAt,
@@ -920,6 +928,7 @@ async function cmdBuild(
           dryRun: opts.dryRun ?? false,
           allowHeadless: opts.allowHeadless ?? false,
           maxBudgetUsd,
+          previewEnvironments,
           log,
         },
         startAt,
@@ -963,6 +972,7 @@ async function cmdBuild(
         dryRun: opts.dryRun ?? false,
         allowHeadless: opts.allowHeadless ?? false,
         maxBudgetUsd,
+        previewEnvironments,
         log,
       },
       startAt,
@@ -3697,6 +3707,11 @@ async function main(): Promise<void> {
       '--max-budget-usd <usd>',
       'optional run-wide dollar cap (opt-in). Checked before each Phase 3 prompt starts against the per-prompt cost-estimate tracker; once the accumulated estimate reaches this cap, the build halts cleanly BETWEEN prompts (already-completed work stays merged). Default: no cap.'
     )
+    .option(
+      '--preview-environments',
+      'optional per-prompt opt-in (mirrors manifest.yaml\'s previewEnvironments field): after Sentinel passes and a prompt merges, deploy an ephemeral Vercel preview, run the POST_PROMPT test suite against it, then tear it down. Requires VERCEL_TOKEN in the environment — cleanly skipped (logged, non-fatal) when absent. Default: off (no behavior change).',
+      false
+    )
     .action(
       (
         pathArg: string,
@@ -3716,6 +3731,7 @@ async function main(): Promise<void> {
           autoApproveGates?: boolean;
           allowHeadless?: boolean;
           maxBudgetUsd?: string;
+          previewEnvironments?: boolean;
         }
       ) => cmdBuild(pathArg, opts)
     );

@@ -107,7 +107,7 @@ export async function runTests(options: TestOrchestratorOptions): Promise<TestRu
 
       let outcome: RunnerOutcome;
       try {
-        outcome = await runnerFn({ projectPath, log });
+        outcome = await runnerFn({ projectPath, log, ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}) });
       } catch (error) {
         outcome = {
           runner: runnerType.toLowerCase(),

@@ -18,7 +18,12 @@ export interface ShellResult {
   timedOut: boolean;
 }
 
-export type ShellRunner = (command: string, cwd: string, timeoutMs: number) => Promise<ShellResult>;
+export type ShellRunner = (
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  env?: Record<string, string>
+) => Promise<ShellResult>;
 
 interface ExecError {
   code?: number;
@@ -38,18 +43,24 @@ function quoteForPowerShellCommandArg(command: string): string {
 export async function defaultShellRunner(
   command: string,
   cwd: string,
-  timeoutMs: number
+  timeoutMs: number,
+  env?: Record<string, string>
 ): Promise<ShellResult> {
   const effectiveCommand =
     process.platform === 'win32'
       ? `powershell.exe -NoProfile -NonInteractive -Command ${quoteForPowerShellCommandArg(command)}`
       : command;
   try {
+    // `env` merges onto the current process's own environment (Node's default when `env` is
+    // omitted from exec options) — an optional extra like `BASE_URL` never removes anything the
+    // spawned test process already needs (PATH, npm/pnpm config, etc). Omitted entirely (the
+    // default for every existing caller) reproduces the exact prior behavior.
     const { stdout, stderr } = await execAsync(effectiveCommand, {
       cwd,
       timeout: timeoutMs,
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
+      ...(env ? { env: { ...process.env, ...env } } : {}),
     });
     return { ok: true, exitCode: 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), timedOut: false };
   } catch (error) {

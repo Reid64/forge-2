@@ -680,6 +680,13 @@ export interface SentinelOptions {
     projectPath?: string;
     buildRunId?: string | null;
     promptId?: string | null;
+    /**
+     * Optional target base URL (an ephemeral preview URL — `src/deploy/ephemeral-preview.ts`)
+     * forwarded to `runTests`/`TestOrchestratorOptions.baseUrl`. Absent by default — this hook's
+     * UNIT/INTEGRATION runners ignore it either way (only API/E2E read it), so omitting it is a
+     * complete no-op, unchanged from before this field existed.
+     */
+    baseUrl?: string;
   };
   /** Override the TestOrchestrator dispatcher (tests). Default: {@link runTests}. */
   runPostPromptTests?: (options: TestOrchestratorOptions) => Promise<TestRunResult[]>;
@@ -4718,6 +4725,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
         promptId: options.postPromptTests.promptId ?? null,
         triggers: [TriggerType.POST_PROMPT],
         runners: [RunnerType.UNIT, RunnerType.INTEGRATION],
+        ...(options.postPromptTests.baseUrl ? { baseUrl: options.postPromptTests.baseUrl } : {}),
       });
       for (const r of testResults) {
         log(

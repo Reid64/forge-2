@@ -141,9 +141,13 @@ export async function runVitestSuite(input: RunnerInput, opts: RunVitestOptions)
   const shuffleArg =
     typeof opts.sequenceShuffleSeed === 'number' ? ` --sequence.shuffle --sequence.seed=${opts.sequenceShuffleSeed}` : '';
   const command = `pnpm exec vitest run${configArg}${coverageArg}${shuffleArg} --reporter=json --outputFile=${opts.reportFile}`;
-  input.log(`vitest: ${command}`);
+  input.log(`vitest: ${command}${input.baseUrl ? ` (BASE_URL=${input.baseUrl})` : ''}`);
 
-  const result = await run(command, input.projectPath, opts.timeoutMs ?? input.timeoutMs ?? DEFAULT_VITEST_TIMEOUT_MS);
+  // Optional target base URL (an ephemeral preview URL, `src/deploy/ephemeral-preview.ts`) —
+  // exported as `BASE_URL` so the target project's own vitest config / test files can read it.
+  // Absent by default (no behavior change for every caller that never sets `input.baseUrl`).
+  const env = input.baseUrl ? { BASE_URL: input.baseUrl } : undefined;
+  const result = await run(command, input.projectPath, opts.timeoutMs ?? input.timeoutMs ?? DEFAULT_VITEST_TIMEOUT_MS, env);
   const durationMs = Date.now() - started;
 
   let raw: string | null = null;

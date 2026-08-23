@@ -218,6 +218,17 @@ export class ManifestResolver {
       }
     }
 
+    // `previewEnvironments` is optional and opt-in (default false/absent — no preview step,
+    // unchanged behavior). When present it must be a boolean — a malformed value (e.g. a string
+    // "true") fails loudly here rather than silently being treated as truthy/falsy downstream.
+    if (manifest.previewEnvironments !== undefined && manifest.previewEnvironments !== null) {
+      if (typeof manifest.previewEnvironments !== 'boolean') {
+        throw new Error(
+          `ManifestResolver: "${manifestPath}" field "previewEnvironments" must be a boolean when present (got ${JSON.stringify(manifest.previewEnvironments)})`
+        );
+      }
+    }
+
     const seenIds = new Set<string>();
     (manifest.queues as unknown[]).forEach((rawQueue, index) => {
       if (typeof rawQueue !== 'object' || rawQueue === null) {
