@@ -39,6 +39,22 @@ import {
   formatTournamentResult,
   type ComponentGeneratorLike,
 } from '../src/design-pipeline/design-tournament.js';
+import { inferBrandProfile } from '../src/design-pipeline/brand-intelligence.js';
+import { inferTargetPersonas, TARGET_USER_VOCAB } from '../src/design-pipeline/persona-profiler.js';
+import {
+  AESTHETIC_FAMILIES,
+  AESTHETIC_FAMILY_IDS,
+  getAestheticFamily,
+  scoreAestheticFamilyMatch,
+  rankAestheticFamilies,
+} from '../src/design-pipeline/aesthetic-reference.js';
+import {
+  MINIMUM_VARIANCE,
+  jaccardSimilarity,
+  validateVariance,
+  fromDesignDirection,
+  type VarianceCandidate,
+} from '../src/design-pipeline/variance-controller.js';
 import { getClient, resetClient } from '../src/memory/client.js';
 import type { ComponentSpec, GeneratedComponent } from '../src/ui-engine/component-generator.js';
 
@@ -282,6 +298,231 @@ describe('design-tournament: DesignTournamentEngine.run (injected generator, no 
     const rendered = formatTournamentResult(result);
     assert.match(rendered, /AWAITING HUMAN DESIGN APPROVAL/);
     assert.match(rendered, /GENERATION FAILED: synthetic generation failure/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Brand Intelligence — pure keyword scoring (documentText injected, no disk I/O)
+// ---------------------------------------------------------------------------
+
+describe('brand-intelligence: inferBrandProfile', () => {
+  test('empty document text degrades to a low-confidence, tone-neutral profile, never throws', () => {
+    const profile = inferBrandProfile('Empty', '/nonexistent/path', '');
+    assert.deepEqual(profile.tone, []);
+    assert.deepEqual(profile.avoid, ['generic_saas', 'ai_slop_icons']);
+    assert.equal(profile.confidence, 'low');
+    assert.match(profile.sourceSummary, /no PRD\/governance text available/);
+  });
+
+  test('premium/technical/trustworthy prose scores matching tone + avoid + values tags', () => {
+    const text =
+      'This is a premium, technical, trustworthy fintech platform. We value trust and security above ' +
+      'all else. Our customers expect a reliable, precise experience.';
+    const profile = inferBrandProfile('Acme', '/nonexistent/path', text);
+    assert.ok(profile.tone.includes('premium'));
+    assert.ok(profile.tone.includes('technical'));
+    assert.ok(profile.tone.includes('trustworthy'));
+    assert.ok(profile.avoid.includes('playful'), 'trustworthy tone should imply avoiding playful');
+    assert.ok(profile.values.includes('trust') || profile.values.includes('security'));
+    assert.match(profile.positioning, /fintech product/);
+    assert.notEqual(profile.confidence, 'low');
+  });
+
+  test('visual signals compose from the same tone words as `tone`', () => {
+    const profile = inferBrandProfile('Acme', '/nonexistent/path', 'A minimal, restrained, precise admin tool.');
+    assert.ok(profile.visualSignals.colorTendencies.length > 0);
+    assert.ok(profile.visualSignals.typographyTendencies.length > 0);
+    assert.ok(['compact', 'balanced', 'spacious'].includes(profile.visualSignals.densityTendency));
+    assert.ok(['subtle', 'moderate', 'expressive'].includes(profile.visualSignals.motionTendency));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Persona Profiler — pure keyword + sentence extraction (documentText injected)
+// ---------------------------------------------------------------------------
+
+describe('persona-profiler: inferTargetPersonas', () => {
+  test('empty document text returns [], never throws', () => {
+    assert.deepEqual(inferTargetPersonas('/nonexistent/path', ''), []);
+  });
+
+  test('a role with zero hits is omitted entirely (never a fabricated persona)', () => {
+    const personas = inferTargetPersonas('/nonexistent/path', 'A simple marketing page with no user roles mentioned at all here.');
+    assert.deepEqual(personas, []);
+  });
+
+  test('detected roles carry real quoted evidence, goals, and heuristic proficiency/density', () => {
+    const text =
+      'The admin can manage and approve every order. The admin will also configure user roles. ' +
+      'The customer can browse products and submit an order.';
+    const personas = inferTargetPersonas('/nonexistent/path', text);
+
+    const admin = personas.find((p) => p.role === 'admin');
+    assert.ok(admin, 'expected an admin persona');
+    assert.ok(admin!.evidenceCount >= 2);
+    assert.ok(admin!.contexts.length > 0);
+    assert.ok(admin!.contexts.every((c) => /admin/i.test(c)));
+    assert.ok(admin!.goals.includes('manage'));
+    assert.ok(admin!.goals.includes('approve') || admin!.goals.includes('configure'));
+    assert.equal(admin!.technicalProficiency, 'high');
+    assert.equal(admin!.dataDensityPreference, 'high');
+
+    const customer = personas.find((p) => p.role === 'customer');
+    assert.ok(customer, 'expected a customer persona');
+    assert.equal(customer!.technicalProficiency, 'low');
+    assert.equal(customer!.dataDensityPreference, 'low');
+
+    // Ranked by evidenceCount desc.
+    assert.ok(personas[0]!.evidenceCount >= personas[personas.length - 1]!.evidenceCount);
+  });
+
+  test('every TARGET_USER_VOCAB role has a documented proficiency/density lookup (via fallback or explicit entry)', () => {
+    for (const role of TARGET_USER_VOCAB) {
+      const personas = inferTargetPersonas('/nonexistent/path', `The ${role} uses this application every day.`);
+      const persona = personas.find((p) => p.role === role);
+      assert.ok(persona, `expected a persona for role '${role}'`);
+      assert.ok(['low', 'medium', 'high'].includes(persona!.technicalProficiency));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aesthetic Reference — self-contained catalog + scoring (pure, no I/O)
+// ---------------------------------------------------------------------------
+
+describe('aesthetic-reference: AESTHETIC_FAMILIES catalog', () => {
+  test('every family has non-empty structured detail and a valid density/motion enum', () => {
+    for (const family of AESTHETIC_FAMILIES) {
+      assert.ok(family.colorTendencies.length > 0, `${family.id} has no colorTendencies`);
+      assert.ok(family.typographyTendencies.length > 0, `${family.id} has no typographyTendencies`);
+      assert.ok(family.definingTraits.length > 0, `${family.id} has no definingTraits`);
+      assert.ok(['compact', 'balanced', 'spacious'].includes(family.spacingDensity));
+      assert.ok(['subtle', 'moderate', 'expressive'].includes(family.motionTendency));
+    }
+    assert.equal(new Set(AESTHETIC_FAMILY_IDS).size, AESTHETIC_FAMILY_IDS.length, 'family ids must be unique');
+  });
+
+  test('getAestheticFamily looks up by id; unknown id returns undefined, never throws', () => {
+    assert.equal(getAestheticFamily('minimalist')?.name, 'Minimalist');
+    assert.equal(getAestheticFamily('not-a-real-family'), undefined);
+  });
+
+  test('scoreAestheticFamilyMatch rewards affinity overlap and penalizes avoidWhen overlap', () => {
+    const minimalist = getAestheticFamily('minimalist')!;
+    const matching = scoreAestheticFamilyMatch(minimalist, ['minimal', 'restrained', 'clean', 'precise']);
+    const clashing = scoreAestheticFamilyMatch(minimalist, ['playful', 'expressive', 'cluttered']);
+    assert.ok(matching > clashing, `expected matching tone to outscore clashing tone (${matching} vs ${clashing})`);
+  });
+
+  test('rankAestheticFamilies returns the requested limit, highest score first', () => {
+    const ranked = rankAestheticFamilies(['minimal', 'restrained', 'precise'], 'admin_dashboard', 3);
+    assert.equal(ranked.length, 3);
+    for (let i = 1; i < ranked.length; i++) {
+      assert.ok(ranked[i - 1]!.score >= ranked[i]!.score);
+    }
+  });
+
+  test('rankAestheticFamilies never returns empty for an empty brand tone', () => {
+    const ranked = rankAestheticFamilies([], undefined, 3);
+    assert.equal(ranked.length, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Variance Controller — pure structural-similarity gating (reuses design-tournament.ts's own shape)
+// ---------------------------------------------------------------------------
+
+describe('variance-controller: validateVariance', () => {
+  test('jaccardSimilarity is 1.0 for identical sets, 0 for disjoint sets, 1.0 for two empty sets', () => {
+    assert.equal(jaccardSimilarity(['a', 'b'], ['a', 'b']), 1.0);
+    assert.equal(jaccardSimilarity(['a', 'b'], ['c', 'd']), 0);
+    assert.equal(jaccardSimilarity([], []), 1.0);
+  });
+
+  test('fewer than 2 candidates is trivially ok', () => {
+    const result = validateVariance([{ id: 'a', structuralTags: ['sidebar_nav'] }]);
+    assert.equal(result.status, 'ok');
+    assert.match(result.summary, /fewer than 2 candidates/);
+  });
+
+  test('identical structural tags + density across two candidates is PROHIBITED (color/font/spacing-only)', () => {
+    const candidates: VarianceCandidate[] = [
+      { id: 'a', structuralTags: ['sidebar_nav', 'high_density'], density: 'high' },
+      { id: 'b', structuralTags: ['sidebar_nav', 'high_density'], density: 'high' },
+    ];
+    const result = validateVariance(candidates);
+    assert.equal(result.status, 'prohibited');
+    assert.equal(result.violations.length, 1);
+    assert.equal(result.violations[0]!.verdict, 'prohibited');
+  });
+
+  test('genuinely distinct structural tags across two candidates is not prohibited', () => {
+    const candidates: VarianceCandidate[] = [
+      { id: 'a', structuralTags: ['sidebar_nav', 'high_density'], density: 'high' },
+      { id: 'b', structuralTags: ['single_column', 'low_density', 'larger_spacing'], density: 'low' },
+    ];
+    const result = validateVariance(candidates);
+    assert.equal(result.status, 'ok');
+    assert.equal(result.violations.length, 0);
+  });
+
+  test('the real TOURNAMENT_DIRECTIONS fixtures (design-tournament.ts) are pairwise structurally distinct', () => {
+    const candidates = TOURNAMENT_DIRECTIONS.map((d) => fromDesignDirection(d));
+    const result = validateVariance(candidates);
+    assert.equal(result.status, 'ok', result.summary);
+  });
+
+  test('code-level token similarity is reported when both candidates supply code, null otherwise', () => {
+    const withCode: VarianceCandidate[] = [
+      { id: 'a', structuralTags: ['single_column'], code: 'export function A() { return <div>hi</div>; }' },
+      { id: 'b', structuralTags: ['split_pane'], code: 'export function A() { return <div>hi</div>; }' },
+    ];
+    const result = validateVariance(withCode);
+    assert.equal(result.comparisons[0]!.tokenSimilarity, 1.0);
+
+    const withoutCode: VarianceCandidate[] = [
+      { id: 'a', structuralTags: ['single_column'] },
+      { id: 'b', structuralTags: ['split_pane'] },
+    ];
+    assert.equal(validateVariance(withoutCode).comparisons[0]!.tokenSimilarity, null);
+  });
+
+  test('MINIMUM_VARIANCE thresholds are sane fractions', () => {
+    assert.ok(MINIMUM_VARIANCE.maxStructuralSimilarity > 0 && MINIMUM_VARIANCE.maxStructuralSimilarity < 1);
+    assert.ok(MINIMUM_VARIANCE.maxTokenSimilarityWhenAvailable > 0 && MINIMUM_VARIANCE.maxTokenSimilarityWhenAvailable <= 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Design Router — brand/persona/aesthetic/variance wiring (routeDesign options)
+// ---------------------------------------------------------------------------
+
+describe('design-router: brand/persona/aesthetic/variance wiring', () => {
+  test('routeDesign always returns recommendedAesthetics + varianceGuidance, even with no options', async () => {
+    const profile = profileApp({
+      projectName: `router-wiring-${RUN_ID}`,
+      entries: [{ id: '1', name: 'Admin dashboard', description: 'admin dashboard data table analytics' }],
+    });
+    const decision = await routeDesign(profile, 'admin_dashboard');
+    assert.ok(decision.recommendedAesthetics.length > 0);
+    assert.match(decision.varianceGuidance, /variance-controller\.ts/);
+    assert.match(formatRoutingDecision(decision), /VARIANCE GUIDANCE:/);
+  });
+
+  test('a supplied brandProfile widens brand_match without replacing the profile\'s own tone', async () => {
+    const profile = profileApp({
+      projectName: `router-wiring-${RUN_ID}`,
+      entries: [{ id: '1', name: 'Admin dashboard', description: 'admin dashboard data table analytics' }],
+    });
+    const baseline = await routeDesign(profile, 'admin_dashboard');
+    const brandProfile = inferBrandProfile(profile.projectName, '/nonexistent/path', 'A precise, technical, restrained industrial platform.');
+    const widened = await routeDesign(profile, 'admin_dashboard', { brandProfile });
+    // impeccable's brandTags include 'precise'/'restrained'/'technical' — all present in brandProfile.tone,
+    // none guaranteed present in the bare profile's own default tone, so brand_match must strictly widen.
+    assert.ok(
+      widened.scores['impeccable']!.brandMatch > baseline.scores['impeccable']!.brandMatch,
+      `expected brandProfile to widen impeccable's brand_match (baseline ${baseline.scores['impeccable']!.brandMatch}, widened ${widened.scores['impeccable']!.brandMatch})`
+    );
   });
 });
 

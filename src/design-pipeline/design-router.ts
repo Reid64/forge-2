@@ -56,6 +56,21 @@
  * throws — a Build Memory failure degrades `historical_success`/`user_preference` to their
  * neutral defaults rather than blocking a decision, and an install-detection failure (unreadable
  * `~/.claude` directory) degrades every tool's `installed` to `false` rather than throwing.
+ *
+ * DESIGN INTELLIGENCE WIRING (this file's own extension point for `brand-intelligence.ts`/
+ * `persona-profiler.ts`/`aesthetic-reference.ts`/`variance-controller.ts`, added alongside those
+ * four modules): `RouteDesignOptions.brandProfile`/`.personas` are OPTIONAL — every existing
+ * caller that only ever had an `AppDesignProfile` keeps compiling and scoring identically. When
+ * supplied, `brand_match` scores against the UNION of `profile.brand.tone`,
+ * `brandProfile.tone`/`.values`, and tags derived from `personas`' technical-proficiency mix
+ * (see {@link personaDerivedToneTags}) — never a REPLACEMENT of the profile's own signal, an
+ * ADDITION to it. {@link DesignRoutingDecision.recommendedAesthetics} is a genuinely new output:
+ * `aesthetic-reference.ts`'s {@link rankAestheticFamilies} scored against that same combined tone
+ * list for `interfaceType` — a tool-agnostic "what style direction fits" answer alongside the
+ * tool-specific routing decision. `recommendedAesthetics`/`varianceGuidance` are informational
+ * only (not part of the eight weighted scoring dimensions, and not persisted by
+ * {@link persistDecision} — see that function's own note) — matching `installed`'s existing
+ * informational-only posture in this same interface.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -66,6 +81,10 @@ import { newId, nowIso, runQuery, toJsonText } from '../memory/client.js';
 import { logLine } from '../tools/forge-logger.js';
 import type { AppDesignProfile } from './app-profiler.js';
 import { getPreferenceScore } from './design-memory.js';
+import type { BrandProfile } from './brand-intelligence.js';
+import type { TargetPersona } from './persona-profiler.js';
+import { rankAestheticFamilies, type AestheticFamilyMatch } from './aesthetic-reference.js';
+import { MINIMUM_VARIANCE } from './variance-controller.js';
 
 const log = logLine('design-router');
 
@@ -103,12 +122,20 @@ export interface DesignRoutingDecision {
   notSelected: Array<{ tool: DesignTool; reason: string }>;
   reasons: string[];
   confidencePercent: number;
+  /** `aesthetic-reference.ts` candidates scored against this decision's combined brand tone. Informational only — see file header. */
+  recommendedAesthetics: AestheticFamilyMatch[];
+  /** `variance-controller.ts`'s thresholds, restated as guidance for whatever Design Tournament run follows this decision. Informational only. */
+  varianceGuidance: string;
 }
 
 export interface RouteDesignOptions {
   buildRunId?: string;
   promptId?: string;
   packageJson?: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } | null;
+  /** Optional richer brand signal (`brand-intelligence.ts`) — unioned onto `profile.brand.tone` for `brand_match`. See file header. */
+  brandProfile?: BrandProfile | null;
+  /** Optional persona signal (`persona-profiler.ts`) — folded into the combined brand tone via {@link personaDerivedToneTags}. See file header. */
+  personas?: readonly TargetPersona[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,11 +348,45 @@ function interfaceMatchFor(entry: ToolRegistryEntry, profile: AppDesignProfile):
   return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-function brandMatchFor(entry: ToolRegistryEntry, profile: AppDesignProfile): number {
+function brandMatchFor(entry: ToolRegistryEntry, combinedTone: readonly string[]): number {
   if (entry.brandTags.length === 0) return 0.5; // brand-neutral tool (e.g. a validation-only role)
-  if (profile.brand.tone.length === 0) return 0.5;
-  const overlap = entry.brandTags.filter((tag) => profile.brand.tone.includes(tag)).length;
+  if (combinedTone.length === 0) return 0.5;
+  const overlap = entry.brandTags.filter((tag) => combinedTone.includes(tag)).length;
   return overlap / entry.brandTags.length;
+}
+
+/**
+ * `personas`' technical-proficiency mix, folded into a small set of brand-tone-vocabulary tags
+ * (the same vocabulary `app-profiler.ts`/`brand-intelligence.ts` use) — a majority-`high`
+ * proficiency persona mix nudges `['technical', 'precise']`, a majority-`low` mix nudges
+ * `['warm']` (the `app-profiler.ts`/`brand-intelligence.ts` tag closest to "approachable" already
+ * in use elsewhere in this codebase). An even/absent mix contributes nothing (never a fabricated
+ * lean when the signal doesn't clearly point one way).
+ */
+function personaDerivedToneTags(personas: readonly TargetPersona[] | null | undefined): string[] {
+  if (!personas || personas.length === 0) return [];
+  let high = 0;
+  let low = 0;
+  for (const p of personas) {
+    if (p.technicalProficiency === 'high') high++;
+    else if (p.technicalProficiency === 'low') low++;
+  }
+  if (high > low) return ['technical', 'precise'];
+  if (low > high) return ['warm'];
+  return [];
+}
+
+/** Union `profile.brand.tone` with `options.brandProfile`'s tone/values and persona-derived tags — never a replacement. */
+function combinedBrandTone(profile: AppDesignProfile, options: RouteDesignOptions): string[] {
+  const brand = options.brandProfile;
+  return [
+    ...new Set([
+      ...profile.brand.tone,
+      ...(brand?.tone ?? []),
+      ...(brand?.values ?? []),
+      ...personaDerivedToneTags(options.personas),
+    ]),
+  ];
 }
 
 function projectStackMatchFor(
@@ -353,6 +414,7 @@ function scoreTool(
   entry: ToolRegistryEntry,
   interfaceType: string,
   profile: AppDesignProfile,
+  tone: readonly string[],
   historicalSuccess: number,
   userPreference: number,
   packageJson: RouteDesignOptions['packageJson'],
@@ -360,7 +422,7 @@ function scoreTool(
 ): ToolScoreBreakdown {
   const capabilityMatch = capabilityMatchFor(entry, interfaceType);
   const interfaceMatch = interfaceMatchFor(entry, profile);
-  const brandMatch = brandMatchFor(entry, profile);
+  const brandMatch = brandMatchFor(entry, tone);
   const projectStackMatch = projectStackMatchFor(entry, packageJson);
   const accessibilityQuality = entry.auditScore;
   const performanceQuality = entry.auditScore;
@@ -418,6 +480,7 @@ export async function routeDesign(
   options: RouteDesignOptions = {}
 ): Promise<DesignRoutingDecision> {
   const installedTools = detectInstalledDesignTools();
+  const tone = combinedBrandTone(profile, options);
   const scores = {} as Record<DesignTool, ToolScoreBreakdown>;
   for (const tool of DESIGN_TOOLS) {
     const entry = DESIGN_CAPABILITY_REGISTRY[tool];
@@ -429,6 +492,7 @@ export async function routeDesign(
       entry,
       interfaceType,
       profile,
+      tone,
       historicalSuccess,
       userPreference,
       options.packageJson,
@@ -458,6 +522,12 @@ export async function routeDesign(
   ).sort((a, b) => b[1] - a[1]);
   const reasons = topDimensions.slice(0, 3).map(([label, value]) => `+ ${label} = ${value.toFixed(2)} for '${interfaceType}'`);
 
+  const recommendedAesthetics = rankAestheticFamilies(tone, interfaceType, 3);
+  const varianceGuidance =
+    `any Design Tournament run following this decision must keep pairwise structural similarity ` +
+    `below ${MINIMUM_VARIANCE.maxStructuralSimilarity} (variance-controller.ts) — a higher similarity ` +
+    `means the variants differ only in color/font/spacing, which is PROHIBITED.`;
+
   const decision: DesignRoutingDecision = {
     id: newId(),
     projectName: profile.projectName,
@@ -469,6 +539,8 @@ export async function routeDesign(
     notSelected,
     reasons,
     confidencePercent: Math.round(primaryBreakdown.total * 100),
+    recommendedAesthetics,
+    varianceGuidance,
   };
 
   await persistDecision(decision, options);
@@ -479,6 +551,13 @@ export async function routeDesign(
   return decision;
 }
 
+/**
+ * Persists the core routing decision. `recommendedAesthetics`/`varianceGuidance` are deliberately
+ * NOT persisted here — they are cheap to recompute from `tool_scores`/`interface_type` plus
+ * whatever `brandProfile`/`personas` a future caller supplies, and `design_router_decisions`'s
+ * schema predates those two fields; adding columns for informational-only output is deferred to
+ * whichever caller (this pipeline's Task 12 follow-on) actually needs them persisted.
+ */
 async function persistDecision(decision: DesignRoutingDecision, options: RouteDesignOptions): Promise<void> {
   await runQuery('design-router.persist', (db) => {
     db.prepare(
@@ -536,6 +615,13 @@ export function formatRoutingDecision(decision: DesignRoutingDecision): string {
     lines.push('NOT SELECTED:');
     for (const n of decision.notSelected) lines.push(`  ${n.tool.toUpperCase()}${installedTag(n.tool)} — ${n.reason}`);
   }
+  if (decision.recommendedAesthetics.length > 0) {
+    lines.push('RECOMMENDED AESTHETICS:');
+    for (const a of decision.recommendedAesthetics) {
+      lines.push(`  ${a.family.name} (${a.family.id}) — ${a.score.toFixed(2)}`);
+    }
+  }
+  lines.push(`VARIANCE GUIDANCE: ${decision.varianceGuidance}`);
   return lines.join('\n');
 }
 
