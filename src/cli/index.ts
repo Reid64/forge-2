@@ -69,6 +69,7 @@ import { cmdHealth } from './health-command.js';
 import { cmdCompile } from './compile-command.js';
 import { cmdGeneratePrompts } from './generate-prompts-command.js';
 import { tryRenderLiveStatus } from './status-command.js';
+import { runDashboard } from './dashboard-command.js';
 import { diffQueueEntries, getQueueVersion, loadQueueEntriesFromFile } from '../tools/queue-versioning.js';
 import { runGapAudit, type AuditScope } from '../resurrection/index.js';
 import { createOrchestratorEngine } from '../orchestrator/engine.js';
@@ -1153,6 +1154,18 @@ async function cmdStatus(
     console.log(chalk.bold('\n  Prompts:'));
     for (const p of prompts) printPromptLine(p);
   }
+}
+
+/**
+ * `forge dashboard [project-path]` — read-only, live-updating view of the current/most recent
+ * build run's Control Plane telemetry (`.forge/runs/<run-id>/*.jsonl`,
+ * `src/telemetry/run-recorder.ts`), plus the same running cost total `forge status` shows (from
+ * `.forge/live-status.json`). See `src/cli/dashboard-command.ts` for the full implementation —
+ * this wrapper only resolves the path.
+ */
+async function cmdDashboard(pathArg: string): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  await runDashboard(projectPath);
 }
 
 /** One prompt_execution line in the status table. */
@@ -3772,6 +3785,14 @@ async function main(): Promise<void> {
     .option('--project <path>', 'project directory to look for .forge/live-status.json in (default cwd)')
     .option('--watch', 'poll every 2s and re-render (works while a build runs in another window)', false)
     .action((buildId: string | undefined, opts: { project?: string; watch?: boolean }) => cmdStatus(buildId, config, opts));
+
+  program
+    .command('dashboard')
+    .description(
+      'Live, read-only dashboard for the current/most recent build run: tails .forge/runs/<run-id>/{events,prompts,tests}.jsonl and shows the current prompt, elapsed time, gate status, running cost, and recent PASS/FAIL/HALT results. Never writes a file or signals a running build.'
+    )
+    .argument('[project-path]', 'target project directory', '.')
+    .action((pathArg: string) => cmdDashboard(pathArg));
 
   program
     .command('history')
