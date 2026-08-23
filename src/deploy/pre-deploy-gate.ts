@@ -9,6 +9,15 @@
  * Session 5.2's root cause (a hijacked PowerShell `$PROFILE` silently `Set-Location`-ing away
  * from `cwd`, so a gate command could "pass" against the wrong project) means every command here
  * uses the same `-NoProfile -NonInteractive` hardening as claude-runner.ts/phase4-sentinel.ts.
+ *
+ * DESIGN APPROVAL GATE: alongside build/lint, this gate also runs
+ * `design-pipeline/deployment-gate.ts`'s `checkDesignApproval` — a real, blocking check (not an
+ * exported-but-unused function) that a project has at least one approved `design_reviews` record
+ * before deploy is allowed to proceed. Represented as a third synthetic `PreDeployCheckResult`
+ * (`command: 'design-approval-gate'`) so it flows through the exact same
+ * pass/fail/BLOCKER-reporting path `runGateCommand`'s real subprocess checks already use — no
+ * parallel reporting mechanism. Opt out via `requireDesignApproval: false` (wired to `forge deploy
+ * --skip-design-gate`) for a project with no UI/design-review workflow at all.
  */
 
 import { exec } from 'node:child_process';
@@ -16,6 +25,7 @@ import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { appendFile } from 'node:fs/promises';
 import { toAsciiGovernanceText } from '../tools/governance-text.js';
+import { checkDesignApproval } from '../design-pipeline/deployment-gate.js';
 
 const execAsync = promisify(exec);
 
@@ -110,18 +120,49 @@ async function appendBlockerSection(governanceDir: string, failed: PreDeployChec
   }
 }
 
+/** Run `design-pipeline/deployment-gate.ts`'s real approval check, reported as a synthetic gate command. */
+async function runDesignApprovalCheck(projectPath: string): Promise<PreDeployCheckResult> {
+  const result = await checkDesignApproval(projectPath);
+  return {
+    command: 'design-approval-gate',
+    exitCode: result.approved ? 0 : 1,
+    skipped: false,
+    outputTail: clip(result.reason),
+  };
+}
+
+export interface RunPreDeployGateOptions {
+  /** Set `false` to skip the design-approval check (e.g. a project with no design-review workflow). Default `true`. */
+  requireDesignApproval?: boolean;
+}
+
 /**
- * F8 entry point: run `pnpm run build` then `pnpm run lint` in `projectPath`. If either exits
- * non-zero, a BLOCKER section (timestamp, failed command, full output) is appended to
- * `<projectPath>/<governanceDirName>/STATE_OF_THE_BUILD.md` and the gate reports `passed: false`.
+ * F8 entry point: run `pnpm run build`, `pnpm run lint`, and (by default) the design-approval gate
+ * in `projectPath`. If any check fails, a BLOCKER section (timestamp, failed command, full output)
+ * is appended to `<projectPath>/<governanceDirName>/STATE_OF_THE_BUILD.md` and the gate reports
+ * `passed: false`.
  */
 export async function runPreDeployGate(
   projectPath: string,
-  governanceDirName = 'governance'
+  governanceDirName = 'governance',
+  options: RunPreDeployGateOptions = {}
 ): Promise<PreDeployGateResult> {
   const buildCheck = await runGateCommand('pnpm run build', projectPath);
   const lintCheck = await runGateCommand('pnpm run lint', projectPath);
-  const checks = [buildCheck, lintCheck];
+  const checks: PreDeployCheckResult[] = [buildCheck, lintCheck];
+
+  if (options.requireDesignApproval ?? true) {
+    checks.push(await runDesignApprovalCheck(projectPath));
+  } else {
+    checks.push({
+      command: 'design-approval-gate',
+      exitCode: 0,
+      skipped: true,
+      skipReason: 'requireDesignApproval=false',
+      outputTail: 'design approval gate skipped by caller',
+    });
+  }
+
   const failed = checks.filter((c) => c.exitCode !== 0);
   const passed = failed.length === 0;
   if (!passed) {

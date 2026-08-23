@@ -4629,15 +4629,16 @@ async function main(): Promise<void> {
     .option('--production', 'Deploy to the Vercel production environment (default: preview)')
     .option('--build-run-id <id>', 'Build Memory build_run id to associate this deployment with (default: a fresh id)')
     .option('--skip-vercel', 'Skip the autonomous Vercel deploy step even if the project is configured for it')
-    .action(async (projectPath: string, opts: { endpoint?: string; projectName?: string; slowLoadMs?: string; production?: boolean; buildRunId?: string; skipVercel?: boolean }) => {
+    .option('--skip-design-gate', 'Skip the design-approval pre-deploy check (for projects with no design-review workflow)')
+    .action(async (projectPath: string, opts: { endpoint?: string; projectName?: string; slowLoadMs?: string; production?: boolean; buildRunId?: string; skipVercel?: boolean; skipDesignGate?: boolean }) => {
       const spinner = ora('Preparing deploy...').start();
       try {
         const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
         const resolved = resolve(projectPath);
 
-        spinner.text = 'Running pre-deploy gate (build + lint)...';
+        spinner.text = 'Running pre-deploy gate (build + lint + design approval)...';
         const { runPreDeployGate } = await import('../deploy/pre-deploy-gate.js');
-        const gateResult = await runPreDeployGate(resolved);
+        const gateResult = await runPreDeployGate(resolved, undefined, { requireDesignApproval: !opts.skipDesignGate });
         if (!gateResult.passed) {
           spinner.stop();
           console.log(chalk.red('[FAIL] PRE-DEPLOY GATE: blocked'));
