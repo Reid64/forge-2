@@ -98,13 +98,24 @@ export interface AgentContract {
 // ---------------------------------------------------------------------------
 
 /**
+ * `STATE_OF_THE_BUILD.md`/`SESSION_STATE.md` are end-of-prompt housekeeping files every Phase 3
+ * prompt type is instructed to update as a matter of course (queue.yaml prompt descriptions,
+ * BLUEPRINT.md Canonical Rule 9) — unlike the rest of {@link DEFAULT_SHARED_CANONICAL_GLOBS}, they
+ * are NOT another subsystem's exclusive territory, so the Build Agent must not be denied writing
+ * them (both the project-root path and, where a project nests them under `governance/`, that path).
+ */
+const BUILD_AGENT_HOUSEKEEPING_GLOBS = ['STATE_OF_THE_BUILD.md', 'SESSION_STATE.md', 'governance/STATE_OF_THE_BUILD.md', 'governance/SESSION_STATE.md'];
+
+/**
  * The Build Agent: the `claude` CLI subprocess `phase3-executor.ts` invokes via
  * `ctx.runClaudeImpl` (`src/engine/claude-runner.ts`, Contract 5 — `claude -p
  * --dangerously-skip-permissions`) once per prompt (`renderProgress('INFO', 'Executing Build
  * Agent...')`). Its only permitted write scope is `projectPath`
  * (`sentinel-prime/execution-monitor.ts`'s BOUNDARY note) MINUS the `shared_canonical` governance
  * docs `src/engine/path-classifier.ts` redirects to scratch before the prompt ever reaches it —
- * those are owned by `gap-auditor`/`integration-bus`, never written directly by the Build Agent.
+ * those are owned by `gap-auditor`/`integration-bus`, never written directly by the Build Agent —
+ * MINUS {@link BUILD_AGENT_HOUSEKEEPING_GLOBS}, which every prompt is expected to touch and so are
+ * carved back out of that governance-doc denial rather than left blocked.
  */
 const BUILD_AGENT: AgentContract = {
   id: 'build-agent',
@@ -112,8 +123,8 @@ const BUILD_AGENT: AgentContract = {
   description:
     'The claude subprocess that produces a prompt\'s actual code/content changes, run once per ' +
     'Phase 3 prompt in the target project root and committed to a feature branch by GitManager.',
-  writablePathPatterns: ['**/*'],
-  deniedPathPatterns: [...DEFAULT_SHARED_CANONICAL_GLOBS],
+  writablePathPatterns: ['**/*', ...BUILD_AGENT_HOUSEKEEPING_GLOBS],
+  deniedPathPatterns: DEFAULT_SHARED_CANONICAL_GLOBS.filter((glob) => !BUILD_AGENT_HOUSEKEEPING_GLOBS.includes(glob)),
   writesOutsideProjectRoot: false,
   canInvokeGit: false,
   canSpawnSubprocesses: true,
