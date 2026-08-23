@@ -1618,12 +1618,60 @@ async function cmdReadiness(pathArg: string, opts: { tier?: string }): Promise<v
  * `forge trace <req-id> [project-path]` — the Requirements Traceability Engine
  * (`src/governance/traceability.ts`). Reports how far a `REQ-NNN` id has progressed: PLANNED
  * (referenced in queue.yaml), IMPLEMENTED (referenced in a git commit), TESTED (referenced in
- * recorded test evidence), or DEPLOYED (the project's latest build completed and shipped).
+ * recorded test evidence), or DEPLOYED (the project's latest build completed and shipped) —
+ * plus, bidirectionally, which `adr_records`/`risks` rows appear to have motivated it.
+ *
+ * `--reverse <identifier>` inverts the lookup: given a downstream identifier (a queue entry
+ * id/name, a commit hash, a test suite name), it reports which `REQ-NNN` id(s) trace back to it.
+ * `--untested` lists every requirement/feature with zero recorded test evidence. Both flags are
+ * mutually exclusive with the default id-forward trace and with each other.
  */
-async function cmdTrace(reqIdArg: string, pathArg: string | undefined): Promise<void> {
-  const { traceRequirement, formatTraceResult } = await import('../governance/traceability.js');
+async function cmdTrace(
+  identifierArg: string | undefined,
+  pathArg: string | undefined,
+  opts: { reverse?: boolean; untested?: boolean }
+): Promise<void> {
+  const { traceRequirement, formatTraceResult, traceReverse, formatReverseTraceResult, findUntestedRequirements, formatUntestedResult } =
+    await import('../governance/traceability.js');
+
+  if (opts.untested) {
+    const projectPath = resolveProjectPath(identifierArg ?? pathArg ?? '.');
+    const result = await findUntestedRequirements(projectPath);
+    console.log(chalk.bold(`\nFORGE Requirements Traceability — untested requirements/features for ${result.projectName}\n`));
+    console.log(formatUntestedResult(result));
+    console.log('');
+    if (result.untestedRequirements.length === 0 && result.untestedFeatures.length === 0) {
+      console.log(chalk.green.bold('Every declared requirement and feature has recorded test evidence.'));
+    } else {
+      fail(`${result.untestedRequirements.length} requirement(s) and ${result.untestedFeatures.length} feature(s) have no recorded test evidence.`);
+    }
+    return;
+  }
+
+  if (opts.reverse) {
+    if (!identifierArg) {
+      fail('forge trace --reverse requires an identifier (a queue entry id/name, commit hash, or test suite name) to trace backward.');
+      return;
+    }
+    const projectPath = resolveProjectPath(pathArg ?? '.');
+    const result = await traceReverse(identifierArg, projectPath);
+    console.log(chalk.bold(`\nFORGE Requirements Traceability — reverse trace for ${result.projectName}\n`));
+    console.log(formatReverseTraceResult(result));
+    console.log('');
+    if (result.matchedRequirementIds.length === 0) {
+      fail(`No REQ-NNN requirement id traces back to "${identifierArg}" for ${projectPath}.`);
+    } else {
+      console.log(chalk.green.bold(`Traces back to: ${result.matchedRequirementIds.join(', ')}`));
+    }
+    return;
+  }
+
+  if (!identifierArg) {
+    fail('forge trace requires a REQ-NNN requirement id (or --reverse <identifier> / --untested).');
+    return;
+  }
   const projectPath = resolveProjectPath(pathArg ?? '.');
-  const result = await traceRequirement(reqIdArg, projectPath);
+  const result = await traceRequirement(identifierArg, projectPath);
 
   console.log(chalk.bold(`\nFORGE Requirements Traceability — ${result.projectName}\n`));
   console.log(formatTraceResult(result));
@@ -4381,10 +4429,16 @@ async function main(): Promise<void> {
 
   program
     .command('trace')
-    .description('Trace a REQ-NNN requirement id through queue.yaml, git history, and test evidence to its current stage')
-    .argument('<req-id>', 'requirement id, e.g. REQ-042')
+    .description(
+      'Trace a REQ-NNN requirement id through queue.yaml, git history, and test evidence to its current stage (bidirectional: ' +
+        'also reports which ADRs/risks motivated it). --reverse traces a downstream identifier back to its requirement id(s); ' +
+        '--untested lists requirements/features with no recorded test evidence.'
+    )
+    .argument('[identifier]', 'requirement id (REQ-042), or with --reverse a downstream identifier (queue entry id/name, commit hash, test suite name); omit with --untested')
     .argument('[project-path]', 'target project directory', '.')
-    .action((reqIdArg: string, pathArg: string) => cmdTrace(reqIdArg, pathArg));
+    .option('--reverse', 'reverse trace: given a downstream identifier, find which REQ-NNN id(s) it traces back to')
+    .option('--untested', 'list requirements/features with no associated test evidence in Build Memory')
+    .action((identifierArg: string | undefined, pathArg: string, opts: { reverse?: boolean; untested?: boolean }) => cmdTrace(identifierArg, pathArg, opts));
 
   program
     .command('state')
