@@ -443,7 +443,11 @@ test('runPhase3Executor: high failure probability triggers a rewrite (Contract 9
     );
     assert.equal(result.outcomes[0]?.wasRewritten, true);
     assert.equal(result.outcomes[0]?.promptHash, 'rewritten-hash');
-    assert.ok(executedPrompt.startsWith('REWRITTEN '));
+    // The rewritten text itself is still exactly what was executed — it just may no longer be at
+    // offset 0, since step b2.5 (Skills Library, `src/skills/index.ts`) can now legitimately
+    // prepend an engineering-standards block ahead of it (e.g. `ux-intelligence` is unconditionally
+    // relevant to every prompt type).
+    assert.ok(executedPrompt.includes('REWRITTEN PROMPT a'));
   });
 });
 

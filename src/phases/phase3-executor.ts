@@ -163,6 +163,7 @@ import { observeRewriteOutcome } from '../learning/build-brain-evolver.js';
 import { onSentinelFailure, onSentinelPrimeHalt } from '../integration/bus.js';
 import { SentinelPrime } from '../sentinel-prime/index.js';
 import { createExecutionMonitor, executionMonitorSingleton } from '../sentinel-prime/execution-monitor.js';
+import { buildSkillsContext } from '../skills/index.js';
 import { detectRequiredComponents, ensureComponentsInstalled } from '../ui-engine/shadcn-installer.js';
 import { ensureDesignTokens } from '../ui-engine/design-token-manager.js';
 import { checkComponentAccessibility, type AccessibilityReport } from '../ui-engine/accessibility-checker.js';
@@ -3049,7 +3050,7 @@ async function executePrompt(
     // skills (if any) the queue entry itself declared via `skills:` (see loadSkillContent above,
     // which is entry-opt-in; this is stack-detected and applies to every prompt automatically).
     try {
-      const withSkillsContext = promptText;
+      const withSkillsContext = buildSkillsContext(ctx.projectPath, promptText, entry.prompt_type);
       if (withSkillsContext !== promptText) {
         log(`prompt ${index} '${entry.id}': skills library context prepended (+${withSkillsContext.length - promptText.length} chars)`);
         promptText = withSkillsContext;

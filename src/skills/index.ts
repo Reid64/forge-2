@@ -591,6 +591,36 @@ export function loadClaudeSkills(dirs: readonly string[]): Skill[] {
  * resolved-value-as-param shape) so tests can point it at a disposable fixture directory instead
  * of this machine's real `.claude/skills/`/`~/.claude/skills/`.
  */
+// A real build calls `buildSkillsContext` once per prompt (`phase3-executor.ts` step b2.5) —
+// often dozens of times in one `forge build` process. Both skill sources are static for the
+// life of that process (the 40 templates and whatever's under `.claude/skills/` don't change
+// mid-build), so re-reading every template file and re-walking the `.claude/skills/` ancestor
+// chain on every single prompt is pure repeated work — measured at a ~5.6x slowdown across a
+// 16-prompt executor test run (50s -> 281s) before this cache was added. Process-lifetime only
+// (module-level `Map`s, never persisted) — a fresh `forge` CLI invocation always re-scans, so a
+// mid-build `forge skills add` still requires restarting the build to take effect, same as
+// before this cache existed.
+const templateSkillsCache = new Map<string, Skill[]>();
+function cachedLoadTemplateSkills(skillsDir: string): Skill[] {
+  let cached = templateSkillsCache.get(skillsDir);
+  if (!cached) {
+    cached = loadTemplateSkills(skillsDir);
+    templateSkillsCache.set(skillsDir, cached);
+  }
+  return cached;
+}
+
+const claudeSkillsCache = new Map<string, Skill[]>();
+function cachedLoadClaudeSkills(dirs: readonly string[]): Skill[] {
+  const key = dirs.join(' ');
+  let cached = claudeSkillsCache.get(key);
+  if (!cached) {
+    cached = loadClaudeSkills(dirs);
+    claudeSkillsCache.set(key, cached);
+  }
+  return cached;
+}
+
 export function buildSkillsContext(
   projectPath: string,
   promptText: string,
@@ -600,8 +630,8 @@ export function buildSkillsContext(
   try {
     const stack = detectProjectStack(projectPath);
     if (!promptType && stack.length === 0) return promptText;
-    const templateSkills = loadTemplateSkills(defaultSkillsLibraryDir());
-    const claudeSkills = loadClaudeSkills(claudeSkillsDirs);
+    const templateSkills = cachedLoadTemplateSkills(defaultSkillsLibraryDir());
+    const claudeSkills = cachedLoadClaudeSkills(claudeSkillsDirs);
     if (templateSkills.length === 0 && claudeSkills.length === 0) return promptText;
     const library = buildLibraryFromSkills([...templateSkills, ...claudeSkills]);
     if (promptType) {
