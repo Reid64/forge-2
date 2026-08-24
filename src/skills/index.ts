@@ -8,16 +8,33 @@
  * template into EVERY prompt automatically — a project-wide standards layer that needs no
  * per-entry opt-in, complementary to (not a replacement for) the existing mechanism.
  *
- * Skill files: flat `*.skill.md` files directly under a skills directory (non-recursive), each
- * with a YAML frontmatter header (`id`, `name`, `domain`, `tags`, `applicablePromptTypes`)
- * followed by the template body. House style: every export here is guarded — a missing
- * directory, an unreadable file, or a malformed frontmatter degrades to "skip it" rather than
- * throwing (skill injection is a quality-of-life layer, never a build blocker).
+ * TWO skill sources feed this library, merged transparently behind one {@link SkillsLibrary}:
+ *   1. Flat `*.skill.md` files directly under `src/skills/templates/` (non-recursive), each with
+ *      this repo's own curated YAML frontmatter (`id`, `name`, `domain`, `tags`,
+ *      `applicablePromptTypes`) — see {@link loadTemplateSkills}/{@link parseSkillFile}.
+ *   2. Real Claude Skills — `<dir>/<skill-name>/SKILL.md` under `.claude/skills/` (both the FORGE
+ *      install's own directory and `~/.claude/skills/`, the same two-location resolution
+ *      `design-system-generator.ts`'s `resolveScriptPath` uses for the UI/UX Pro Max skill) —
+ *      see {@link loadClaudeSkills}/{@link parseClaudeSkillFile}. These carry only plain
+ *      `name`/`description` frontmatter (the real Claude Skill spec — confirmed against the
+ *      actual installed `.claude/skills/design-taste-frontend/SKILL.md`, not assumed), so
+ *      `tags`/`applicablePromptTypes` are near-always absent; {@link inferPromptTypesAndDomain}
+ *      derives them from `name`+`description` keyword matching so the SAME `getForPrompt`
+ *      relevance logic used for templates governs these too, rather than blindly injecting into
+ *      every prompt type. A per-skill character cap ({@link CLAUDE_SKILL_MAX_TEMPLATE_CHARS})
+ *      guards against a large human-authored SKILL.md (unlike the small curated templates)
+ *      reintroducing the context-overflow problem that got auto-injection disabled in build
+ *      prompts once already (commit cdb6807).
+ *
+ * House style: every export here is guarded — a missing directory, an unreadable file, or a
+ * malformed frontmatter degrades to "skip it" rather than throwing (skill injection is a
+ * quality-of-life layer, never a build blocker).
  */
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { load as parseYaml } from 'js-yaml';
 import { readProjectPrdContent } from './ux-intelligence.js';
 import { detectComplianceRegimes } from './compliance-detector.js';
@@ -166,12 +183,8 @@ function renderSkillsBlock(skills: readonly Skill[]): string {
   return `## ${SKILLS_CONTEXT_HEADER}\n\n${sections.join('\n\n')}`;
 }
 
-/**
- * Load every `*.skill.md` file directly under `skillsDir` into a queryable {@link SkillsLibrary}.
- * A missing directory or a read error degrades to an empty library (`skills: []`) rather than
- * throwing.
- */
-export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
+/** Read every `*.skill.md` file directly under `skillsDir` (non-recursive). Never throws — a missing directory or a read error degrades to `[]`. */
+function loadTemplateSkills(skillsDir: string): Skill[] {
   const skills: Skill[] = [];
   try {
     if (existsSync(skillsDir)) {
@@ -187,9 +200,29 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
   } catch {
     /* best-effort — keep whatever was parsed before the failure */
   }
+  return skills;
+}
 
+/**
+ * Build a queryable {@link SkillsLibrary} over an already-loaded, already-merged `skills` array —
+ * the shared query engine both {@link loadSkillsLibrary} (templates only) and
+ * {@link buildSkillsContext} (templates + `.claude/skills/`) build on top of, so relevance
+ * matching is defined exactly once.
+ *
+ * In {@link SkillsLibrary.getForPrompt} ONLY (never `injectIntoContext` — see that method's own
+ * comment), a skill with an empty `tags` array (every real Claude Skill from `.claude/skills/` —
+ * see this module's header) is treated as stack-agnostic: it passes the stack-tag filter
+ * regardless of `projectStack`, the same way a tag-less skill logically should (it isn't scoped
+ * to any particular dependency, unlike `supabase`/`stripe`/etc. — its relevance is governed by
+ * the prompt-type gate `getForPrompt` applies first, via `applicablePromptTypes`, which for these
+ * skills is inferred by {@link inferPromptTypesAndDomain} rather than hand-authored). No
+ * `src/skills/templates/*.skill.md`
+ * file currently omits `tags`, so this is additive — it changes nothing for the existing 40
+ * templates.
+ */
+function buildLibraryFromSkills(skills: readonly Skill[]): SkillsLibrary {
   return {
-    skills,
+    skills: [...skills],
     getByDomain(domain: string): Skill[] {
       return skills.filter((s) => s.domain.toLowerCase() === domain.toLowerCase());
     },
@@ -205,7 +238,10 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
         (s) =>
           s.applicablePromptTypes.some((t) => t.toLowerCase() === type)
       );
-      const stackMatched = stackTags.size === 0 ? byType : byType.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
+      const stackMatched =
+        stackTags.size === 0
+          ? byType
+          : byType.filter((s) => s.tags.length === 0 || s.tags.some((t) => stackTags.has(t.toLowerCase())));
 
       const alwaysIds = new Set<string>(ALWAYS_RELEVANT_SKILL_IDS);
       for (const id of ALWAYS_RELEVANT_BY_PROMPT_TYPE[type] ?? []) alwaysIds.add(id);
@@ -221,6 +257,12 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
       for (const s of skills) if (alwaysIds.has(s.id)) merged.set(s.id, s);
       return [...merged.values()];
     },
+    // Deliberately NOT the `tags.length === 0` stack-agnostic treatment `getForPrompt` uses below:
+    // this path has no prompt-type gate at all (it's the plain stack-tag match for `forge skills
+    // inject`'s generic no-prompt-type case), so a tag-less `.claude/skills` entry (this module's
+    // header) would otherwise match EVERY call unconditionally — exactly the "blindly prepended
+    // regardless of type" outcome relevance-scoping exists to prevent. Those skills are reachable
+    // through the prompt-type-gated `getForPrompt` path instead.
     injectIntoContext(promptText: string, projectStack: string[]): string {
       const stackTags = new Set(projectStack.map((t) => t.toLowerCase()));
       const matching = skills.filter((s) => s.tags.some((t) => stackTags.has(t.toLowerCase())));
@@ -228,6 +270,16 @@ export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
       return `${renderSkillsBlock(matching)}\n\n---\n\n${promptText}`;
     },
   };
+}
+
+/**
+ * Load every `*.skill.md` file directly under `skillsDir` into a queryable {@link SkillsLibrary}
+ * (templates only — the `defaultSkillsLibraryDir()` source). A missing directory or a read error
+ * degrades to an empty library (`skills: []`) rather than throwing. Unchanged signature/behavior:
+ * `forge skills list/show/add` and {@link component-generator.ts} still call this directly.
+ */
+export function loadSkillsLibrary(skillsDir: string): SkillsLibrary {
+  return buildLibraryFromSkills(loadTemplateSkills(skillsDir));
 }
 
 /**
@@ -327,27 +379,231 @@ export function defaultSkillsLibraryDir(): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Real Claude Skills (.claude/skills/<name>/SKILL.md) — a second skill source
+// ---------------------------------------------------------------------------
+
 /**
- * Detect `projectPath`'s stack, load every matching skill from the default skills-library
- * directory, and return `promptText` with a `## ENGINEERING STANDARDS AND PATTERNS FOR THIS
- * BUILD` block prepended. Returns `promptText` unchanged when no stack is detected (and no
- * `promptType` was given), the library is empty, or nothing matches — never throws.
+ * A real Claude Skill's `SKILL.md` is typically far larger than this repo's curated
+ * `*.skill.md` templates (the 40 templates sum to ~64KB total; one real skill alone can exceed
+ * that — `design-taste-frontend`'s installed `SKILL.md` is ~88KB on its own). Auto-injecting one
+ * uncapped is exactly the kind of context-overflow risk that got build-prompt skill injection
+ * disabled once already (commit cdb6807, `phase3-executor.ts`) — so each `.claude/skills/` body
+ * is capped here, independently of prompt-type/stack relevance scoping (which bounds WHICH
+ * skills get in, not how big any one of them is).
+ */
+const CLAUDE_SKILL_MAX_TEMPLATE_CHARS = 6_000;
+
+/** Truncate an oversized `.claude/skills/` template body, leaving a clear marker + the source path for follow-up. */
+function truncateClaudeSkillTemplate(template: string, sourcePath: string): string {
+  if (template.length <= CLAUDE_SKILL_MAX_TEMPLATE_CHARS) return template;
+  const truncated = template.slice(0, CLAUDE_SKILL_MAX_TEMPLATE_CHARS).trimEnd();
+  return `${truncated}\n\n[...truncated at ${CLAUDE_SKILL_MAX_TEMPLATE_CHARS} of ${template.length} chars — full skill at ${sourcePath}...]`;
+}
+
+/**
+ * Keyword → (domain, applicable prompt types) hints used to classify a real Claude Skill that
+ * declares no `tags`/`applicablePromptTypes` (the real Claude Skill spec has neither — only
+ * `name`/`description`). Matched against `name + ' ' + description` (falling back to the first
+ * 2000 chars of the skill body when a skill omits `description`), case-insensitively, substring.
+ * Deliberately keyword-general — NOT keyed to any specific skill name — so a future skill
+ * installed via `npx skills add`/`git clone` is classified the same way with no code change, per
+ * the same "never fabricate applicability, degrade to unclassified" posture as the rest of this
+ * module: a skill matching none of these hints gets `applicablePromptTypes: []` and is simply
+ * never injected (safe default), rather than guessed into every prompt.
+ */
+const CLAUDE_SKILL_KEYWORD_HINTS: ReadonlyArray<{
+  domain: string;
+  promptTypes: readonly string[];
+  keywords: readonly string[];
+}> = [
+  {
+    domain: 'frontend',
+    promptTypes: ['ui', 'component', 'page', 'feature'],
+    keywords: [
+      'frontend', 'front-end', 'landing page', 'design system', 'visual design', 'typography',
+      'tailwind', 'component', 'portfolio', 'aesthetic', 'design direction', 'interface design',
+      'styling', 'responsive design', 'web design', 'ui design', 'ux design', 'design taste',
+    ],
+  },
+  {
+    domain: 'backend',
+    promptTypes: ['api', 'schema', 'feature'],
+    keywords: ['backend', 'back-end', 'rest api', 'graphql api', 'database schema', 'server-side', 'endpoint design'],
+  },
+  {
+    domain: 'agent',
+    promptTypes: ['agent'],
+    keywords: ['ai agent', 'llm agent', 'agentic workflow', 'tool calling', 'prompt engineering'],
+  },
+  {
+    domain: 'testing',
+    promptTypes: ['test'],
+    keywords: ['test coverage', 'unit testing', 'e2e testing', 'test strategy', 'testing skill'],
+  },
+  {
+    domain: 'deploy',
+    promptTypes: ['deploy'],
+    keywords: ['deployment pipeline', 'ci/cd', 'devops', 'infrastructure as code'],
+  },
+];
+
+/** Classify free text against {@link CLAUDE_SKILL_KEYWORD_HINTS}. Multiple hints may match; prompt types union, first-matched hint's domain wins. */
+function inferPromptTypesAndDomain(text: string): { promptTypes: string[]; domain: string } {
+  const lower = text.toLowerCase();
+  const promptTypes = new Set<string>();
+  let domain = 'general';
+  for (const hint of CLAUDE_SKILL_KEYWORD_HINTS) {
+    if (hint.keywords.some((k) => lower.includes(k))) {
+      for (const t of hint.promptTypes) promptTypes.add(t);
+      if (domain === 'general') domain = hint.domain;
+    }
+  }
+  return { promptTypes: [...promptTypes], domain };
+}
+
+/**
+ * Parse one real `<skillsDir>/<name>/SKILL.md` into a {@link Skill}. Reuses
+ * {@link parseSkillContent} for the base id/name/domain/tags/applicablePromptTypes/template
+ * extraction (the same leading `---`…`---` YAML-frontmatter shape this repo's own templates use
+ * — confirmed against the real installed `design-taste-frontend/SKILL.md`, not assumed), then:
+ *   - infers `applicablePromptTypes`/`domain` via {@link inferPromptTypesAndDomain} when the
+ *     frontmatter declared none (true for every real Claude Skill seen so far — they carry only
+ *     `name`/`description`), using the frontmatter `description` (re-read directly — `Skill` has
+ *     no `description` field) when present, else the template body itself;
+ *   - caps the template body via {@link truncateClaudeSkillTemplate}.
+ * Returns `null` on a missing/unreadable file or malformed frontmatter — skipped, never thrown.
+ */
+function parseClaudeSkillFile(filePath: string, fallbackId: string): Skill | null {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+  const base = parseSkillContent(raw, fallbackId);
+  if (!base) return null;
+
+  let description = '';
+  try {
+    const match = FRONTMATTER_RE.exec(raw);
+    const parsed = match ? (parseYaml(match[1] ?? '') as Record<string, unknown> | null) : null;
+    if (parsed && typeof parsed.description === 'string') description = parsed.description.trim();
+  } catch {
+    /* malformed frontmatter already handled by parseSkillContent above — inference just falls back to the body */
+  }
+
+  const needsInference = base.applicablePromptTypes.length === 0;
+  const inferenceText = `${base.name} ${description}`.trim() || base.template.slice(0, 2000);
+  const inferred = needsInference ? inferPromptTypesAndDomain(inferenceText) : null;
+
+  return {
+    ...base,
+    domain: base.domain === 'general' && inferred ? inferred.domain : base.domain,
+    applicablePromptTypes: needsInference && inferred ? inferred.promptTypes : base.applicablePromptTypes,
+    template: truncateClaudeSkillTemplate(base.template, filePath),
+  };
+}
+
+/**
+ * The two locations a real Claude Skill can be installed, in resolution order — the identical
+ * pattern `design-system-generator.ts`'s `resolveScriptPath` uses for the UI/UX Pro Max skill:
+ * (1) `.claude/skills/` bundled with THIS FORGE install (walked up from this compiled module,
+ * same as {@link defaultSkillsLibraryDir}, since `.claude/` lives at the repo root alongside
+ * `src/`/`dist/`), and (2) `~/.claude/skills/`, the per-machine install location `npx skills add`/
+ * `git clone` write to. Deliberately NOT `<projectPath>/.claude/skills/` (the target project being
+ * built) — matching `resolveScriptPath`, this is about which skills are installed on THIS
+ * machine for FORGE itself to draw on, independent of which project a build targets. Deduplicated
+ * (an 8-level ancestor walk can otherwise repeat a path); a directory need not exist yet.
+ */
+export function defaultClaudeSkillsDirs(): string[] {
+  const candidates: string[] = [];
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 8; i += 1) {
+      candidates.push(join(dir, '.claude', 'skills'));
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    candidates.push(join(process.cwd(), '.claude', 'skills'));
+  }
+  candidates.push(join(homedir(), '.claude', 'skills'));
+  return [...new Set(candidates)];
+}
+
+/**
+ * Scan every `<dir>/<skill-name>/SKILL.md` across `dirs` (non-recursive one level of skill-name
+ * subfolders, each dir itself best-effort — one bad directory never blocks the others) into
+ * {@link Skill}s via {@link parseClaudeSkillFile}. A skill id found in an earlier `dirs` entry
+ * wins over a same-id later one (mirrors `resolveScriptPath`'s "first candidate that exists"
+ * precedence: the FORGE-bundled install's own `.claude/skills/` shadows the same-named skill
+ * under `~/.claude/skills/`). Never throws — a missing/unreadable directory contributes nothing.
+ */
+export function loadClaudeSkills(dirs: readonly string[]): Skill[] {
+  const byId = new Map<string, Skill>();
+  for (const dir of dirs) {
+    try {
+      if (!existsSync(dir)) continue;
+      const entries = readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort();
+      for (const name of entries) {
+        const skillPath = join(dir, name, 'SKILL.md');
+        if (!existsSync(skillPath)) continue;
+        const skill = parseClaudeSkillFile(skillPath, name);
+        if (skill && !byId.has(skill.id)) byId.set(skill.id, skill);
+      }
+    } catch {
+      /* best-effort per-directory — keep whatever was parsed from other directories */
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Detect `projectPath`'s stack, load every matching skill from BOTH sources — this repo's own
+ * `src/skills/templates/*.skill.md` (via {@link defaultSkillsLibraryDir}) AND real Claude Skills
+ * under `.claude/skills/` (via {@link defaultClaudeSkillsDirs}/{@link loadClaudeSkills}) — merged
+ * into one {@link SkillsLibrary}, and return `promptText` with a `## ENGINEERING STANDARDS AND
+ * PATTERNS FOR THIS BUILD` block prepended. Returns `promptText` unchanged when no stack is
+ * detected (and no `promptType` was given), both sources are empty, or nothing matches — never
+ * throws.
  *
  * When `promptType` is supplied (Phase 3 passes `entry.prompt_type` on every real build), skill
  * selection routes through {@link SkillsLibrary.getForPrompt} — the minimal, type-scoped set
  * (stack-tag-matched skills applicable to this prompt type, plus the curated "always relevant"
  * layer) — rather than {@link SkillsLibrary.injectIntoContext}'s plain stack-tag match, which
  * has no notion of prompt type and would otherwise inject every stack-matched skill into every
- * prompt regardless of whether it's a schema, api, ui, or deploy prompt. `promptType` is
+ * prompt regardless of whether it's a schema, api, ui, or deploy prompt. This is exactly why a
+ * `.claude/skills/` entry's inferred `applicablePromptTypes` matters: it is what keeps e.g. a
+ * design-taste skill out of a `schema`/`api`/`deploy` prompt and in only `ui`/`component`/`page`/
+ * `feature` prompts, the same enforcement the curated templates already get. `promptType` is
  * deliberately optional: `forge skills inject` (a generic "paste any prompt text" debugging
- * command with no queue entry, hence no prompt type) still gets the broader stack-only match.
+ * command with no queue entry, hence no prompt type) still gets the broader stack-only match —
+ * and, per {@link SkillsLibrary.injectIntoContext}'s own comment, that broader match deliberately
+ * excludes tag-less `.claude/skills/` entries rather than blindly injecting them into every call.
+ *
+ * `claudeSkillsDirs` defaults to {@link defaultClaudeSkillsDirs}'s real on-machine resolution;
+ * it exists as an explicit parameter (mirroring `loadSkillsLibrary(skillsDir)`'s own
+ * resolved-value-as-param shape) so tests can point it at a disposable fixture directory instead
+ * of this machine's real `.claude/skills/`/`~/.claude/skills/`.
  */
-export function buildSkillsContext(projectPath: string, promptText: string, promptType?: string): string {
+export function buildSkillsContext(
+  projectPath: string,
+  promptText: string,
+  promptType?: string,
+  claudeSkillsDirs: readonly string[] = defaultClaudeSkillsDirs()
+): string {
   try {
     const stack = detectProjectStack(projectPath);
     if (!promptType && stack.length === 0) return promptText;
-    const library = loadSkillsLibrary(defaultSkillsLibraryDir());
-    if (library.skills.length === 0) return promptText;
+    const templateSkills = loadTemplateSkills(defaultSkillsLibraryDir());
+    const claudeSkills = loadClaudeSkills(claudeSkillsDirs);
+    if (templateSkills.length === 0 && claudeSkills.length === 0) return promptText;
+    const library = buildLibraryFromSkills([...templateSkills, ...claudeSkills]);
     if (promptType) {
       const matching = library.getForPrompt(promptType, stack);
       if (matching.length === 0) return promptText;

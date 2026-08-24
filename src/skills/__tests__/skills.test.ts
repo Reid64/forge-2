@@ -45,6 +45,7 @@ import {
   defaultSkillsLibraryDir,
   buildSkillsContext,
   validateSkillFile,
+  loadClaudeSkills,
   SKILLS_CONTEXT_HEADER,
 } from '../index.js';
 
@@ -81,6 +82,35 @@ after(() => {
 function sorted(values: readonly string[]): string[] {
   return [...values].sort();
 }
+
+// ---------------------------------------------------------------------------
+// Fixture helper — a disposable `.claude/skills/<name>/SKILL.md` directory (the
+// real Claude Skills layout: one subfolder per skill, plain `name`/`description`
+// frontmatter — see `../index.js`'s module header for why this is a second,
+// distinct source from `src/skills/templates/*.skill.md`).
+// ---------------------------------------------------------------------------
+
+function makeClaudeSkillsDir(skills: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-claude-skills-test-'));
+  tempDirs.push(dir);
+  for (const [name, content] of Object.entries(skills)) {
+    const skillDir = join(dir, name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), content, 'utf8');
+  }
+  return dir;
+}
+
+/** A small, real-shaped fixture matching the actual installed `design-taste-frontend/SKILL.md`'s frontmatter shape (plain `name`/`description`, no `id`/`domain`/`tags`/`applicablePromptTypes`). */
+const SAMPLE_DESIGN_SKILL_MD = `---
+name: sample-design-taste
+description: Anti-slop frontend design skill for landing pages and portfolios. Enforces real design systems and strict visual design direction.
+---
+
+# Sample Design Taste
+
+UNIQUE_MARKER_798c2 - this exact sentence should appear verbatim in an injected prompt for a UI-related build.
+`;
 
 // ---------------------------------------------------------------------------
 // detectProjectStack
@@ -414,4 +444,127 @@ test('validateSkillFile: falls back to the provided id when frontmatter omits it
   const result = validateSkillFile('---\ndomain: test\n---\n\nSome guidance.', 'derived-from-filename');
   assert.strictEqual(result.valid, true);
   assert.strictEqual(result.skill?.id, 'derived-from-filename');
+});
+
+// ---------------------------------------------------------------------------
+// .claude/skills/*/SKILL.md — the real Claude Skills second source. Real skills carry only
+// plain `name`/`description` frontmatter (confirmed against the actual installed
+// `.claude/skills/design-taste-frontend/SKILL.md`), so relevance is inferred by keyword-matching
+// name+description against `CLAUDE_SKILL_KEYWORD_HINTS` rather than a hand-authored
+// `applicablePromptTypes` field — these tests prove that inference actually gates injection in
+// both directions (design prompt -> injected, non-design prompt -> not injected), not just that
+// the file gets parsed.
+// ---------------------------------------------------------------------------
+
+test('loadClaudeSkills: parses real name/description-only frontmatter and infers domain + applicablePromptTypes', () => {
+  const dir = makeClaudeSkillsDir({ 'sample-design-taste': SAMPLE_DESIGN_SKILL_MD });
+  const skills = loadClaudeSkills([dir]);
+
+  assert.strictEqual(skills.length, 1);
+  const skill = skills[0]!;
+  assert.strictEqual(skill.id, 'sample-design-taste');
+  assert.strictEqual(skill.name, 'sample-design-taste');
+  assert.deepStrictEqual(skill.tags, []); // real Claude Skills declare no tags — not stack-specific
+  assert.strictEqual(skill.domain, 'frontend'); // inferred from "frontend"/"landing page"/"design system" etc.
+  assert.ok(skill.applicablePromptTypes.includes('ui'));
+  assert.ok(skill.applicablePromptTypes.includes('component'));
+  assert.ok(skill.template.includes('UNIQUE_MARKER_798c2'));
+});
+
+test('loadClaudeSkills: a skill matching no domain keyword gets applicablePromptTypes: [] (never injected, not guessed)', () => {
+  const genericSkillMd = `---
+name: generic-notes
+description: A collection of miscellaneous notes with no clear domain signal whatsoever.
+---
+
+Some generic content here.
+`;
+  const dir = makeClaudeSkillsDir({ 'generic-notes': genericSkillMd });
+  const skills = loadClaudeSkills([dir]);
+
+  assert.strictEqual(skills.length, 1);
+  assert.deepStrictEqual(skills[0]!.applicablePromptTypes, []);
+  assert.strictEqual(skills[0]!.domain, 'general');
+});
+
+test('loadClaudeSkills: a skill folder with no SKILL.md inside is skipped, never thrown', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-claude-skills-test-'));
+  tempDirs.push(dir);
+  mkdirSync(join(dir, 'not-a-skill'), { recursive: true });
+  writeFileSync(join(dir, 'not-a-skill', 'README.md'), 'no SKILL.md here', 'utf8');
+
+  assert.doesNotThrow(() => loadClaudeSkills([dir]));
+  assert.deepStrictEqual(loadClaudeSkills([dir]), []);
+});
+
+test('loadClaudeSkills: a missing directory degrades to [] rather than throwing', () => {
+  assert.doesNotThrow(() => loadClaudeSkills([join(tmpdir(), 'forge-does-not-exist-xyz')]));
+  assert.deepStrictEqual(loadClaudeSkills([join(tmpdir(), 'forge-does-not-exist-xyz')]), []);
+});
+
+test('loadClaudeSkills: an earlier directory\'s skill wins over a same-id skill in a later directory', () => {
+  const firstDir = makeClaudeSkillsDir({
+    'dup-skill': '---\nname: dup-skill\ndescription: frontend design skill, first copy.\n---\n\nFIRST_COPY_MARKER\n',
+  });
+  const secondDir = makeClaudeSkillsDir({
+    'dup-skill': '---\nname: dup-skill\ndescription: frontend design skill, second copy.\n---\n\nSECOND_COPY_MARKER\n',
+  });
+  const skills = loadClaudeSkills([firstDir, secondDir]);
+  assert.strictEqual(skills.length, 1);
+  assert.ok(skills[0]!.template.includes('FIRST_COPY_MARKER'));
+});
+
+test('loadClaudeSkills: an oversized SKILL.md body is truncated with a clear marker (context-overflow guard)', () => {
+  const hugeBody = 'frontend design system content. '.repeat(1000); // ~34,000 chars, well over the cap
+  const hugeSkillMd = `---\nname: huge-skill\ndescription: frontend design skill.\n---\n\n${hugeBody}`;
+  const dir = makeClaudeSkillsDir({ 'huge-skill': hugeSkillMd });
+  const skills = loadClaudeSkills([dir]);
+
+  assert.strictEqual(skills.length, 1);
+  assert.ok(skills[0]!.template.length < hugeBody.length, 'expected the template to be truncated, not the full ~34,000 chars');
+  assert.ok(skills[0]!.template.length < 7_000, `expected a bounded template well under the raw size, got ${skills[0]!.template.length} chars`);
+  assert.ok(skills[0]!.template.includes('truncated'), 'expected a truncation marker so the loss is visible, not silent');
+});
+
+test('buildSkillsContext: a real .claude/skills/*/SKILL.md is injected into a genuinely design/UI-related prompt', () => {
+  const claudeSkillsDir = makeClaudeSkillsDir({ 'sample-design-taste': SAMPLE_DESIGN_SKILL_MD });
+  const projectDir = makeProject({ dependencies: { next: '^14.2.18' } });
+  const promptText = 'Build the marketing landing page hero section.';
+
+  const result = buildSkillsContext(projectDir, promptText, 'ui', [claudeSkillsDir]);
+
+  assert.notStrictEqual(result, promptText);
+  assert.ok(result.includes(SKILLS_CONTEXT_HEADER));
+  assert.ok(result.includes('UNIQUE_MARKER_798c2'), "expected the sample skill's actual body content in the injected output");
+});
+
+test('buildSkillsContext: the SAME .claude/skills/*/SKILL.md is NOT injected into a non-design (schema) prompt — relevance filter works both directions', () => {
+  const claudeSkillsDir = makeClaudeSkillsDir({ 'sample-design-taste': SAMPLE_DESIGN_SKILL_MD });
+  const projectDir = makeProject({ dependencies: { next: '^14.2.18' } });
+  const promptText = 'Create the invoices table schema.';
+
+  const result = buildSkillsContext(projectDir, promptText, 'schema', [claudeSkillsDir]);
+
+  assert.ok(!result.includes('UNIQUE_MARKER_798c2'), 'the design skill must not leak into a schema prompt');
+});
+
+test('buildSkillsContext: an oversized real SKILL.md never blows past the character cap even when injected', () => {
+  const hugeBody = 'frontend design system content. '.repeat(1000);
+  const hugeSkillMd = `---\nname: huge-design-skill\ndescription: frontend design skill.\n---\n\n${hugeBody}`;
+  const claudeSkillsDir = makeClaudeSkillsDir({ 'huge-design-skill': hugeSkillMd });
+  const projectDir = makeProject({ dependencies: { next: '^14.2.18' } });
+  const promptText = 'Build the marketing landing page hero section.';
+
+  const result = buildSkillsContext(projectDir, promptText, 'ui', [claudeSkillsDir]);
+
+  assert.notStrictEqual(result, promptText);
+  // Bounded against the raw ~34,000-char fixture body, not against zero — a 'ui' prompt on this
+  // stack also legitimately pulls in a handful of small stack-matched templates alongside the
+  // (capped) fixture skill, so some headroom above the per-skill cap alone is expected here.
+  const injectedLength = result.length - promptText.length;
+  assert.ok(
+    injectedLength < 20_000,
+    `expected the injected block to stay well under the raw ~34,000-char fixture size, got +${injectedLength} chars`
+  );
+  assert.ok(!result.includes('frontend design system content. '.repeat(1000)), 'the raw uncapped fixture body must not appear verbatim');
 });
