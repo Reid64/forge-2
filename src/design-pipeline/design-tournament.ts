@@ -39,7 +39,7 @@
  * style.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { newId, nowIso, runQuery, toJsonText } from '../memory/client.js';
@@ -196,6 +196,15 @@ export function buildVariantSpec(baseSpec: ComponentSpec, direction: DesignDirec
 }
 
 /**
+ * The path {@link UIComponentGenerator.generate} writes a variant to
+ * (`component-generator.ts`'s own `projectPath/src/components/${spec.name}.tsx` convention) —
+ * mirrored here so `--use-existing` can check for a variant's file BEFORE paying for generation.
+ */
+export function variantFilePath(projectPath: string, variantSpecName: string): string {
+  return join(projectPath, 'src', 'components', `${variantSpecName}.tsx`);
+}
+
+/**
  * Real, deterministic variance verification (spec component #09, "Design Variance Controller"):
  * Jaccard similarity of the two code strings' whitespace-tokenized word sets. `1.0` = identical
  * token sets, `0.0` = no shared tokens. Used to WARN (not block) when two variants ended up
@@ -275,6 +284,14 @@ export interface DesignTournamentOptions {
   variantCount?: number;
   componentGenerator?: ComponentGeneratorLike;
   screenshotter?: PlaywrightScreenshotter;
+  /**
+   * When true, a variant whose expected file ({@link variantFilePath}) already exists on disk is
+   * read from disk and reused verbatim — its generation step is skipped entirely — instead of
+   * being regenerated. Off by default: a stale/unrelated file at that path would otherwise be
+   * silently reused, so a caller must opt in explicitly (matches `forge build
+   * --use-existing-queue`'s posture, not an automatic resume).
+   */
+  useExisting?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,12 +303,14 @@ export class DesignTournamentEngine {
   private readonly variantCount: number;
   private readonly componentGenerator: ComponentGeneratorLike | null;
   private readonly screenshotter: PlaywrightScreenshotter | null;
+  private readonly useExisting: boolean;
 
   constructor(options: DesignTournamentOptions = {}) {
     this.log = options.log ?? log;
     this.variantCount = resolveVariantCount(options.variantCount ?? MAX_VARIANTS);
     this.componentGenerator = options.componentGenerator ?? null;
     this.screenshotter = options.screenshotter ?? null;
+    this.useExisting = options.useExisting ?? false;
   }
 
   /**
@@ -316,11 +335,21 @@ export class DesignTournamentEngine {
 
     for (const direction of directions) {
       const variantSpec = buildVariantSpec(baseSpec, direction);
+
+      if (this.useExisting) {
+        const reused = this.tryReuseExistingVariant(variantSpec, direction, projectPath);
+        if (reused) {
+          generated.push({ direction, component: reused, error: null });
+          continue;
+        }
+      }
+
       if (!this.componentGenerator) {
         generated.push({ direction, component: null, error: 'no ComponentGenerator configured' });
         continue;
       }
       try {
+        this.log(`[DESIGN TOURNAMENT] variant '${direction.name}': generating (no reusable file found)`);
         const component = await this.componentGenerator.generate(variantSpec, projectPath, buildRunId, promptId);
         generated.push({ direction, component, error: null });
       } catch (error) {
@@ -344,6 +373,32 @@ export class DesignTournamentEngine {
     };
     await this.persistRun(result, projectPath, buildRunId, promptId);
     return result;
+  }
+
+  /**
+   * `--use-existing`: if `variantSpec`'s expected file ({@link variantFilePath}) already exists on
+   * disk, read it and return a {@link GeneratedComponent} built from the on-disk code — skipping
+   * generation entirely. Returns `null` (falls through to normal generation) when the file is
+   * missing or unreadable; a read failure is never silently treated as "reuse" of empty code.
+   */
+  private tryReuseExistingVariant(
+    variantSpec: ComponentSpec,
+    direction: DesignDirection,
+    projectPath: string
+  ): GeneratedComponent | null {
+    const filePath = variantFilePath(projectPath, variantSpec.name);
+    if (!existsSync(filePath)) return null;
+    try {
+      const code = readFileSync(filePath, 'utf8');
+      this.log(`[DESIGN TOURNAMENT] variant '${direction.name}': REUSING existing file (--use-existing) → ${filePath}`);
+      return { spec: variantSpec, code, storyCode: '', testCode: '', filePath };
+    } catch (error) {
+      this.log(
+        `WARNING: [DESIGN TOURNAMENT] variant '${direction.name}': found ${filePath} but could not read it ` +
+          `(${describeError(error)}) — generating instead.`
+      );
+      return null;
+    }
   }
 
   /** Logs (never throws/blocks) a WARNING for any pair of successfully-generated variants whose

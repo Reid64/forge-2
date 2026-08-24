@@ -3673,7 +3673,7 @@ async function promptTournamentChoice(result: DesignTournamentResult): Promise<D
  */
 async function cmdDesignTournament(
   pathArg: string,
-  opts: { brief?: string; name?: string; variants?: string; nonInteractive?: boolean }
+  opts: { brief?: string; name?: string; variants?: string; useExisting?: boolean; nonInteractive?: boolean }
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
   if (!opts.brief) {
@@ -3705,11 +3705,16 @@ async function cmdDesignTournament(
     return;
   }
 
+  if (opts.useExisting) {
+    designLog('INFO', '--use-existing: variants whose expected file already exists on disk will be reused, not regenerated.');
+  }
+
   const engine = createDesignTournamentEngine({
     log: (m) => designLog('INFO', m),
     variantCount,
     componentGenerator: new UIComponentGenerator(),
     screenshotter,
+    useExisting: opts.useExisting ?? false,
   });
 
   const buildRunId = randomUUID();
@@ -4350,12 +4355,22 @@ async function main(): Promise<void> {
     .option('--name <component-name>', 'component name for the generated variants', 'TournamentComponent')
     .option('--variants <n>', 'number of variants to generate (2-4)')
     .option(
+      '--use-existing',
+      'reuse a variant\'s file from a prior run instead of regenerating it, for any variant whose expected ' +
+        '<name>Variant<ID>.tsx already exists on disk under src/components/ — only variants genuinely missing ' +
+        'are generated. Off by default: without this flag every variant is always (re)generated.',
+      false
+    )
+    .option(
       '--non-interactive',
       'never blocks on stdin; leaves the tournament AWAITING HUMAN DESIGN APPROVAL (no automatic multi-way winner)',
       false
     )
-    .action((pathArg: string, opts: { brief?: string; name?: string; variants?: string; nonInteractive?: boolean }) =>
-      cmdDesignTournament(pathArg, opts)
+    .action(
+      (
+        pathArg: string,
+        opts: { brief?: string; name?: string; variants?: string; useExisting?: boolean; nonInteractive?: boolean }
+      ) => cmdDesignTournament(pathArg, opts)
     );
 
   design

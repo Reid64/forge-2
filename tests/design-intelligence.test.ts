@@ -19,6 +19,9 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import { profileApp, saveAppDesignProfile, getAppDesignProfile, type AppProfilerQueueEntry } from '../src/design-pipeline/app-profiler.js';
 import { routeDesign, DESIGN_TOOLS, formatRoutingDecision } from '../src/design-pipeline/design-router.js';
@@ -34,6 +37,7 @@ import {
   buildVariantDirections,
   buildVariantSpec,
   computeTokenJaccardSimilarity,
+  variantFilePath,
   TOURNAMENT_DIRECTIONS,
   DesignTournamentEngine,
   formatTournamentResult,
@@ -298,6 +302,114 @@ describe('design-tournament: DesignTournamentEngine.run (injected generator, no 
     const rendered = formatTournamentResult(result);
     assert.match(rendered, /AWAITING HUMAN DESIGN APPROVAL/);
     assert.match(rendered, /GENERATION FAILED: synthetic generation failure/);
+  });
+});
+
+describe('design-tournament: --use-existing reuse (real scratch project, real files on disk)', () => {
+  let projectDir: string;
+  let callCount: number;
+
+  // Mimics UIComponentGenerator.generate's own disk-write behavior (component-generator.ts:
+  // projectPath/src/components/<spec.name>.tsx) so `variantFilePath` finds a real file — but never
+  // shells out to the real Claude Code CLI, matching this suite's injected-generator convention.
+  const countingGenerator: ComponentGeneratorLike = {
+    generate: async (spec, projectPathArg) => {
+      callCount++;
+      const filePath = join(projectPathArg, 'src', 'components', `${spec.name}.tsx`);
+      const code = `export function ${spec.name}() { return null; } // generation #${callCount}`;
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, code, 'utf8');
+      const generated: GeneratedComponent = { spec, code, storyCode: '', testCode: '', filePath };
+      return generated;
+    },
+  };
+
+  before(() => {
+    projectDir = mkdtempSync(join(tmpdir(), `forge-tournament-reuse-test-${RUN_ID}-`));
+    callCount = 0;
+  });
+
+  after(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  const baseSpec: ComponentSpec = {
+    name: `ReuseTest${RUN_ID}`,
+    description: 'A test component for --use-existing reuse.',
+    props: [],
+    dataSource: null,
+    interactions: [],
+    accessibility: [],
+  };
+
+  test('first run (useExisting off) generates both variants and writes real files', async () => {
+    const engine = new DesignTournamentEngine({ componentGenerator: countingGenerator, variantCount: 2 });
+    const result = await engine.run(baseSpec, projectDir, `build-${RUN_ID}`, `prompt-${RUN_ID}`);
+
+    assert.equal(callCount, 2, 'both variants should have gone through generate()');
+    assert.equal(result.variants.length, 2);
+    for (const v of result.variants) {
+      assert.equal(v.generationError, null);
+      assert.ok(v.filePath && existsSync(v.filePath), `expected a real file on disk for ${v.direction.name}`);
+      assert.equal(v.filePath, variantFilePath(projectDir, `${baseSpec.name}Variant${v.direction.id.toUpperCase()}`));
+    }
+  });
+
+  test('second run with useExisting reuses both files — generate() is called zero more times', async () => {
+    const callCountBeforeSecondRun = callCount;
+    const onDiskBefore = [
+      readFileSync(variantFilePath(projectDir, `${baseSpec.name}VariantA`), 'utf8'),
+      readFileSync(variantFilePath(projectDir, `${baseSpec.name}VariantB`), 'utf8'),
+    ];
+
+    const logs: string[] = [];
+    const engine = new DesignTournamentEngine({
+      componentGenerator: countingGenerator,
+      variantCount: 2,
+      useExisting: true,
+      log: (m) => logs.push(m),
+    });
+    const result = await engine.run(baseSpec, projectDir, `build-${RUN_ID}-2`, `prompt-${RUN_ID}-2`);
+
+    // The real check: the injected generator's call count — the exact boundary a real
+    // claude.exe/claude-runner.ts invocation would cross in production — did not move. A log
+    // line alone would not catch a bug where the engine logs "REUSING" but calls generate() anyway.
+    assert.equal(callCount, callCountBeforeSecondRun, 'no additional generate() calls for reused variants');
+
+    assert.equal(result.variants.length, 2);
+    for (const v of result.variants) {
+      assert.equal(v.generationError, null);
+    }
+    // Content on disk is untouched (same bytes as before the second run — proof nothing was rewritten).
+    assert.equal(readFileSync(variantFilePath(projectDir, `${baseSpec.name}VariantA`), 'utf8'), onDiskBefore[0]);
+    assert.equal(readFileSync(variantFilePath(projectDir, `${baseSpec.name}VariantB`), 'utf8'), onDiskBefore[1]);
+
+    const reuseLogs = logs.filter((l) => l.includes('REUSING existing file'));
+    assert.equal(reuseLogs.length, 2, 'expected a REUSING log line for each of the 2 variants');
+  });
+
+  test('a third variant with no existing file is generated while the first two are reused', async () => {
+    const callCountBeforeThirdRun = callCount;
+    const logs: string[] = [];
+    const engine = new DesignTournamentEngine({
+      componentGenerator: countingGenerator,
+      variantCount: 3,
+      useExisting: true,
+      log: (m) => logs.push(m),
+    });
+    const result = await engine.run(baseSpec, projectDir, `build-${RUN_ID}-3`, `prompt-${RUN_ID}-3`);
+
+    assert.equal(callCount, callCountBeforeThirdRun + 1, 'only the missing 3rd variant should call generate()');
+    assert.equal(result.variants.length, 3);
+    assert.equal(result.variants[0]!.generationError, null);
+    assert.equal(result.variants[1]!.generationError, null);
+    assert.equal(result.variants[2]!.generationError, null);
+    assert.ok(existsSync(variantFilePath(projectDir, `${baseSpec.name}VariantC`)));
+
+    const reuseLogs = logs.filter((l) => l.includes('REUSING existing file'));
+    const generateLogs = logs.filter((l) => l.includes('generating (no reusable file found)'));
+    assert.equal(reuseLogs.length, 2);
+    assert.equal(generateLogs.length, 1);
   });
 });
 
