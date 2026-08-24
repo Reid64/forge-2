@@ -42,8 +42,16 @@
  * assumption. `img2threejs` is installed when `~/.claude/skills/img2threejs/SKILL.md` exists;
  * `impeccable` is installed when `~/.claude/plugins/known_marketplaces.json` registers an
  * `impeccable` marketplace (key `impeccable` or a `pbakaus/impeccable` source repo). `taste_skill`
- * and `awesome_design` have no known skill/marketplace name to check against yet, so they report
- * `installed: false` until one is identified — never guessed. `installed` is informational only:
+ * is the real Claude Skill installed as `design-taste-frontend` — checked via `src/skills/index.ts`'s
+ * `loadClaudeSkills`/`defaultClaudeSkillsDirs` (the SAME two-location resolution `buildSkillsContext`
+ * uses: this FORGE install's own `.claude/skills/` and `~/.claude/skills/`), matched by id since
+ * that's the skill's real, confirmed installed name (not guessed — `DESIGN_CAPABILITY_REGISTRY`'s
+ * own `taste_skill` capability profile, landing_page/marketing_site/portfolio/brand_expression, was
+ * transcribed from that same skill's real `description` frontmatter). `awesome_design` is installed
+ * when an `awesome-claude-design` folder with real content (a `README.md`) exists under either
+ * `.claude/skills/` location — a reference corpus, not a `SKILL.md`-shaped Claude Skill, so it's
+ * checked by folder+marker-file presence rather than `loadClaudeSkills`' SKILL.md-only scan.
+ * `installed` is informational only:
  * it is not one of the eight weighted scoring dimensions above and never changes `total`, since
  * routing scores a tool's fitness for the interface, not this machine's local setup. Even when a
  * tool is installed, `routeDesign()` still only produces a persisted DECISION — which tool a
@@ -79,6 +87,7 @@ import { join } from 'node:path';
 
 import { newId, nowIso, runQuery, toJsonText } from '../memory/client.js';
 import { logLine } from '../tools/forge-logger.js';
+import { loadClaudeSkills, defaultClaudeSkillsDirs } from '../skills/index.js';
 import type { AppDesignProfile } from './app-profiler.js';
 import { getPreferenceScore } from './design-memory.js';
 import type { BrandProfile } from './brand-intelligence.js';
@@ -298,17 +307,48 @@ function isImpeccableMarketplaceRegistered(): boolean {
   }
 }
 
+/** The real, confirmed installed skill id for `taste_skill` (see this file's header). */
+const TASTE_SKILL_ID = 'design-taste-frontend';
+
+/**
+ * `true` when the `design-taste-frontend` Claude Skill is installed under either
+ * `.claude/skills/` location (`defaultClaudeSkillsDirs()` — this FORGE install's own directory,
+ * or `~/.claude/skills/`), via the SAME scan `buildSkillsContext` uses to find it for real prompt
+ * injection. Matched by id, not folder name, since {@link loadClaudeSkills} already derives the
+ * id from the folder (or the skill's own `id`/`name` frontmatter when present).
+ */
+function isTasteSkillInstalled(): boolean {
+  try {
+    return loadClaudeSkills(defaultClaudeSkillsDirs()).some((s) => s.id === TASTE_SKILL_ID);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `true` when an `awesome-claude-design` folder with real content (a `README.md`) exists under
+ * either `.claude/skills/` location. This corpus has no `SKILL.md` (it's a reference/showcase
+ * repo, not a Claude Skill), so it's checked by folder+marker presence rather than
+ * {@link loadClaudeSkills}'s SKILL.md-only scan.
+ */
+function isAwesomeDesignInstalled(): boolean {
+  try {
+    return defaultClaudeSkillsDirs().some((dir) => existsSync(join(dir, 'awesome-claude-design', 'README.md')));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Live install/registration state for every {@link DESIGN_TOOLS} candidate on this machine.
- * `taste_skill`/`awesome_design` have no known Claude Code skill or marketplace name to check
- * against yet, so they report `false` until one is identified (never guessed). Never throws — an
- * unreadable `~/.claude` directory degrades every flag to `false`.
+ * Never throws — an unreadable `~/.claude` directory (or FORGE-install `.claude/`) degrades every
+ * flag to `false`.
  */
 export function detectInstalledDesignTools(): Readonly<Record<DesignTool, boolean>> {
   return {
-    taste_skill: false,
+    taste_skill: isTasteSkillInstalled(),
     impeccable: isImpeccableMarketplaceRegistered(),
-    awesome_design: false,
+    awesome_design: isAwesomeDesignInstalled(),
     img2threejs: isImg2ThreejsSkillInstalled(),
   };
 }

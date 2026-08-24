@@ -1,9 +1,11 @@
 /**
  * FORGE 2.0 — UIComponentGenerator (UI Engine).
  *
- * Generates one production-grade UI component per {@link ComponentSpec}: loads the
- * `ui-components` engineering-standards skill from the Skills Library
- * (`src/skills/index.ts`), auto-installs whatever shadcn/ui primitives the spec implies
+ * Generates one production-grade UI component per {@link ComponentSpec}: injects the full
+ * Skills Library via {@link buildSkillsContext} (`src/skills/index.ts` — both this repo's
+ * curated `*.skill.md` templates AND real Claude Skills under `.claude/skills/`, e.g.
+ * `design-taste-frontend`, stack-detected and prompt-type-scoped exactly like a real Phase 3
+ * build prompt), auto-installs whatever shadcn/ui primitives the spec implies
  * (`src/ui-engine/shadcn-installer.ts`), assembles a generation prompt that folds both of
  * those in alongside a fixed set of hard requirements, runs it through the Claude Code CLI
  * (`src/engine/claude-runner.ts` — Contract 5, never the metered Messages API), and writes
@@ -13,7 +15,7 @@
  * House style, matching the three modules above: `generate()` is the one place in this file
  * that is allowed to throw — a component that failed to generate must never be reported as
  * generated (Iron Law 3, "never fabricate a result"). Every SURROUNDING concern (skill
- * loading, shadcn install, Storybook detection, Build Memory persistence) is a
+ * injection, shadcn install, Storybook detection, Build Memory persistence) is a
  * quality-of-life layer and degrades silently on failure exactly like
  * `buildSkillsContext`/`ensureComponentsInstalled` do — a missing skill file, a failed
  * install, or an unreachable Build Memory database must never block a component that
@@ -24,7 +26,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { runClaude } from '../engine/claude-runner.js';
-import { loadSkillsLibrary, defaultSkillsLibraryDir } from '../skills/index.js';
+import { buildSkillsContext } from '../skills/index.js';
 import { detectRequiredComponents, ensureComponentsInstalled } from './shadcn-installer.js';
 import { detectStorybookInstalled, generateStory } from './storybook-generator.js';
 import { newId, nowIso, runQuery } from '../memory/client.js';
@@ -72,25 +74,8 @@ export interface GeneratedComponent {
 // Internals
 // ---------------------------------------------------------------------------
 
-const UI_COMPONENTS_SKILL_ID = 'ui-components';
 /** Generous timeout for a single component's generation call — larger components need room. */
 const GENERATION_TIMEOUT_MS = 15 * 60 * 1000;
-
-/**
- * Load the `ui-components` skill's template body from the Skills Library. Degrades to `''`
- * (the generation prompt simply omits the skill section) on a missing/malformed skill file —
- * matches `buildSkillsContext`'s guarded posture; a missing skill file must never block
- * generation.
- */
-function loadUiComponentsSkillTemplate(): string {
-  try {
-    const library = loadSkillsLibrary(defaultSkillsLibraryDir());
-    const skill = library.skills.find((s) => s.id === UI_COMPONENTS_SKILL_ID);
-    return skill?.template ?? '';
-  } catch {
-    return '';
-  }
-}
 
 /** The fixed hard requirements every generated component must satisfy, regardless of spec. */
 const HARD_REQUIREMENTS: readonly string[] = [
@@ -107,15 +92,13 @@ const HARD_REQUIREMENTS: readonly string[] = [
 
 /**
  * Build the full generation prompt: the `ui-components` skill template (when available), the
- * component spec rendered as a structured block, and the fixed hard requirements — in that
- * order, so the model sees house standards, then the concrete ask, then the non-negotiables.
+ * component spec rendered as a structured block, and the fixed hard requirements. Skills Library
+ * content is NOT folded in here — {@link UIComponentGenerator.generate} prepends it afterward via
+ * {@link buildSkillsContext}, which needs the fully-assembled prompt text to do its own
+ * stack-detection/prompt-type relevance matching.
  */
-function buildGenerationPrompt(spec: ComponentSpec, skillTemplate: string): string {
+function buildGenerationPrompt(spec: ComponentSpec): string {
   const sections: string[] = [];
-
-  if (skillTemplate.trim() !== '') {
-    sections.push(`## ENGINEERING STANDARDS (ui-components skill)\n\n${skillTemplate.trim()}`);
-  }
 
   const propsList = spec.props.length > 0 ? spec.props.map((p) => `- ${p}`).join('\n') : '- (no props)';
   const interactionsList =
@@ -275,27 +258,26 @@ async function persistDesignArtifact(
 export class UIComponentGenerator {
   /**
    * Generate `spec` into `projectPath`, tagging the Build Memory record with `buildRunId`/
-   * `promptId` for provenance. Throws if the Claude Code CLI run itself did not succeed
-   * (Iron Law 3 — a failed generation must never be reported as a `GeneratedComponent`); every
-   * other step (skill loading, shadcn install, Storybook story write, persistence) degrades
-   * silently rather than blocking a component that DID generate successfully.
+   * `promptId` for provenance. `promptType` (default `'component'`, matching every existing
+   * caller's actual usage — a single reusable component) is passed straight through to
+   * {@link buildSkillsContext} for its prompt-type relevance scoping; a caller generating a full
+   * PAGE (e.g. the site tournament) should pass `'page'` so page-scoped skills match too. Throws
+   * if the Claude Code CLI run itself did not succeed (Iron Law 3 — a failed generation must
+   * never be reported as a `GeneratedComponent`); every other step (skill injection, shadcn
+   * install, Storybook story write, persistence) degrades silently rather than blocking a
+   * component that DID generate successfully.
    */
   async generate(
     spec: ComponentSpec,
     projectPath: string,
     buildRunId: string,
-    promptId: string
+    promptId: string,
+    promptType: string = 'component'
   ): Promise<GeneratedComponent> {
     const log = logLine('ui-component-generator');
     log(`generating component '${spec.name}' for build ${buildRunId} / prompt ${promptId}`);
 
-    // 1) Load the ui-components skill template.
-    const skillTemplate = loadUiComponentsSkillTemplate();
-    if (skillTemplate === '') {
-      log(`WARNING: '${UI_COMPONENTS_SKILL_ID}' skill template not found — generating without it`);
-    }
-
-    // 2) Detect and install required shadcn components.
+    // 1) Detect and install required shadcn components.
     const detectionText = [spec.description, ...spec.interactions].join(' ');
     const requiredComponents = detectRequiredComponents(detectionText);
     if (requiredComponents.length > 0) {
@@ -303,10 +285,18 @@ export class UIComponentGenerator {
       if (installed.length > 0) log(`installed shadcn components: ${installed.join(', ')}`);
     }
 
-    // 3) Build the generation prompt.
-    const prompt = buildGenerationPrompt(spec, skillTemplate);
+    // 2) Build the generation prompt, then inject the full Skills Library (this repo's curated
+    //    templates + real Claude Skills under .claude/skills/, e.g. design-taste-frontend) —
+    //    the SAME buildSkillsContext call site a real Phase 3 build prompt goes through.
+    const basePrompt = buildGenerationPrompt(spec);
+    const prompt = buildSkillsContext(projectPath, basePrompt, promptType);
+    if (prompt === basePrompt) {
+      log(`no Skills Library content matched (stack/prompt-type '${promptType}') — generating without it`);
+    } else {
+      log(`Skills Library context injected (+${prompt.length - basePrompt.length} chars)`);
+    }
 
-    // 4) Call runClaude.
+    // 3) Call runClaude.
     const result = await runClaude(prompt, {
       cwd: projectPath,
       timeoutMs: GENERATION_TIMEOUT_MS,
@@ -320,24 +310,24 @@ export class UIComponentGenerator {
       throw new Error(`UIComponentGenerator: generation of '${spec.name}' failed (${reason})`);
     }
 
-    // 5) Parse response to extract the component code.
+    // 4) Parse response to extract the component code.
     const code = extractComponentCode(result.stdout);
     if (code === '') {
       throw new Error(`UIComponentGenerator: generation of '${spec.name}' produced no usable code`);
     }
 
-    // 6) Write the component to projectPath/src/components/{spec.name}.tsx.
+    // 5) Write the component to projectPath/src/components/{spec.name}.tsx.
     const filePath = join(projectPath, 'src', 'components', `${spec.name}.tsx`);
     writeFileSafe(filePath, code, log);
 
-    // 7) Generate the Storybook story from the written component (StorybookGenerator) — reads
+    // 6) Generate the Storybook story from the written component (StorybookGenerator) — reads
     //    the real file on disk so Loading/Empty/Error state detection sees the actual source.
     const storyCode = generateStory(filePath, spec.name, spec.props);
 
-    // 8) Generate Vitest test file.
+    // 7) Generate Vitest test file.
     const testCode = generateTestCode(spec);
 
-    // 9) Write the story if Storybook is detected.
+    // 8) Write the story if Storybook is detected.
     if (detectStorybookInstalled(projectPath)) {
       const storyPath = join(projectPath, 'src', 'stories', `${spec.name}.stories.tsx`);
       writeFileSafe(storyPath, storyCode, log);
@@ -345,7 +335,7 @@ export class UIComponentGenerator {
       log('Storybook not detected in target project — skipping story write');
     }
 
-    // 10) Persist to design_artifacts (best-effort, never blocks the returned result).
+    // 9) Persist to design_artifacts (best-effort, never blocks the returned result).
     await persistDesignArtifact(buildRunId, promptId, spec, code, filePath);
 
     return { spec, code, storyCode, testCode, filePath };

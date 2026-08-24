@@ -125,6 +125,8 @@ import {
 } from '../design-pipeline/design-tournament.js';
 import { validateVariance, fromDesignDirection, type VarianceValidationResult } from '../design-pipeline/variance-controller.js';
 import { buildComposite, type CompositeSectionSelection } from '../design-pipeline/composite-builder.js';
+import { derivePagePlan, type SitePagePlan } from '../design-pipeline/site-plan.js';
+import { createDesignSiteTournamentEngine, type SiteTournamentResult } from '../design-pipeline/design-site-tournament.js';
 
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
@@ -3782,6 +3784,190 @@ async function cmdDesignTournament(
   }
 }
 
+/** Write a human-readable comparison report for a completed SITE tournament run — every variant, every page, screenshots, site-level variance, design intelligence findings. */
+function writeSiteTournamentComparisonReport(projectPath: string, result: SiteTournamentResult): string {
+  const dir = join(projectPath, '.forge', 'design-site-tournament', result.id);
+  mkdirSync(dir, { recursive: true });
+  const reportPath = join(dir, 'comparison-report.md');
+
+  const lines: string[] = [];
+  lines.push(`# Design Site Tournament — ${result.siteName}`);
+  lines.push('');
+  lines.push(`Run: ${result.id}`);
+  lines.push(`Status: ${result.status}`);
+  lines.push(`Pages in plan: ${result.pagePlan.pages.length} (source: ${result.pagePlan.source})`);
+  lines.push('');
+
+  lines.push('## Design Intelligence');
+  lines.push('');
+  lines.push(
+    `- app-profiler: type=${result.intelligence.profile.applicationType.primary}, ` +
+      `interfaces=[${result.intelligence.profile.interfaceTypes.join(', ')}], ` +
+      `complexity=${result.intelligence.profile.visualComplexity}`
+  );
+  lines.push(
+    `- brand-intelligence: tone=[${result.intelligence.brandProfile.tone.join(', ')}], ` +
+      `confidence=${result.intelligence.brandProfile.confidence}`
+  );
+  lines.push(
+    result.intelligence.personas.length > 0
+      ? `- persona-profiler: ${result.intelligence.personas.map((p) => p.role).join(', ')}`
+      : '- persona-profiler: none detected'
+  );
+  lines.push(
+    `- design-router: primary=${result.intelligence.routingDecision.primaryTool} ` +
+      `(${result.intelligence.routingDecision.confidencePercent}% confidence), ` +
+      `recommended aesthetic=${result.intelligence.routingDecision.recommendedAesthetics[0]?.family.name ?? 'n/a'}`
+  );
+  lines.push('');
+
+  lines.push('## Variants');
+  for (const v of result.variants) {
+    lines.push('');
+    lines.push(`### [${v.direction.id.toUpperCase()}] ${v.direction.name}`);
+    lines.push(`- Structural tags: ${v.direction.structuralTags.join(', ')}`);
+    lines.push(`- Density: ${v.direction.density}`);
+    lines.push(`- Pages generated: ${v.pagesGenerated}/${v.pages.length}${v.pagesFailed > 0 ? ` (${v.pagesFailed} FAILED)` : ''}`);
+    lines.push(
+      `- Average accessibility: ${v.averageAccessibility !== null ? `${Math.round(v.averageAccessibility * 10)}/100` : 'unscored'}`
+    );
+    lines.push('');
+    lines.push('| Page | Route | File | Accessibility | Screenshots | Error |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const p of v.pages) {
+      lines.push(
+        `| ${p.page.title} | /${p.page.slug} | ${p.filePath ?? '(failed)'} | ` +
+          `${p.accessibility !== null ? `${Math.round(p.accessibility * 10)}/100` : '-'} | ` +
+          `${p.screenshotPaths.length} | ${p.generationError ?? ''} |`
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## Site-level variance check (variance-controller.ts MINIMUM_VARIANCE, concatenated page code per variant)');
+  lines.push('');
+  lines.push(result.varianceResult.summary);
+  for (const c of result.varianceResult.comparisons) {
+    lines.push(
+      `- ${c.aId.toUpperCase()} vs ${c.bId.toUpperCase()}: structural similarity ${c.structuralSimilarity.toFixed(2)}` +
+        `${c.tokenSimilarity !== null ? `, token similarity ${c.tokenSimilarity.toFixed(2)}` : ''} — ${c.verdict.toUpperCase()}`
+    );
+  }
+  lines.push('');
+  lines.push('## Recommendation');
+  lines.push('');
+  lines.push(result.recommendation);
+  lines.push('');
+
+  writeFileSync(reportPath, lines.join('\n'), 'utf8');
+  return reportPath;
+}
+
+/** Render a {@link SiteTournamentResult} for CLI/log display. */
+function formatSiteTournamentResult(result: SiteTournamentResult): string {
+  const lines: string[] = [];
+  lines.push(`DESIGN SITE TOURNAMENT — ${result.siteName} (run ${result.id}, ${result.pagePlan.pages.length} pages)`);
+  for (const v of result.variants) {
+    lines.push(
+      `  [${v.direction.id.toUpperCase()}] ${v.direction.name} — ${v.pagesGenerated}/${v.pages.length} pages` +
+        (v.pagesFailed > 0 ? ` (${v.pagesFailed} FAILED)` : '') +
+        (v.averageAccessibility !== null ? `, avg accessibility ${Math.round(v.averageAccessibility * 10)}/100` : '')
+    );
+  }
+  lines.push('');
+  lines.push(result.recommendation);
+  lines.push('STATUS: AWAITING HUMAN DESIGN APPROVAL');
+  return lines.join('\n');
+}
+
+/**
+ * `forge design site-tournament <project-path> --brief <text-or-file> [--name <SiteName>]
+ * [--variants <n>] [--only <id[,id...]>] [--non-interactive]` — the multi-page counterpart to
+ * `forge design tournament`: parses `--brief` into a {@link SitePagePlan} (`site-plan.ts`,
+ * real Claude Code CLI extraction), computes design intelligence ONCE for the whole site
+ * (app-profiler + brand-intelligence + persona-profiler + design-router —
+ * {@link computeSiteDesignIntelligence}), then generates every page for every requested
+ * direction via the real {@link DesignSiteTournamentEngine} (real `UIComponentGenerator` calls —
+ * one per page per variant — real `PlaywrightScreenshotter` captures of every page), runs
+ * site-level variance validation (concatenated page code per variant), writes a full comparison
+ * report, and — same posture as the single-component command — leaves the run AWAITING HUMAN
+ * DESIGN APPROVAL. `--only` restricts the run to specific direction ids (e.g. `--only a` to
+ * generate/verify one variant's full page set as a checkpoint before committing to the rest);
+ * omit it to run every direction up to `--variants`. Interactive N-way approval is NOT YET BUILT
+ * for the site case (disclosed, not silently skipped — see `design-site-tournament.ts`'s header)
+ * — every run currently ends at AWAITING APPROVAL regardless of `--non-interactive`.
+ */
+async function cmdDesignSiteTournament(
+  pathArg: string,
+  opts: { brief?: string; name?: string; variants?: string; only?: string; nonInteractive?: boolean }
+): Promise<void> {
+  const projectPath = resolveProjectPath(pathArg);
+  if (!opts.brief) {
+    designFail('forge design site-tournament requires --brief "<text>" or --brief <path-to-file>.');
+    return;
+  }
+  const briefText = resolveBriefText(opts.brief);
+  if (briefText === null) {
+    designFail(`forge design site-tournament could not read --brief '${opts.brief}' as text or an existing file.`);
+    return;
+  }
+
+  const siteName = opts.name?.trim() || basename(projectPath) || 'Site';
+  const variantCount = opts.variants ? Number.parseInt(opts.variants, 10) : undefined;
+  const variantIds = opts.only ? opts.only.split(',').map((s) => s.trim().toLowerCase()).filter((s) => s !== '') : undefined;
+
+  designLog('INFO', `forge design site-tournament — planning '${siteName}' in ${projectPath}`);
+  const pagePlan = await withSpinner('Site Tournament — derive page plan from brief', (log) =>
+    derivePagePlan(briefText, projectPath, { log })
+  );
+  designLog(
+    pagePlan.source === 'llm-extracted' ? 'PASS' : 'WARN',
+    `page plan (${pagePlan.source}): ${pagePlan.pages.length} page(s) — ${pagePlan.pages.map((p) => p.slug).join(', ')}`
+  );
+  for (const w of pagePlan.warnings) designLog('WARN', w);
+
+  const screenshotter = createPlaywrightScreenshotter({ log: (m) => designLog('INFO', m) });
+  if (!(await screenshotter.isAvailable())) {
+    designFail('forge design site-tournament requires the "playwright" package — it is not installed/importable.');
+    return;
+  }
+
+  const engine = createDesignSiteTournamentEngine({
+    log: (m) => designLog('INFO', m),
+    variantCount,
+    variantIds,
+    componentGenerator: new UIComponentGenerator(),
+    screenshotter,
+  });
+
+  const buildRunId = randomUUID();
+  const promptId = randomUUID();
+
+  const result = await withSpinner(
+    `Site Tournament — generate ${pagePlan.pages.length} page(s) x ${variantIds?.length ?? variantCount ?? 4} direction(s)`,
+    () => engine.run(siteName, briefText, pagePlan, projectPath, buildRunId, promptId)
+  );
+
+  console.log(`\n${formatSiteTournamentResult(result)}\n`);
+
+  const varianceOk = result.varianceResult.status === 'ok';
+  designLog(varianceOk ? 'PASS' : 'FAIL', `site-level variance check: ${result.varianceResult.summary}`);
+  if (!varianceOk) {
+    designLog(
+      'WARN',
+      'forge design site-tournament: some variant pair is structurally too similar at the site level — review the comparison report before approving.'
+    );
+  }
+
+  const reportPath = writeSiteTournamentComparisonReport(projectPath, result);
+  designLog('PASS', `comparison report written → ${reportPath}`);
+
+  designLog(
+    'INFO',
+    'site tournament left AWAITING HUMAN DESIGN APPROVAL (no automatic winner for a multi-way, multi-page choice; interactive approval not yet built for the site case).'
+  );
+}
+
 /** Parse `--selections` (a JSON array of {@link CompositeSectionSelection}) from literal text or a file path. */
 function resolveComposeSelections(raw: string): CompositeSectionSelection[] | null {
   let text: string;
@@ -4371,6 +4557,33 @@ async function main(): Promise<void> {
         pathArg: string,
         opts: { brief?: string; name?: string; variants?: string; useExisting?: boolean; nonInteractive?: boolean }
       ) => cmdDesignTournament(pathArg, opts)
+    );
+
+  design
+    .command('site-tournament')
+    .description(
+      'Multi-page counterpart to `tournament`: parse --brief into a full page plan, generate every page for ' +
+        '2-4 competing site-wide design directions (Design Site Tournament), screenshot every page, verify ' +
+        'site-level structural variance, and leave the run at the N-way human approval gate'
+    )
+    .argument('<project-path>', 'target project directory')
+    .requiredOption('--brief <text-or-file>', 'the multi-page site brief — literal text, or a path to a text file')
+    .option('--name <site-name>', 'site name for the generated variants (default: project directory name)')
+    .option('--variants <n>', 'number of directions to generate (2-4)')
+    .option(
+      '--only <id[,id...]>',
+      'restrict this run to specific direction ids (e.g. "a" to generate/verify one variant\'s full page set ' +
+        'as a checkpoint before committing to the rest) — omit to run every direction up to --variants'
+    )
+    .option(
+      '--non-interactive',
+      'accepted for parity with `tournament`; interactive N-way approval is not yet built for the site case, ' +
+        'so every run currently ends AWAITING APPROVAL regardless of this flag',
+      false
+    )
+    .action(
+      (pathArg: string, opts: { brief?: string; name?: string; variants?: string; only?: string; nonInteractive?: boolean }) =>
+        cmdDesignSiteTournament(pathArg, opts)
     );
 
   design
