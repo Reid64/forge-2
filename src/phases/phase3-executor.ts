@@ -166,7 +166,11 @@ import { createExecutionMonitor, executionMonitorSingleton } from '../sentinel-p
 import { buildSkillsContext } from '../skills/index.js';
 import { detectRequiredComponents, ensureComponentsInstalled } from '../ui-engine/shadcn-installer.js';
 import { ensureDesignTokens } from '../ui-engine/design-token-manager.js';
-import { checkComponentAccessibility, type AccessibilityReport } from '../ui-engine/accessibility-checker.js';
+import {
+  checkComponentAccessibility,
+  extractDeclaredColorTokens,
+  type AccessibilityReport,
+} from '../ui-engine/accessibility-checker.js';
 import { stripSharedPreambleDuplicates } from '../engine/shared-preamble.js';
 import { createSupabaseMigrator, type MigrationResult } from '../autonomy/supabase-migrator.js';
 import { BuildHealthMonitor } from '../autonomy/health-monitor.js';
@@ -3789,10 +3793,11 @@ async function executePrompt(
     if (disposition === 'completed' && SHADCN_INSTALL_PROMPT_TYPES.has(entry.prompt_type)) {
       accessibilityIssueCount = 0;
       const tsxFiles = [...changed.created, ...changed.modified].filter((f) => f.endsWith('.tsx'));
+      const declaredColorTokens = extractDeclaredColorTokens(ctx.projectPath);
       for (const relativeFile of tsxFiles) {
         try {
           const code = await readFile(join(ctx.projectPath, relativeFile), 'utf8');
-          const report = checkComponentAccessibility(relativeFile, code);
+          const report = checkComponentAccessibility(relativeFile, code, declaredColorTokens);
           if (report.issues.length > 0) {
             accessibilityIssueCount += report.issues.length;
             log(`[UI ENGINE] ACCESSIBILITY: ${report.issues.length} issues found in ${relativeFile}`);

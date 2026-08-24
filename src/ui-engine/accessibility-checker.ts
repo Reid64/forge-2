@@ -23,6 +23,9 @@
  *   4. `onclick-non-interactive-element`— `onClick` on a bare `<div>`/`<span>`
  *   5. `missing-role-interactive`       — `onClick` on a non-native-interactive element with no `role`
  *   6. `hardcoded-color-contrast`       — a hardcoded hex/rgb(a) color that can't be contrast-verified
+ *                                         (hex values already declared in the project's own
+ *                                         tailwind.config/globals.css design tokens are exempt — see
+ *                                         {@link extractDeclaredColorTokens})
  *   7. `keyboard-navigation-missing`    — `onClick` with no `onKeyDown`/`onKeyPress`/`onKeyUp` sibling
  *   8. `form-field-missing-label`       — `<input>`/`<select>`/`<textarea>` with no associated label
  *   9. `dialog-missing-arialabelledby`  — a dialog/modal element with no accessible name
@@ -76,8 +79,13 @@ interface JsxElement extends JsxTag {
   innerText: string;
 }
 
-/** Native elements that are keyboard-interactive out of the box — never flagged for role/keyboard rules. */
-const NATIVE_INTERACTIVE_TAGS = new Set(['button', 'a', 'input', 'select', 'textarea']);
+/**
+ * Native (or native-resolving) elements that are keyboard-interactive out of the box — never
+ * flagged for role/keyboard rules. `Link`/`link` covers Next.js's `<Link>` component, which
+ * renders a real `<a>` and is already keyboard/role-correct — without it, every Next.js link
+ * false-positives `missing-role-interactive` and `keyboard-navigation-missing`.
+ */
+const NATIVE_INTERACTIVE_TAGS = new Set(['button', 'a', 'link', 'input', 'select', 'textarea']);
 
 /** First line of a (possibly multi-line) JSX snippet, trimmed, for compact issue reporting. */
 function firstLineOf(raw: string): string {
@@ -267,7 +275,65 @@ function checkMissingRoleOnCustomInteractive(tags: JsxTag[]): AccessibilityIssue
 // Rule 6 — color contrast (hardcoded color values that may fail WCAG AA contrast)
 // ---------------------------------------------------------------------------
 
-function checkHardcodedColorContrast(code: string): AccessibilityIssue[] {
+/** Files (relative to project root) that are the canonical source of a project's declared design tokens. */
+const TOKEN_SOURCE_FILES: readonly string[] = [
+  'tailwind.config.ts',
+  'tailwind.config.js',
+  'src/app/globals.css',
+  'app/globals.css',
+  'src/styles/globals.css',
+  'styles/globals.css',
+];
+
+/**
+ * Candidate locations for the project's own design brief — `forge design (site-)tournament`'s
+ * `--brief <path-to-file>` copy of the source brief, when a project inlines its palette as named
+ * prose tokens (e.g. `forest #1F3A2E`, `terracotta #C4663A`) rather than a tailwind.config/CSS
+ * declaration. Any hex literal in one of these files is trusted as an approved token.
+ */
+const BRIEF_SOURCE_FILES: readonly string[] = ['brief.txt', 'brief.md', 'BRIEF.md', 'DESIGN_BRIEF.md', 'PRD.md'];
+
+const HEX_LITERAL_RE = /#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g;
+
+/** Normalize a hex color for palette comparison: lowercase, 3-digit shorthand expanded to 6-digit. */
+function normalizeHex(hex: string): string {
+  const h = hex.toLowerCase();
+  if (h.length === 4) {
+    const r = h[1];
+    const g = h[2];
+    const b = h[3];
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return h;
+}
+
+/**
+ * Extract every hex color literal declared in `projectPath`'s own design-token sources
+ * (`tailwind.config.ts`/`.js`, `globals.css`, and — since a brief may specify its palette as
+ * named inline-hex tokens rather than a config file, e.g. "forest #1F3A2E ... sage #8FA68E ...
+ * terracotta #C4663A" — the project's own brief file) into a normalized set. These ARE the
+ * project's approved palette, so a component using one of these exact hex values is correctly
+ * consuming a declared token, not hardcoding an unverified color. Degrades to an empty set
+ * (never throws) when none of the candidate files exist, matching `detectProjectTokens`'s
+ * posture in `design-token-manager.ts`.
+ */
+export function extractDeclaredColorTokens(projectPath: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const relativePath of [...TOKEN_SOURCE_FILES, ...BRIEF_SOURCE_FILES]) {
+    let source: string;
+    try {
+      source = readFileSync(join(projectPath, relativePath), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const match of source.matchAll(HEX_LITERAL_RE)) {
+      tokens.add(normalizeHex(match[0]));
+    }
+  }
+  return tokens;
+}
+
+function checkHardcodedColorContrast(code: string, declaredColorTokens: Set<string>): AccessibilityIssue[] {
   const issues: AccessibilityIssue[] = [];
   const seen = new Set<string>();
 
@@ -277,6 +343,7 @@ function checkHardcodedColorContrast(code: string): AccessibilityIssue[] {
     const color = match[0];
     if (seen.has(color)) continue;
     seen.add(color);
+    if (declaredColorTokens.has(normalizeHex(color))) continue; // an approved project design token
     issues.push(colorContrastIssue(color));
   }
 
@@ -412,9 +479,16 @@ function clampScore(score: number): number {
 
 /**
  * Run every WCAG 2.1 AA check above against one component's already-read `code`, tagged with
- * `filePath` for the report. Pure and synchronous — never touches the filesystem itself.
+ * `filePath` for the report. Pure and synchronous — never touches the filesystem itself, EXCEPT
+ * that `declaredColorTokens` (see {@link extractDeclaredColorTokens}) is expected to already
+ * reflect the project's own design-token palette so rule 6 can exempt approved tokens; callers
+ * that omit it (or pass an empty set) get the old behavior of flagging every hardcoded hex value.
  */
-export function checkComponentAccessibility(filePath: string, code: string): AccessibilityReport {
+export function checkComponentAccessibility(
+  filePath: string,
+  code: string,
+  declaredColorTokens: Set<string> = new Set()
+): AccessibilityReport {
   const tags = extractJsxTags(code);
 
   const issues: AccessibilityIssue[] = [
@@ -423,7 +497,7 @@ export function checkComponentAccessibility(filePath: string, code: string): Acc
     ...checkMissingHtmlForOnLabels(code),
     ...checkOnClickOnNonInteractiveElements(tags),
     ...checkMissingRoleOnCustomInteractive(tags),
-    ...checkHardcodedColorContrast(code),
+    ...checkHardcodedColorContrast(code, declaredColorTokens),
     ...checkKeyboardNavigation(tags),
     ...checkFormFieldsMissingLabels(tags, code),
     ...checkDialogMissingAriaLabelledby(tags),
@@ -485,6 +559,7 @@ function walkComponentFiles(dir: string): string[] {
 export async function checkProjectAccessibility(projectPath: string): Promise<AccessibilityReport[]> {
   const componentsDir = join(projectPath, 'src', 'components');
   const files = walkComponentFiles(componentsDir);
+  const declaredColorTokens = extractDeclaredColorTokens(projectPath);
 
   const reports: AccessibilityReport[] = [];
   for (const filePath of files) {
@@ -494,7 +569,7 @@ export async function checkProjectAccessibility(projectPath: string): Promise<Ac
     } catch {
       continue; // unreadable file — skip, never throw
     }
-    reports.push(checkComponentAccessibility(relative(projectPath, filePath), code));
+    reports.push(checkComponentAccessibility(relative(projectPath, filePath), code, declaredColorTokens));
   }
   return reports;
 }

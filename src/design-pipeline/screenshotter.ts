@@ -45,7 +45,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { isAbsolute, join } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
-import { checkComponentAccessibility } from '../ui-engine/accessibility-checker.js';
+import { checkComponentAccessibility, extractDeclaredColorTokens } from '../ui-engine/accessibility-checker.js';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -333,7 +333,7 @@ function computeAccessibilityScore(projectPath: string, componentName: string, l
   if (!sourcePath) return null;
   try {
     const code = readFileSync(sourcePath, 'utf8');
-    return checkComponentAccessibility(sourcePath, code).score;
+    return checkComponentAccessibility(sourcePath, code, extractDeclaredColorTokens(projectPath)).score;
   } catch (error) {
     log(`WARNING: accessibility scoring skipped for '${componentName}' (${describeError(error)})`);
     return null;
