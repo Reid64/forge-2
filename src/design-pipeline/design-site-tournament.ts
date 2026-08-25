@@ -289,6 +289,18 @@ function relativeImportPath(fromDir: string, toFileNoExt: string): string {
   return rel.startsWith('.') ? rel : `./${rel}`;
 }
 
+/**
+ * Preview-mount folder name, under `src/app/`, that hosts every generated page's throwaway
+ * preview route for screenshot capture. MUST NOT start with `_` (or be wrapped in `(parens)`) —
+ * Next.js App Router treats an underscore-prefixed (or parenthesized) segment as a "private
+ * folder" and excludes it from routing entirely, so a page.tsx placed there 404s unconditionally
+ * regardless of server health or the page's own code. (Previously `_forge-site-tournament` — every
+ * site-tournament screenshot capture 404'd from day one because of this; confirmed via literal
+ * "This page could not be found" screenshots. `cleanupPreviewDir` removes this folder at the end
+ * of every run, so a normal (routable) name is safe — it's never left mounted in a real build.)
+ */
+const PREVIEW_MOUNT_DIR = 'forge-site-tournament-preview';
+
 function buildPreviewPageSource(pageDir: string, componentFilePathNoExt: string, componentName: string): string {
   const importPath = relativeImportPath(pageDir, componentFilePathNoExt);
   return (
@@ -335,7 +347,7 @@ export class DesignSiteTournamentEngine {
 
     const intelligence = await computeSiteDesignIntelligence(siteName, projectPath, briefText, pagePlan, this.log);
 
-    const previewDir = join(projectPath, 'src', 'app', '_forge-site-tournament', runId);
+    const previewDir = join(projectPath, 'src', 'app', PREVIEW_MOUNT_DIR, runId);
     let devServerPort: number | null = null;
     if (this.screenshotter) {
       devServerPort = await this.screenshotter.startDevServer(projectPath).catch(() => null);
@@ -473,7 +485,7 @@ export class DesignSiteTournamentEngine {
       return [];
     }
 
-    const route = `/_forge-site-tournament/${previewDir.split(/[\\/]/).pop()}/${direction.id}/${page.slug}`;
+    const route = `/${PREVIEW_MOUNT_DIR}/${previewDir.split(/[\\/]/).pop()}/${direction.id}/${page.slug}`;
     const url = `http://localhost:${devServerPort}${route}`;
     try {
       return await this.screenshotter.captureComponent(url, {
