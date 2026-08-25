@@ -24,6 +24,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import ts from 'typescript';
 
 import { runClaude } from '../engine/claude-runner.js';
 import { buildSkillsContext } from '../skills/index.js';
@@ -142,7 +143,13 @@ function buildGenerationPrompt(spec: ComponentSpec): string {
       '## OUTPUT FORMAT',
       '',
       `Return ONLY the complete TypeScript/TSX source for the \`${spec.name}\` component, as a`,
-      'single fenced code block (```tsx ... ```). No explanation before or after the code block.',
+      'single fenced code block (```tsx ... ```). No explanation before or after the code block —',
+      'not even a short confirmation. If you use a file-editing tool to write the file yourself,',
+      `still repeat the exact same source back as a fenced code block in your final response —`,
+      'the caller parses your final response text, not the file you wrote, so a response with no',
+      'code fence is treated as a failed generation even if the file on disk is correct.',
+      `Export the component as \`export function ${spec.name}(...)\` — a NAMED export, not`,
+      '`export default` (this file is imported by name elsewhere, not as a page).',
     ].join('\n')
   );
 
@@ -159,6 +166,58 @@ function extractComponentCode(stdout: string): string {
   const fenceMatch = /```(?:tsx|ts|typescript)?\r?\n([\s\S]*?)```/.exec(stdout);
   if (fenceMatch?.[1]) return fenceMatch[1].trim();
   return stdout.trim();
+}
+
+/** Escape regex metacharacters so a component name can be embedded in a `RegExp` literally. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Syntax-validate `code` as a real TSX component before it's ever written to disk — catches the
+ * case where {@link extractComponentCode} found no fenced code block and fell back to the raw
+ * stdout, which (observed in production: `VeteransVariantA`/`AiGrantWriterVariantA`/
+ * `HumanServicesVariantA`/`CompanyVariantA` all hit this) is often not a generation failure at
+ * all but `claude -p --dangerously-skip-permissions` (Contract 5) using its OWN file-editing
+ * tools to write the component directly, then returning only a natural-language confirmation
+ * ("I've written `src/components/X.tsx`...") as its final response — prose, not code, silently
+ * captured as `code` and then written over whatever (possibly correct) file the tool call had
+ * already produced. Two checks, both cheap and dependency-free (uses the `typescript` package
+ * already in this repo, syntax-only — no type-checking, no project Program needed):
+ *   1. `code` must parse as valid TS/TSX source with zero syntax errors.
+ *   2. `code` must actually export something named `componentName` (default or named) — syntactically
+ *      valid TS that ISN'T the component (e.g. a stray comment block) must not pass either.
+ * Never throws; returns a reason string on failure so the caller can report a real, specific
+ * error instead of a generic "no usable code" (Iron Law 3 — never fabricate a result, and that
+ * includes never fabricating a vague reason for a real, diagnosable failure).
+ */
+function validateGeneratedCode(code: string, componentName: string): { valid: true } | { valid: false; reason: string } {
+  const { diagnostics } = ts.transpileModule(code, {
+    compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.Latest },
+    reportDiagnostics: true,
+    fileName: `${componentName}.tsx`,
+  });
+  const syntaxErrors = (diagnostics ?? []).filter((d) => d.category === ts.DiagnosticCategory.Error);
+  if (syntaxErrors.length > 0) {
+    const first = syntaxErrors[0]!;
+    const message = ts.flattenDiagnosticMessageText(first.messageText, ' ');
+    const at = first.start !== undefined ? ` at offset ${first.start}` : '';
+    return {
+      valid: false,
+      reason:
+        `does not parse as valid TS/TSX (${message}${at}) — this is the exact shape of the agent ` +
+        `returning a natural-language confirmation instead of a fenced code block`,
+    };
+  }
+  const exportsComponent = new RegExp(
+    `export\\s+(default\\s+)?(function|class)\\s+${escapeRegExp(componentName)}\\b|` +
+      `export\\s+(default\\s+)?const\\s+${escapeRegExp(componentName)}\\b|` +
+      `export\\s*\\{[^}]*\\b${escapeRegExp(componentName)}\\b[^}]*\\}`
+  ).test(code);
+  if (!exportsComponent) {
+    return { valid: false, reason: `parses as TS/TSX but exports no symbol named '${componentName}'` };
+  }
+  return { valid: true };
 }
 
 /**
@@ -314,6 +373,14 @@ export class UIComponentGenerator {
     const code = extractComponentCode(result.stdout);
     if (code === '') {
       throw new Error(`UIComponentGenerator: generation of '${spec.name}' produced no usable code`);
+    }
+
+    // 4b) Validate BEFORE writing anything — never let prose (or any non-component TS/TSX) reach
+    // disk as if it were the generated component (Iron Law 3). See validateGeneratedCode's own
+    // doc comment for the real failure mode this guards against.
+    const validation = validateGeneratedCode(code, spec.name);
+    if (!validation.valid) {
+      throw new Error(`UIComponentGenerator: generation of '${spec.name}' produced invalid output — ${validation.reason}`);
     }
 
     // 5) Write the component to projectPath/src/components/{spec.name}.tsx.

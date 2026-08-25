@@ -301,10 +301,31 @@ function relativeImportPath(fromDir: string, toFileNoExt: string): string {
  */
 const PREVIEW_MOUNT_DIR = 'forge-site-tournament-preview';
 
-function buildPreviewPageSource(pageDir: string, componentFilePathNoExt: string, componentName: string): string {
+/**
+ * `buildGenerationPrompt` (`ui-engine/component-generator.ts`) never pinned down whether a
+ * generated page uses a default or named export, so real generated pages are a real mix of both
+ * (confirmed across the 23 pages already on disk in a downstream project: 14 default-export, 5
+ * named-export) — a preview wrapper hardcoding one import style would compile-error for whichever
+ * convention it didn't guess. Sniffing `componentCode` for a top-level `export default` and
+ * switching import style accordingly means this wrapper works for either, without needing every
+ * already-generated file rewritten to agree on one convention.
+ */
+function usesDefaultExport(componentCode: string): boolean {
+  return /^export\s+default\b/m.test(componentCode);
+}
+
+function buildPreviewPageSource(
+  pageDir: string,
+  componentFilePathNoExt: string,
+  componentName: string,
+  componentCode: string
+): string {
   const importPath = relativeImportPath(pageDir, componentFilePathNoExt);
+  const importStatement = usesDefaultExport(componentCode)
+    ? `import ${componentName} from '${importPath}';`
+    : `import { ${componentName} } from '${importPath}';`;
   return (
-    `import { ${componentName} } from '${importPath}';\n\n` +
+    `${importStatement}\n\n` +
     `export default function ForgeSiteTournamentPreviewPage() {\n` +
     `  return <${componentName} />;\n` +
     `}\n`
@@ -479,7 +500,11 @@ export class DesignSiteTournamentEngine {
     try {
       mkdirSync(pageDir, { recursive: true });
       const componentFileNoExt = component.filePath.replace(/\.tsx$/, '');
-      writeFileSync(join(pageDir, 'page.tsx'), buildPreviewPageSource(pageDir, componentFileNoExt, component.spec.name), 'utf8');
+      writeFileSync(
+        join(pageDir, 'page.tsx'),
+        buildPreviewPageSource(pageDir, componentFileNoExt, component.spec.name, component.code),
+        'utf8'
+      );
     } catch (error) {
       this.log(`WARNING: [SITE TOURNAMENT] could not write preview page for '${direction.name}'/'${page.slug}' (${describeError(error)})`);
       return [];
