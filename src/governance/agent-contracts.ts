@@ -152,7 +152,7 @@ const BUILD_AGENT: AgentContract = {
   description:
     'The claude subprocess that produces a prompt\'s actual code/content changes, run once per ' +
     'Phase 3 prompt in the target project root and committed to a feature branch by GitManager.',
-  writablePathPatterns: ['**/*', ...BUILD_AGENT_HOUSEKEEPING_GLOBS, 'vitest.config.*', 'package.json', 'pnpm-lock.yaml'],
+  writablePathPatterns: ['**/*', ...BUILD_AGENT_HOUSEKEEPING_GLOBS, 'vitest.config.*', 'package.json', 'pnpm-lock.yaml', 'TOOLCHAIN.md'],
   deniedPathPatterns: DEFAULT_SHARED_CANONICAL_GLOBS.filter((glob) => !BUILD_AGENT_HOUSEKEEPING_GLOBS.includes(glob)),
   writesOutsideProjectRoot: false,
   canInvokeGit: false,
@@ -462,5 +462,6 @@ export function getAgentContract(id: AgentId): AgentContract | undefined {
 
 /** Every registered {@link AgentId}, for iteration/tests. */
 export const ALL_AGENT_IDS: readonly AgentId[] = Object.keys(AGENT_CONTRACTS) as AgentId[];
+
 
 
