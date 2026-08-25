@@ -140,6 +140,8 @@ function lineNumberAt(content: string, index: number): number {
 // ---------------------------------------------------------------------------
 
 function checkThinImplementation(filePath: string, content: string): OutputViolation[] {
+  // Test files are intentionally focused and concise; skip this check
+  if (filePath.includes('.test.ts') || filePath.includes('.spec.ts')) return [];
   const realLines = countRealLines(content);
   if (realLines >= MINIMUM_REAL_LINES) return [];
 
@@ -439,3 +441,4 @@ export function createPostOutputValidator(): PostOutputValidator {
 }
 
 export default PostOutputValidator;
+
