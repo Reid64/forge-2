@@ -132,14 +132,48 @@ const SIDE_EFFECT_IMPORT_RE = /\bimport\s+['"]([^'"]+)['"]/g;
 const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 const REQUIRE_RE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
-/** Extracts every raw (unresolved) import-specifier string referenced anywhere in `content`. */
+/**
+ * True if `line[0..index)` leaves us inside an open `'`/`"`/`` ` `` string literal at `index` — a
+ * simple single-line string-state scanner (handles `\`-escapes), not a full tokenizer (does not
+ * track a template literal that itself spans multiple lines, or comments). Used to reject a regex
+ * match that only "looks like" an import/require because it sits inside a string/template literal
+ * in the scanned file's own source — e.g. a string containing the literal text `'import '`
+ * (`dead-code-detector.ts`'s own `trimmed.startsWith('import ')` check), or a template literal
+ * like `` `import "${x}" from '${y}'` `` (an error-message string, not a real import statement) —
+ * both of which previously produced fabricated "missing dependency" findings for package names
+ * like `) && !trimmed.startsWith(` or `${imp.source}` (Finding B-4).
+ */
+function isInsideStringLiteral(line: string, index: number): boolean {
+  let quote: string | null = null;
+  for (let i = 0; i < index; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === '\\') {
+        i++; // skip the escaped character, it can't close/toggle the string
+        continue;
+      }
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+    }
+  }
+  return quote !== null;
+}
+
+/** Extracts every raw (unresolved) import-specifier string referenced anywhere in `content`,
+ *  skipping any match that sits inside a string/template literal rather than a real statement. */
 function extractImportSpecifiers(content: string): string[] {
   const specifiers: string[] = [];
   for (const re of [FROM_SPECIFIER_RE, SIDE_EFFECT_IMPORT_RE, DYNAMIC_IMPORT_RE, REQUIRE_RE]) {
     re.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = re.exec(content))) {
-      if (match[1]) specifiers.push(match[1]);
+      if (!match[1]) continue;
+      const lineStart = content.lastIndexOf('\n', match.index) + 1;
+      const lineEndIdx = content.indexOf('\n', match.index);
+      const line = content.slice(lineStart, lineEndIdx === -1 ? content.length : lineEndIdx);
+      if (isInsideStringLiteral(line, match.index - lineStart)) continue;
+      specifiers.push(match[1]);
     }
   }
   return specifiers;
