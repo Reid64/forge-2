@@ -66,10 +66,34 @@ export async function runReconcile(projectName: string, input: ReconcileInput, n
 }
 
 // ── QUEUE GENERATOR ───────────────────────────────────────────────────────────
-export interface QueuePrompt { id: string; tier: string; name: string; dependsOn: string[]; prompt: string; }
+/** Mirrors `src/engine/queue-generator.ts`'s `PromptType` — kept as a literal union here (not
+ * imported) since retrofit's queue.yaml is hand-serialized, not built via `serializeQueue`. */
+export type RetrofitPromptType = 'schema' | 'auth' | 'api' | 'ui' | 'feature' | 'agent' | 'test' | 'deploy';
+export interface QueuePrompt { id: string; tier: string; name: string; dependsOn: string[]; prompt: string; promptType: RetrofitPromptType; }
 export interface GeneratedQueue { buildId: string; projectName: string; totalPrompts: number; tiers: { critical_fixes: number; warn_fixes_and_features: number; enterprise_patterns: number }; prompts: QueuePrompt[]; generatedAt: string; }
 
 const sid = (prefix: string, i: number) => `${prefix}-${String(i+1).padStart(3,'0')}`;
+
+/**
+ * Infer a {@link RetrofitPromptType} from a finding's free-text category/message (or an
+ * enterprise pattern name) via keyword match, defaulting to `'feature'`. `queue.yaml`'s
+ * `prompt_type` is a REQUIRED field (`phase3-executor.ts`'s `coerceQueueEntry` silently SKIPS
+ * any entry missing it) — without this, every retrofit-generated prompt was unusable by a
+ * subsequent `forge build --use-existing-queue`, and the downstream skills-injection call
+ * (`buildSkillsContext(ctx.projectPath, promptText, entry.prompt_type)`) degraded to its
+ * weakest whole-library fallback for lack of a `prompt_type` to match against.
+ */
+function inferPromptType(text: string): RetrofitPromptType {
+  const t = text.toLowerCase();
+  if (/\b(schema|migration|database|table|column|rls|sql)\b/.test(t)) return 'schema';
+  if (/\b(auth|jwt|session|login|rbac|permission)\b/.test(t)) return 'auth';
+  if (/\b(api|route|endpoint|webhook)\b/.test(t)) return 'api';
+  if (/\b(ui|component|accessibility|a11y|wcag|css|style|design)\b/.test(t)) return 'ui';
+  if (/\b(agent|orchestrat)\b/.test(t)) return 'agent';
+  if (/\b(test|coverage|spec)\b/.test(t)) return 'test';
+  if (/\b(deploy|ci|cd|pipeline|vercel|docker)\b/.test(t)) return 'deploy';
+  return 'feature';
+}
 
 export function generateRetrofitQueue(projectName: string, projectPath: string, reconcile: ReconcileOutput, outputPath: string, deepAnalysisContext?: string): GeneratedQueue {
   const prompts: QueuePrompt[] = [];
@@ -81,15 +105,15 @@ export function generateRetrofitQueue(projectName: string, projectPath: string, 
   // generated prompt so agents see it alongside their specific fix instructions.
   const contextSuffix = deepAnalysisContext ? `\n\n${deepAnalysisContext}` : '';
 
-  criticals.forEach((f,i) => prompts.push({ id: sid('RC',i), tier: 'CRITICAL', name: `Fix CRITICAL: ${f.category} — ${f.message.substring(0,60)}`, dependsOn: i>0?[sid('RC',i-1)]:[], prompt: `Fix CRITICAL issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}${f.file?'\nFILE: '+f.file:''}\n\nFix completely. Run: pnpm tsc --noEmit — must pass 0 errors.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
-  warns.forEach((f,i) => { const prior = i>0?[sid('RW',i-1)]:criticals.length>0?[sid('RC',criticals.length-1)]:[];prompts.push({ id: sid('RW',i), tier: 'WARN', name: `Fix WARN: ${f.category}`, dependsOn: prior, prompt: `Fix WARN issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}\n\nFix cleanly. Run: pnpm tsc --noEmit.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }); });
+  criticals.forEach((f,i) => prompts.push({ id: sid('RC',i), tier: 'CRITICAL', name: `Fix CRITICAL: ${f.category} — ${f.message.substring(0,60)}`, dependsOn: i>0?[sid('RC',i-1)]:[], promptType: inferPromptType(`${f.category} ${f.message}`), prompt: `Fix CRITICAL issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}${f.file?'\nFILE: '+f.file:''}\n\nFix completely. Run: pnpm tsc --noEmit — must pass 0 errors.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
+  warns.forEach((f,i) => { const prior = i>0?[sid('RW',i-1)]:criticals.length>0?[sid('RC',criticals.length-1)]:[];prompts.push({ id: sid('RW',i), tier: 'WARN', name: `Fix WARN: ${f.category}`, dependsOn: prior, promptType: inferPromptType(`${f.category} ${f.message}`), prompt: `Fix WARN issue in ${projectPath}.\n\nISSUE (${f.category}): ${f.message}\n\nFix cleanly. Run: pnpm tsc --noEmit.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }); });
   const lastId = warns.length>0?sid('RW',warns.length-1):criticals.length>0?sid('RC',criticals.length-1):undefined;
-  patterns.forEach((p,i) => prompts.push({ id: sid('RE',i), tier: 'ENTERPRISE', name: `Inject: ${p}`, dependsOn: i>0?[sid('RE',i-1)]:lastId?[lastId]:[], prompt: `Inject '${p}' pattern into ${projectPath}.\n\nImplement for Next.js/TypeScript/Supabase.\nRun: pnpm tsc --noEmit && pnpm build.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
+  patterns.forEach((p,i) => prompts.push({ id: sid('RE',i), tier: 'ENTERPRISE', name: `Inject: ${p}`, dependsOn: i>0?[sid('RE',i-1)]:lastId?[lastId]:[], promptType: inferPromptType(p), prompt: `Inject '${p}' pattern into ${projectPath}.\n\nImplement for Next.js/TypeScript/Supabase.\nRun: pnpm tsc --noEmit && pnpm build.\nUpdate STATE_OF_THE_BUILD.md and SESSION_STATE.md.${contextSuffix}` }));
 
   const queue: GeneratedQueue = { buildId: `forge-retrofit-${projectName}-${Date.now()}`, projectName, totalPrompts: prompts.length, tiers: { critical_fixes: criticals.length, warn_fixes_and_features: warns.length, enterprise_patterns: patterns.length }, prompts, generatedAt: new Date().toISOString() };
   mkdirSync(outputPath, { recursive: true });
   const lines = [`project: ${projectName}`,'','governance:','  - BLUEPRINT.md','  - STATE_OF_THE_BUILD.md','  - SESSION_STATE.md','  - SCHEMA_REGISTRY.md','  - BEHAVIORAL_CONTRACTS.md','  - AGENTS.md','','settings:','  build_model: claude-sonnet-4-6','  max_retries: 3','','prompts:'];
-  for (const p of prompts) { lines.push(`  - id: ${p.id}`); lines.push(`    name: "${p.name.replace(/"/g,'\\"')}"`); if (p.dependsOn.length) { lines.push('    depends_on:'); for (const d of p.dependsOn) lines.push(`      - ${d}`); } lines.push('    prompt: |'); for (const l of p.prompt.split('\n')) lines.push(`      ${l}`); lines.push(''); }
+  for (const p of prompts) { lines.push(`  - id: ${p.id}`); lines.push(`    name: "${p.name.replace(/"/g,'\\"')}"`); lines.push(`    prompt_type: ${p.promptType}`); if (p.dependsOn.length) { lines.push('    depends_on:'); for (const d of p.dependsOn) lines.push(`      - ${d}`); } lines.push('    prompt: |'); for (const l of p.prompt.split('\n')) lines.push(`      ${l}`); lines.push(''); }
   writeFileSync(join(outputPath, 'queue.yaml'), lines.join('\n'), 'utf8');
   return queue;
 }

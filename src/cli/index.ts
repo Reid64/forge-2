@@ -54,7 +54,7 @@ import { dump as dumpYaml, load as parseYaml } from 'js-yaml';
 import { loadConfig, describeConfig, type EnvConfig } from './config.js';
 
 import { runPhase0Scout, type Phase0Result } from '../phases/phase0-scout.js';
-import { runPhase1aPrd } from '../phases/phase1a-prd.js';
+import { runPhase1aPrd, deriveHeuristicPrdMetadata } from '../phases/phase1a-prd.js';
 import { runPhase1bArchitect, type ArchitectureDesign } from '../phases/phase1b-architect.js';
 import { runPhase2Governance } from '../phases/phase2-governance.js';
 import { generateQueue, type QueueEntry } from '../engine/queue-generator.js';
@@ -2105,18 +2105,19 @@ async function cmdEstimate(pathArg: string, opts: { idea?: string; prd?: string 
   // the stack fingerprint to scope the prediction.
   const scout = await runScout(projectPath, { autoInstall: false, autoFix: false, writeToolchainFile: false });
 
-  // A lightweight PRD pass derives the feature/table/agent scope (writes nothing).
+  // A pure heuristic derives the feature/table/agent scope — no model call. `forge estimate`
+  // documents itself as "Cost/time estimate without building"; it previously called
+  // runPhase1aPrd, the same real Phase 1A step `forge build` uses, which performs a real, billed
+  // LLM generation pass regardless of --idea vs --prd (Finding K-1).
   const idea = opts.prd ? await readFile(resolve(opts.prd), 'utf8') : opts.idea ?? '';
-  const prd = await withSpinner('Phase 1A — PRD scope', (log) =>
-    runPhase1aPrd(projectPath, idea, { stackFingerprint: scout.stackFingerprint, writePrdFile: false, log })
-  );
+  const metadata = deriveHeuristicPrdMetadata(idea, scout.stackFingerprint);
 
-  const featureCount = Math.max(prd.metadata.featureCount, 1);
+  const featureCount = Math.max(metadata.featureCount, 1);
   const features: FeatureSpec[] = Array.from({ length: featureCount }, (_, i) => ({ name: `feature-${i + 1}` }));
 
   const estimate = await withSpinner('Cost Estimator', (log) =>
     estimateBuildCost(
-      { stackFingerprint: scout.stackFingerprint, features, tableCount: prd.metadata.tableEstimate, agentCount: prd.metadata.agentEstimate },
+      { stackFingerprint: scout.stackFingerprint, features, tableCount: metadata.tableEstimate, agentCount: metadata.agentEstimate },
       { log }
     )
   );

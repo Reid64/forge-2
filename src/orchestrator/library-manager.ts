@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { dump as dumpYaml, load as parseYaml } from 'js-yaml';
 
 import { nowIso } from '../memory/client.js';
@@ -39,9 +39,17 @@ function errMsg(error: unknown): string {
 }
 
 export class LibraryManager {
-  /** `<baseDir>/library/<project>` — the FORGE 1.0 per-project library layout. */
+  /**
+   * `<baseDir>/library/<project>` — the FORGE 1.0 per-project library layout. `project` is meant
+   * to be a bare project-name segment, not a filesystem path: a real absolute path here (e.g. a
+   * user passing the same `<project-path>` argument every other FORGE command accepts) would
+   * `join` into an illegal nested path (an embedded drive-letter colon on Windows) and crash
+   * `scaffold`/`add`'s `mkdirSync`, or silently resolve to a garbled, always-empty directory for
+   * `list`/`validate` — so an absolute `project` is normalized to its basename instead.
+   */
   getLibraryPath(baseDir: string, project: string): string {
-    return join(baseDir, 'library', project);
+    const name = isAbsolute(project) ? basename(project) : project;
+    return join(baseDir, 'library', name);
   }
 
   /** Create `libraryPath` (and any missing parents) if it does not already exist. */
