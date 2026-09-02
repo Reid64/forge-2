@@ -1,39 +1,38 @@
 /**
- * FORGE 2.0 — Schema Validator tests (post-queue session #45).
+ * FORGE 2.0 — Schema Validator tests.
  *
- * Pure `node:test` — no network, no Build Memory. The failure sink (store) and the
- * clock are injected, so every assertion is deterministic and offline.
+ * Rewritten against the real `src/tools/schema-validator.ts` API (Finding A-2 / audit item 2):
+ * the previous version of this file imported 12 names — `validate`, `JsonObjectSchema`,
+ * `MEMORY_TABLE_SCHEMAS`, `ValidationReport`, `rowValidator`, etc. — that never existed anywhere
+ * in the module (confirmed via `git log --follow`: no commit ever removed them). The module
+ * shipped a narrower, purpose-built API instead: three non-throwing boundary validators
+ * (`validateConfigFile`/`validateApiResponse`/`validateMemoryWrite`), a handful of domain Zod
+ * schemas, and a separate live-vs-TypeScript schema-drift detector. This file tests that real API.
  *
- * HOW TO RUN (from a permitted session):
- *   pnpm add zod            # zod is statically imported — required for compile + run
- *   node --import tsx --test tests/schema-validator.test.ts
+ * Pure `node:test` — no network for the validator wrappers (they never throw and never touch the
+ * network); `detectSchemaDrift` is exercised with a monkey-patched `globalThis.fetch` and a real
+ * temp file (it has no injectable fetch/fs seam, unlike every other collaborator in this codebase).
  *
- * Node 20 cannot execute TypeScript natively and src/ uses NodeNext `.js` import
- * specifiers that resolve to `.ts` sources — the `tsx` loader handles both.
+ * HOW TO RUN
+ *     node --import tsx --test tests/schema-validator.test.ts
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
-  validate,
-  validateAndReport,
-  validateApiResponse,
-  validateConfigFile,
-  validateMemoryWrite,
-  validateMemoryRow,
-  rowValidator,
-  formatIssues,
-  summarizeIssues,
-  ValidationReport,
-  BuildRunSchema,
-  ProductionTelemetrySchema,
-  JsonSchema,
-  JsonObjectSchema,
-  MEMORY_TABLE_SCHEMAS,
-  MEMORY_INSERT_SCHEMAS,
   z,
-  type ValidationFailureRecord,
+  validateConfigFile,
+  validateApiResponse,
+  validateMemoryWrite,
+  BuildRunSchema,
+  AnthropicMessagesResponseSchema,
+  OpenAIChatResponseSchema,
+  detectSchemaDrift,
+  type ValidationResult,
 } from '../src/tools/schema-validator.js';
 
 // --- fixtures ---------------------------------------------------------------
@@ -55,6 +54,8 @@ const validBuildRun = {
   machine_id: 'machine-x',
   toolchain_manifest: {},
   governance_hash: null,
+  queue_hash: null,
+  bundle_sizes: null,
   sentinel_interventions: 0,
   autonomous_recovery_mode: false,
   parallel_prompts_used: false,
@@ -62,267 +63,224 @@ const validBuildRun = {
   created_at: '2026-06-11T00:00:00.000Z',
 };
 
-/** Capturing store + clock for deterministic failure assertions. */
-function makeStore(): {
-  store: (r: ValidationFailureRecord) => Promise<void>;
-  records: ValidationFailureRecord[];
-} {
-  const records: ValidationFailureRecord[] = [];
-  return {
-    records,
-    store: async (r: ValidationFailureRecord): Promise<void> => {
-      records.push(r);
-    },
-  };
-}
+// --- validateConfigFile -------------------------------------------------------
 
-/** Let the fire-and-forget store microtask/macrotask settle. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-const fixedClock = (): string => '2026-06-11T12:00:00.000Z';
-
-// --- validate(): core -------------------------------------------------------
-
-test('validate() accepts a well-formed row', () => {
-  const result = validate(BuildRunSchema, validBuildRun);
+test('validateConfigFile accepts a well-formed value', () => {
+  const result = validateConfigFile(BuildRunSchema, validBuildRun, { context: 'unit:config', report: false });
   assert.equal(result.ok, true);
-  if (result.ok) {
-    assert.equal(result.data.project_name, 'tarritrix');
-    assert.deepEqual(result.issues, []);
-  }
+  assert.deepEqual(result.issues, []);
 });
 
-test('validate() rejects a wrong-typed field with a clear, path-pointed issue', () => {
+test('validateConfigFile rejects a wrong-typed field with a path-pointed issue', () => {
   const bad = { ...validBuildRun, total_prompts: 'thirty' };
-  const result = validate(BuildRunSchema, bad);
+  const result = validateConfigFile(BuildRunSchema, bad, { context: 'unit:config', report: false });
   assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.ok(result.issues.some((i) => i.path === 'total_prompts'));
-    assert.match(result.error, /total_prompts/);
-  }
+  assert.ok(result.issues.some((i) => i.path === 'total_prompts'));
 });
 
-test('validate() rejects an out-of-set enum value', () => {
+test('validateConfigFile rejects an out-of-set enum value', () => {
   const bad = { ...validBuildRun, status: 'in_progress' };
-  const result = validate(BuildRunSchema, bad);
+  const result = validateConfigFile(BuildRunSchema, bad, { context: 'unit:config', report: false });
   assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.ok(result.issues.some((i) => i.path === 'status'));
-  }
+  assert.ok(result.issues.some((i) => i.path === 'status'));
 });
 
-test('validate() rejects a missing required field', () => {
+test('validateConfigFile rejects a missing required field', () => {
   const { machine_id, ...withoutMachine } = validBuildRun;
   void machine_id;
-  const result = validate(BuildRunSchema, withoutMachine);
+  const result = validateConfigFile(BuildRunSchema, withoutMachine, { context: 'unit:config', report: false });
   assert.equal(result.ok, false);
 });
 
-test('validate() never throws on non-object input', () => {
+test('validateConfigFile never throws on non-object input', () => {
   for (const input of [null, undefined, 42, 'x', []]) {
-    const result = validate(BuildRunSchema, input);
+    const result = validateConfigFile(BuildRunSchema, input, { context: 'unit:config', report: false });
     assert.equal(result.ok, false);
   }
 });
 
-// --- Json / JsonObject recursion -------------------------------------------
-
-test('JsonSchema accepts deeply nested JSON and rejects non-JSON', () => {
-  assert.equal(validate(JsonSchema, { a: [1, 'two', { b: null }, false] }).ok, true);
-  assert.equal(validate(JsonSchema, 'plain string').ok, true);
-  assert.equal(validate(JsonSchema, () => 1).ok, false);
-  assert.equal(validate(JsonSchema, undefined).ok, false);
+test('validateConfigFile marks the root path as (root) for a top-level type mismatch', () => {
+  const ConfigSchema = z.object({ port: z.number() });
+  const result = validateConfigFile(ConfigSchema, 'not an object', { context: 'unit:config', report: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.issues[0]?.path, '(root)');
 });
 
-test('JsonObjectSchema requires an object, not an array or scalar', () => {
-  assert.equal(validate(JsonObjectSchema, { k: 1 }).ok, true);
-  assert.equal(validate(JsonObjectSchema, [1, 2]).ok, false);
-  assert.equal(validate(JsonObjectSchema, 'x').ok, false);
+test('validateConfigFile joins nested paths with dots', () => {
+  const NestedSchema = z.object({ outer: z.object({ inner: z.number() }) });
+  const result = validateConfigFile(NestedSchema, { outer: { inner: 'no' } }, { context: 'unit:config', report: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.issues[0]?.path, 'outer.inner');
 });
 
-// --- issue formatting -------------------------------------------------------
-
-test('formatIssues marks the root path as (root) and joins nested paths with dots', () => {
-  const scalar = JsonObjectSchema.safeParse('not an object');
-  assert.equal(scalar.success, false);
-  if (!scalar.success) {
-    assert.equal(formatIssues(scalar.error)[0]?.path, '(root)');
-  }
-
-  const nested = z.object({ outer: z.object({ inner: z.number() }) }).safeParse({
-    outer: { inner: 'no' },
-  });
-  assert.equal(nested.success, false);
-  if (!nested.success) {
-    assert.equal(formatIssues(nested.error)[0]?.path, 'outer.inner');
-  }
+test('validateConfigFile with report unset (default true) still returns the result without throwing', () => {
+  // report defaults to true — this exercises the real logger.warn() code path, not just the
+  // report:false short-circuit every other test in this file uses to keep output quiet.
+  const result: ValidationResult = validateConfigFile(BuildRunSchema, { id: 'x' }, { context: 'unit:config-default' });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.length > 0);
 });
 
-test('summarizeIssues caps the list and reports an overflow count', () => {
-  const issues = Array.from({ length: 8 }, (_unused, i) => ({
-    path: `f${i}`,
-    code: 'invalid_type',
-    message: 'bad',
-  }));
-  const summary = summarizeIssues(issues);
-  assert.match(summary, /8 validation error/);
-  assert.match(summary, /\+3 more/);
-  assert.equal(summarizeIssues([]), 'valid');
-});
+// --- validateApiResponse ------------------------------------------------------
 
-// --- external API response (integration point 1) ----------------------------
-
-test('validateApiResponse logs a failure to the injected store, fire-and-forget', async () => {
-  const { store, records } = makeStore();
+test('validateApiResponse reports issues for a malformed body', () => {
   const result = validateApiResponse(BuildRunSchema, { id: 'x' }, {
     context: 'unit:api',
     target: 'fake-service',
-    store,
-    clock: fixedClock,
-  });
-  assert.equal(result.ok, false);
-  await tick();
-  assert.equal(records.length, 1);
-  assert.equal(records[0]?.source, 'api_response');
-  assert.equal(records[0]?.target, 'fake-service');
-  assert.equal(records[0]?.occurredAt, '2026-06-11T12:00:00.000Z');
-  assert.ok((records[0]?.issueCount ?? 0) > 0);
-});
-
-test('validateApiResponse does NOT log when the response is valid', async () => {
-  const { store, records } = makeStore();
-  const result = validateApiResponse(BuildRunSchema, validBuildRun, {
-    context: 'unit:api',
-    store,
-  });
-  assert.equal(result.ok, true);
-  await tick();
-  assert.equal(records.length, 0);
-});
-
-test('report:false suppresses logging even on failure', async () => {
-  const { store, records } = makeStore();
-  validateAndReport('internal', BuildRunSchema, {}, {
-    context: 'unit:silent',
-    store,
     report: false,
   });
-  await tick();
-  assert.equal(records.length, 0);
-});
-
-// --- config file (integration point 2) --------------------------------------
-
-test('validateConfigFile returns a clear operator-facing message', async () => {
-  const ConfigSchema = z.object({
-    port: z.number(),
-    name: z.string(),
-  });
-  const { store, records } = makeStore();
-  const result = validateConfigFile(ConfigSchema, { port: 'nope', name: 7 }, {
-    context: 'providers.yaml',
-    store,
-  });
   assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.match(result.error, /port/);
-  }
-  await tick();
-  assert.equal(records[0]?.source, 'config_file');
+  assert.ok(result.issues.length > 0);
 });
 
-// --- Build Memory write (integration point 3) -------------------------------
-
-test('validateMemoryWrite accepts a legitimately-partial insert payload', async () => {
-  const { store, records } = makeStore();
-  // A telemetry insert omits id/created_at (DB defaults) — must still validate.
-  const result = validateMemoryWrite(
-    'production_telemetry',
-    { project_name: 'forge', event_type: 'usage', event_data: { k: 1 } },
-    { store }
-  );
+test('validateApiResponse accepts a well-formed body', () => {
+  const result = validateApiResponse(BuildRunSchema, validBuildRun, { context: 'unit:api', report: false });
   assert.equal(result.ok, true);
-  await tick();
-  assert.equal(records.length, 0);
 });
 
-test('validateMemoryWrite rejects a wrong-typed present field', async () => {
-  const { store, records } = makeStore();
-  const result = validateMemoryWrite(
-    'build_runs',
-    { project_name: 'forge', total_prompts: 'lots' },
-    { store }
-  );
+test('validateApiResponse: AnthropicMessagesResponseSchema is deliberately lenient (sparse body still valid)', () => {
+  const sparse = { id: 'msg_1' };
+  const result = validateApiResponse(AnthropicMessagesResponseSchema, sparse, { context: 'unit:anthropic', report: false });
+  assert.equal(result.ok, true);
+});
+
+test('validateApiResponse: AnthropicMessagesResponseSchema still rejects a wrong-typed known field', () => {
+  const bad = { usage: { input_tokens: 'lots' } };
+  const result = validateApiResponse(AnthropicMessagesResponseSchema, bad, { context: 'unit:anthropic', report: false });
   assert.equal(result.ok, false);
-  await tick();
-  assert.equal(records[0]?.source, 'memory_write');
-  assert.equal(records[0]?.target, 'build_runs');
 });
 
-test('validateMemoryRow validates a full row against its table schema', () => {
-  assert.equal(validateMemoryRow('build_runs', validBuildRun).ok, true);
-  assert.equal(validateMemoryRow('build_runs', { id: 'only' }).ok, false);
+test('validateApiResponse: OpenAIChatResponseSchema is deliberately lenient (sparse body still valid)', () => {
+  const sparse = { id: 'chatcmpl_1' };
+  const result = validateApiResponse(OpenAIChatResponseSchema, sparse, { context: 'unit:openai', report: false });
+  assert.equal(result.ok, true);
 });
 
-test('every table has both a full-row and an insert schema', () => {
-  const tables = Object.keys(MEMORY_TABLE_SCHEMAS);
-  assert.equal(tables.length, 11);
-  for (const t of tables) {
-    assert.ok(MEMORY_INSERT_SCHEMAS[t as keyof typeof MEMORY_INSERT_SCHEMAS]);
+test('validateApiResponse: OpenAIChatResponseSchema still rejects a wrong-typed known field', () => {
+  const bad = { choices: [{ index: 'zero' }] };
+  const result = validateApiResponse(OpenAIChatResponseSchema, bad, { context: 'unit:openai', report: false });
+  assert.equal(result.ok, false);
+});
+
+// --- validateMemoryWrite -------------------------------------------------------
+
+test('validateMemoryWrite accepts any non-null object (no per-table schema is registered here)', () => {
+  // Per the module's own doc comment: the CRUD layer owns row shapes; this seam only asserts
+  // "is this a plausible record at all" to avoid an import cycle back into memory/.
+  const result = validateMemoryWrite('production_telemetry', { project_name: 'forge', event_type: 'usage' }, { context: 'unit:memory', report: false });
+  assert.equal(result.ok, true);
+});
+
+test('validateMemoryWrite rejects non-object input', () => {
+  for (const input of [null, undefined, 42, 'x', []]) {
+    const result = validateMemoryWrite('build_runs', input, { context: 'unit:memory', report: false });
+    assert.equal(result.ok, false);
   }
 });
 
-// --- rowValidator (memory/client.ts seam) -----------------------------------
+// --- BuildRunSchema domain shape ----------------------------------------------
 
-test('rowValidator returns [] when valid and clear strings when not', () => {
-  const check = rowValidator(ProductionTelemetrySchema);
-  assert.deepEqual(
-    check({
-      id: 't1',
-      project_name: 'forge',
-      build_run_id: null,
-      event_type: 'usage',
-      event_data: {},
-      severity: null,
-      captured_at: 'now',
-      fed_back_to_build: null,
-      created_at: 'now',
-    }),
-    []
+test('BuildRunSchema round-trips a real build_runs row via safeParse', () => {
+  const parsed = BuildRunSchema.safeParse(validBuildRun);
+  assert.equal(parsed.success, true);
+});
+
+// --- detectSchemaDrift / autoRegenerateTypes (live schema vs TS types) --------
+
+test('detectSchemaDrift: missing/extra tables and columns are reported with correct severity', async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'forge-schema-drift-'));
+  const typesPath = join(tmpDir, 'database.ts');
+  // A minimal Supabase-generated-shape types file: `users` table with `id`/`name`; the live DB
+  // (mocked below) also has a `posts` table this file never declares, and is missing `email`.
+  writeFileSync(
+    typesPath,
+    [
+      'export interface Database {',
+      '  public: {',
+      '    Tables: {',
+      '      users: {',
+      '        Row: {',
+      '          id: string;',
+      '          name: string;',
+      '          email: string;',
+      '        };',
+      '      };',
+      '    };',
+      '  };',
+      '}',
+      '',
+    ].join('\n')
   );
-  const issues = check({ id: 't1' });
-  assert.ok(issues.length > 0);
-  assert.ok(issues.every((s) => typeof s === 'string' && s.includes(':')));
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/rpc/get_custom_enums')) {
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
+    // columns query — `users` matches TS exactly except missing `email`; `posts` has no TS type.
+    const rows = [
+      { table_name: 'users', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null },
+      { table_name: 'users', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null },
+      { table_name: 'posts', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null },
+    ];
+    return new Response(JSON.stringify(rows), { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const report = await detectSchemaDrift('https://fake.supabase.co', 'fake-key', typesPath);
+    assert.equal(report.hasDrift, true);
+
+    const missingTable = report.issues.find((i) => i.issueType === 'missing_table' && i.table === 'posts');
+    assert.ok(missingTable, 'posts (live-only table) reported as missing_table');
+    assert.equal(missingTable?.severity, 'error');
+
+    const extraTable = report.issues.find((i) => i.issueType === 'extra_table' && i.table === 'users');
+    assert.equal(extraTable, undefined, 'users exists live too, so it is not an extra_table');
+
+    const extraColumn = report.issues.find((i) => i.issueType === 'extra_column' && i.column === 'email');
+    assert.ok(extraColumn, 'email (TS-only column) reported as extra_column');
+    assert.equal(extraColumn?.severity, 'warning');
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
-// --- ValidationReport -------------------------------------------------------
+test('detectSchemaDrift: identical live schema and TS types report no drift', async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'forge-schema-drift-'));
+  const typesPath = join(tmpDir, 'database.ts');
+  writeFileSync(
+    typesPath,
+    ['export interface Database {', '  public: {', '    Tables: {', '      users: {', '        Row: {', '          id: string;', '        };', '      };', '    };', '  };', '}', ''].join('\n')
+  );
 
-test('ValidationReport aggregates checks, awaits the store, and summarizes', async () => {
-  const { store, records } = makeStore();
-  const report = new ValidationReport(store, fixedClock);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/rpc/get_custom_enums')) return new Response(JSON.stringify([]), { status: 200 });
+    return new Response(
+      JSON.stringify([{ table_name: 'users', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null }]),
+      { status: 200 }
+    );
+  }) as typeof fetch;
 
-  await report.check('api_response', BuildRunSchema, validBuildRun, {
-    context: 'c1',
-    target: 'build_runs',
-  });
-  await report.check('memory_write', BuildRunSchema, { id: 'bad' }, {
-    context: 'c2',
-    target: 'build_runs',
-  });
-
-  assert.equal(report.totalChecks, 2);
-  assert.equal(report.failureCount, 1);
-  assert.equal(report.passed, false);
-  assert.equal(records.length, 1); // store is awaited inside check()
-  assert.equal(records[0]?.occurredAt, '2026-06-11T12:00:00.000Z');
-  assert.match(report.summary(), /2 validation\(s\) — 1 failed/);
+  try {
+    const report = await detectSchemaDrift('https://fake.supabase.co', 'fake-key', typesPath);
+    assert.equal(report.hasDrift, false);
+    assert.deepEqual(report.issues, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
-test('ValidationReport with no failures reports all passed', async () => {
-  const report = new ValidationReport(makeStore().store);
-  await report.check('memory_read', BuildRunSchema, validBuildRun, { context: 'ok' });
-  assert.equal(report.passed, true);
-  assert.match(report.summary(), /all passed/);
+test('autoRegenerateTypes throws a clear error when supabase/config.toml is absent', async () => {
+  const { autoRegenerateTypes } = await import('../src/tools/schema-validator.js');
+  const tmpDir = mkdtempSync(join(tmpdir(), 'forge-autoregen-'));
+  try {
+    await assert.rejects(() => autoRegenerateTypes(tmpDir), /Cannot determine Supabase project ref/);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

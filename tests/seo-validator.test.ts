@@ -367,7 +367,10 @@ test('clean run → PASS, server stopped, browser closed, result stored with a s
   assert.equal(result.siteScore, 100);
   assert.equal(result.pages[0]?.status, 'pass');
   assert.equal(stop.stopped, true);
-  assert.equal(driver.closed, true);
+  // A caller-injected driver is never closed by this function — only a driver it creates
+  // internally (ownsDriver) is, so a shared/reused driver survives across multiple gates by
+  // design (src/tools/seo-validator.ts:1531,1540,1563).
+  assert.equal(driver.closed, false);
   assert.equal(store.calls.length, 1);
   assert.equal(store.calls[0]?.blocked, false);
 });
@@ -526,14 +529,14 @@ function seoStub(overrides: Partial<SEOAuditResult>): SEOAuditResult {
   };
 }
 
-test('Sentinel: no seo config → exactly the five Contract-13 checks', async () => {
+test('Sentinel: no seo config → exactly the nine Contract-13 checks', async () => {
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     log: silent,
   });
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   assert.equal(result.checks.some((c) => c.name === 'seo'), false);
 });
 
@@ -541,6 +544,7 @@ test('Sentinel: seo runs after a .tsx change and a CRITICAL issue fails the gate
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     seo: { routes: [{ path: '/' }] },
     uiPromptJustRan: true,
@@ -581,6 +585,7 @@ test('Sentinel: seo passes (non-critical surfaced) without failing the gate', as
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     seo: { routes: [{ path: '/' }] },
     uiPromptJustRan: true,

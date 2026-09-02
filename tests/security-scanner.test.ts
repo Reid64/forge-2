@@ -286,14 +286,14 @@ const greenRun = async (): Promise<CommandResult> => ({
   timedOut: false,
 });
 
-test('Sentinel: no security config → exactly the five Contract-13 checks', async () => {
+test('Sentinel: no security config → exactly the nine Contract-13 checks', async () => {
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
     getFileChanges: async () => [],
     log: () => {},
   });
-  assert.equal(res.checks.length, 5);
+  assert.equal(res.checks.length, 9);
   assert.ok(!res.checks.some((c) => c.name === 'security_scan'));
 });
 
@@ -301,6 +301,7 @@ test('Sentinel: a critical security finding FAILS the gate', async () => {
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'A', path: 'lib/keys.ts' }],
     securityScan: {},
     runSecurityCheck: async (_input: SecurityScanInput) => ({
@@ -323,10 +324,11 @@ test('Sentinel: a critical security finding FAILS the gate', async () => {
   assert.equal(sec?.passed, false);
 });
 
-test('Sentinel: a clean security scan passes (six checks present)', async () => {
+test('Sentinel: a clean security scan passes (ten checks present)', async () => {
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'A', path: 'lib/safe.ts' }],
     securityScan: {},
     runSecurityCheck: async () => ({

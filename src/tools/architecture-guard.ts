@@ -309,12 +309,15 @@ export function parseNamedList(inner: string): string[] {
   return inner
     .split(',')
     .map((s) => s.trim())
-    .filter((s) => s !== '' && s !== 'type')
+    // Drop the bare `type` keyword AND any whole `type X` / `type X as Y` entry — a type-only
+    // named import has no runtime dependency edge, so it must not leak into the graph this
+    // function feeds (previously only the `type ` prefix was stripped, leaving the bare
+    // identifier behind as if it were a real runtime import).
+    .filter((s) => s !== '' && s !== 'type' && !/^type\s+/.test(s))
     .map((tok) => {
-      const cleaned = tok.replace(/^type\s+/, '');
-      const asM = /^(\w+)\s+as\s+\w+/.exec(cleaned);
+      const asM = /^(\w+)\s+as\s+\w+/.exec(tok);
       if (asM && asM[1]) return asM[1];
-      const idM = /^(\w+)/.exec(cleaned);
+      const idM = /^(\w+)/.exec(tok);
       return idM && idM[1] ? idM[1] : '';
     })
     .filter((s) => s !== '');

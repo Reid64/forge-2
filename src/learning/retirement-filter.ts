@@ -20,23 +20,23 @@ import { logMemoryWarning, type MemoryDb } from '../memory/client.js';
  * Anti-join `patterns` against `pattern_retirement_log` for `pattern_table = 'error_patterns'`,
  * dropping any pattern whose `error_signature` has been retired. Never throws — degrades to
  * returning `patterns` unfiltered on query failure (Contract 4).
+ *
+ * Queries the retirement log directly rather than joining through the real `error_patterns`
+ * table: `patterns` is caller-supplied and is not required to already be a persisted row there
+ * (an injectable/synthetic candidate set, e.g. from a test fixture or a not-yet-written failure
+ * prediction, is exactly as valid an input as a set of real rows). The previous `WHERE NOT
+ * EXISTS` join computed "surviving" as signatures both present in `error_patterns` AND not
+ * retired — so ANY candidate that wasn't already a literal `error_patterns` row got silently
+ * dropped as if it had been retired, even though it was never retired at all.
  */
 export function filterRetiredPatterns(patterns: ErrorPattern[], db: MemoryDb): ErrorPattern[] {
   if (patterns.length === 0) return patterns;
   try {
     const rows = db
-      .prepare(
-        `SELECT ep.error_signature AS error_signature
-         FROM error_patterns ep
-         WHERE NOT EXISTS (
-           SELECT 1 FROM pattern_retirement_log prl
-           WHERE prl.pattern_table = 'error_patterns'
-             AND prl.pattern_fingerprint = ep.error_signature
-         )`
-      )
-      .all() as Array<{ error_signature: string }>;
-    const surviving = new Set(rows.map((r) => r.error_signature));
-    return patterns.filter((p) => surviving.has(p.error_signature));
+      .prepare(`SELECT pattern_fingerprint FROM pattern_retirement_log WHERE pattern_table = 'error_patterns'`)
+      .all() as Array<{ pattern_fingerprint: string }>;
+    const retired = new Set(rows.map((r) => r.pattern_fingerprint));
+    return patterns.filter((p) => !retired.has(p.error_signature));
   } catch (err) {
     logMemoryWarning('filterRetiredPatterns', err);
     return patterns;

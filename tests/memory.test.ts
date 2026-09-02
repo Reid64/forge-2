@@ -1,51 +1,47 @@
 /**
- * FORGE 2.0 — Build Memory integration test (Sprint 1, s1-p05).
+ * FORGE 2.0 — Build Memory integration test.
  *
- * Exercises every Build Memory CRUD module against the LIVE local self-hosted
- * Supabase (docker/docker-compose.yml). Per the task, it:
- *   1. creates a build_run,
- *   2. creates prompt_executions linked to it,
- *   3. creates an error_pattern,
- *   4. creates a resolution linked to it,
- *   5. queries matching patterns,
- *   6. verifies the 10 pre-loaded seed error patterns exist.
+ * Rewritten against the real local SQLite transport (Finding A-2 / audit item 3): Build Memory
+ * migrated off the old self-hosted-Supabase stack to `better-sqlite3` (`src/memory/client.ts`) a
+ * while ago, but this file was never updated — it still called Supabase's chained
+ * `client.from('table').select(...)` query builder, which a `better-sqlite3` `Database` handle
+ * has no method for at all (`client.from is not a function`), so every test here failed 100% of
+ * the time regardless of environment.
  *
- * It additionally round-trips the update/list helpers so the whole CRUD surface
- * named in queue.yaml s1-p04 is covered.
+ * This version exercises the same CRUD surface (build_runs/prompt_executions/error_patterns/
+ * resolutions) through the real `src/memory/*.ts` modules and raw `db.prepare(...)` statements
+ * for the connectivity probe / cleanup, against an ISOLATED database: `USERPROFILE`/`HOME` are
+ * pointed at a fresh temp directory BEFORE any FORGE module is imported (module-level code
+ * resolves `~/.forge/forge_memory.db` from `os.homedir()` at import time), so this suite never
+ * touches the operator's real `~/.forge/forge_memory.db`.
+ *
+ * The two "seed data" tests from the Supabase era (10 pre-loaded `forge-bootstrap` error
+ * patterns) are dropped, not just renamed: `git grep -n "forge-bootstrap"` across `src/` finds
+ * nothing — that migration-012 seed step was never ported to the SQLite schema
+ * (`src/learning/database.ts`), so the feature those two tests exercised no longer exists. The
+ * `getAutoResolvable` CRUD function itself is real and still tested here, against
+ * freshly-created rows instead of removed seed data.
  *
  * HOW TO RUN
- * ----------
- * Use tests/run-tests.ps1, which (a) verifies the Docker Supabase stack is up,
- * (b) loads FORGE_SUPABASE_URL / FORGE_SUPABASE_SERVICE_KEY from docker/.env,
- * (c) runs the `pnpm tsc --noEmit` gate, then (d) runs this file.
- *
- * Node 20 cannot execute TypeScript natively (type stripping is Node >= 22.6),
- * and src/ uses NodeNext `.js` import specifiers that resolve to `.ts` sources.
- * Both are handled by the `tsx` loader, so the runner invokes:
  *     node --import tsx --test tests/memory.test.ts
- *
- * PREREQUISITES (run-tests.ps1 checks the first; the operator does 2–3 once):
- *   1. Supabase stack running:   .\docker\start-forge-db.ps1
- *   2. Migrations applied:       .\migrations\apply-migrations.ps1   (incl. 012 seed)
- *   3. tsx installed:            pnpm install   (tsx is in devDependencies)
- *
- * Test rows are namespaced with a per-run id and deleted in `after`, so repeated
- * runs leave the database clean and never collide on the UNIQUE error_signature.
  */
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import {
-  builds,
-  prompts,
-  errors,
-  resolutions,
-  getClient,
-  resetClient,
-} from '../src/memory/index.js';
+// Must happen BEFORE any FORGE module import: `src/learning/database.ts` resolves
+// `~/.forge/forge_memory.db` from `os.homedir()` at module-load time.
+const tmpHome = mkdtempSync(join(tmpdir(), 'forge-memory-test-'));
+process.env.USERPROFILE = tmpHome;
+process.env.HOME = tmpHome;
 
-// Unique per-run markers so concurrent/repeat runs never collide.
+const { builds, prompts, errors, resolutions, getClient, resetClient } = await import('../src/memory/index.js');
+const { closeConnection } = await import('../src/learning/database.js');
+
+// Unique per-run markers (harmless now that the DB itself is isolated, kept for readability).
 const RUN_ID = `${Date.now()}`;
 const TEST_PROJECT = `forge-selftest-${RUN_ID}`;
 const ERROR_SIGNATURE = `selftest: synthetic signature ${RUN_ID}`;
@@ -56,26 +52,13 @@ let promptId: string | null = null;
 let errorPatternId: string | null = null;
 let resolutionId: string | null = null;
 
-before(async () => {
-  // Re-read env (run-tests.ps1 exports the credentials before launching node).
+before(() => {
   resetClient();
   const client = getClient();
-  assert.ok(
-    client,
-    'Build Memory client is null. Set FORGE_SUPABASE_URL and FORGE_SUPABASE_SERVICE_KEY ' +
-      '(run-tests.ps1 loads them from docker/.env) and ensure the Supabase stack is up.'
-  );
+  assert.ok(client, 'Build Memory client is null — could not open the isolated test database.');
 
-  // Live connectivity probe. Every CRUD helper returns null on failure
-  // (BEHAVIORAL_CONTRACTS Contract 4), so we confirm reachability up front to
-  // distinguish "database is down" from "a CRUD function is broken".
-  const { error } = await client.from('build_runs').select('id').limit(1);
-  assert.ok(
-    !error,
-    `Cannot reach the build_runs table — is the stack up and are migrations applied? ${
-      error ? `(${error.message})` : ''
-    }`
-  );
+  const row = client.prepare('SELECT id FROM build_runs LIMIT 1').all();
+  assert.ok(Array.isArray(row), 'Cannot query the build_runs table on the isolated test database.');
 });
 
 test('build_runs: createBuild inserts and returns the row', async () => {
@@ -228,55 +211,59 @@ test('resolutions: getResolutionForPattern + incrementApplied', async () => {
   assert.equal(failed.times_failed, 1);
 });
 
-test('seed data: exactly the 10 pre-loaded error patterns exist', async () => {
-  const client = getClient();
-  assert.ok(client, 'client is null');
+test('error_patterns: getAutoResolvable returns only auto_resolve_eligible rows, sorted desc', async () => {
+  const suffix = `${RUN_ID}-autoresolve`;
+  const high = await errors.createErrorPattern({
+    error_signature: `selftest: high ${suffix}`,
+    error_category: 'type_error',
+    error_message_sample: 'sample',
+    first_seen_project: TEST_PROJECT,
+    success_rate: 0.97,
+    auto_resolve_eligible: true,
+  });
+  const mid = await errors.createErrorPattern({
+    error_signature: `selftest: mid ${suffix}`,
+    error_category: 'type_error',
+    error_message_sample: 'sample',
+    first_seen_project: TEST_PROJECT,
+    success_rate: 0.92,
+    auto_resolve_eligible: true,
+  });
+  const ineligible = await errors.createErrorPattern({
+    error_signature: `selftest: ineligible ${suffix}`,
+    error_category: 'type_error',
+    error_message_sample: 'sample',
+    first_seen_project: TEST_PROJECT,
+    success_rate: 0.99,
+    auto_resolve_eligible: false,
+  });
+  assert.ok(high && mid && ineligible, 'setup rows failed to create');
 
-  // All 10 seeds use first_seen_project = 'forge-bootstrap' (migration 012),
-  // which isolates them from the synthetic row this test created.
-  const { data, error } = await client
-    .from('error_patterns')
-    .select('error_signature')
-    .eq('first_seen_project', 'forge-bootstrap');
-
-  assert.ok(!error, `seed query failed: ${error ? error.message : ''}`);
-  assert.ok(data, 'seed query returned null data');
-  assert.equal(
-    data.length,
-    10,
-    `expected 10 seeded error patterns, found ${data.length} — run migrations/apply-migrations.ps1`
-  );
-});
-
-test('seed data: getAutoResolvable returns the 8 auto-eligible seeds, sorted desc', async () => {
   const list = await errors.getAutoResolvable();
   assert.ok(list, 'getAutoResolvable returned null');
 
-  // 8 of the 10 seeds have success_rate > 0.90 (html_assumed_rendered=0.90 and
-  // supabase_rls_blocks=0.85 are NOT auto-eligible; the synthetic pattern at 0.5
-  // is also excluded). Results are ordered by success_rate descending.
-  const seeds = list.filter((p) => p.first_seen_project === 'forge-bootstrap');
-  assert.equal(seeds.length, 8, `expected 8 auto-resolvable seeds, found ${seeds.length}`);
-  for (let i = 1; i < seeds.length; i++) {
-    const prev = seeds[i - 1]?.success_rate ?? 0;
-    const cur = seeds[i]?.success_rate ?? 0;
-    assert.ok(prev >= cur, 'getAutoResolvable is not sorted by success_rate descending');
-  }
+  const ids = new Set([high.id, mid.id, ineligible.id]);
+  const scoped = list.filter((p) => ids.has(p.id));
+  assert.equal(scoped.length, 2, 'expected exactly the 2 auto_resolve_eligible rows from this test');
+  assert.equal(scoped[0]?.id, high.id, 'higher success_rate should sort first');
+  assert.equal(scoped[1]?.id, mid.id);
+  assert.ok(!scoped.some((p) => p.id === ineligible.id), 'auto_resolve_eligible=false row must be excluded');
 });
 
-after(async () => {
-  // Remove everything this run created. FK order: children before parents.
+after(() => {
   const client = getClient();
-  if (!client) return;
-
-  if (buildId) {
-    await client.from('prompt_executions').delete().eq('build_run_id', buildId);
-    await client.from('build_runs').delete().eq('id', buildId);
-  }
-  if (resolutionId) {
-    await client.from('resolutions').delete().eq('id', resolutionId);
-  }
-  if (errorPatternId) {
-    await client.from('error_patterns').delete().eq('id', errorPatternId);
+  try {
+    if (buildId) {
+      client?.prepare('DELETE FROM prompt_executions WHERE build_run_id = ?').run(buildId);
+      client?.prepare('DELETE FROM build_runs WHERE id = ?').run(buildId);
+    }
+    if (resolutionId) {
+      client?.prepare('DELETE FROM resolutions WHERE id = ?').run(resolutionId);
+    }
+    client?.prepare('DELETE FROM error_patterns WHERE first_seen_project = ?').run(TEST_PROJECT);
+  } finally {
+    closeConnection();
+    resetClient();
+    rmSync(tmpHome, { recursive: true, force: true });
   }
 });

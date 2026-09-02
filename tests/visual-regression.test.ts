@@ -5,7 +5,7 @@
  * (identical / changed / dimension-mismatch), `routeSlug`, the `runVisualRegression` lifecycle
  * (first-run baseline capture → pass → regression fail → forced update → driver-unavailable skip)
  * driven with an in-memory filesystem + a fake screenshot driver, and the Phase 4 Sentinel
- * integration (the optional sixth check, opt-in, with an injected visual runner).
+ * integration (the optional tenth check, opt-in, with an injected visual runner).
  */
 
 import test from 'node:test';
@@ -231,15 +231,17 @@ test('runVisualRegression: no driver available → every page skipped', async ()
 });
 
 // ---------------------------------------------------------------------------
-// Phase 4 Sentinel integration (optional sixth check)
+// Phase 4 Sentinel integration (optional tenth check)
 // ---------------------------------------------------------------------------
 
-/** Minimal Sentinel options whose five mandatory checks all pass, so we can isolate check 6. */
+/** Minimal Sentinel options whose nine mandatory checks all pass or skip, so we can isolate check 10. */
 function passingSentinelOptions(): Parameters<typeof runSentinel>[0] {
   return {
     projectPath: PROJECT,
     runCommand: async () => ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false }),
-    getFileChanges: async () => [],
+    // A productive change, so the mandatory File Delta check (the "produced a real work product"
+    // signal) passes rather than falling through to a real git lookup against a fixture path.
+    getFileChanges: async () => [{ status: 'A', path: 'src/new.ts' }],
     schemaPromptsHaveRun: false,
     packageJsonContent: '{"dependencies":{}}',
     baselineDependencies: [],
@@ -247,13 +249,13 @@ function passingSentinelOptions(): Parameters<typeof runSentinel>[0] {
   };
 }
 
-test('Sentinel: no visualRegression config keeps exactly the five mandatory checks', async () => {
+test('Sentinel: no visualRegression config keeps exactly the nine mandatory checks', async () => {
   const result = await runSentinel(passingSentinelOptions());
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   assert.equal(result.checks.find((c) => c.name === 'visual_regression'), undefined);
 });
 
-test('Sentinel: a visual regression fails the gate as the sixth check', async () => {
+test('Sentinel: a visual regression fails the gate as the tenth check', async () => {
   const failing: VisualRegressionResult = {
     passed: false,
     firstRun: false,
@@ -295,7 +297,7 @@ test('Sentinel: a visual regression fails the gate as the sixth check', async ()
     runVisualCheck: async () => failing,
   });
 
-  assert.equal(result.checks.length, 6);
+  assert.equal(result.checks.length, 10);
   assert.equal(result.passed, false);
   assert.equal(result.failedCheck, 'visual_regression');
   assert.match(result.diagnosticReport, /UI regression/);
@@ -313,6 +315,6 @@ test('Sentinel: uiPromptJustRan=false suppresses the visual check', async () => 
     },
   });
   assert.equal(called, false);
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   assert.equal(result.passed, true);
 });

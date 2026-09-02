@@ -75,7 +75,7 @@ import {
   OpenAIChatResponseSchema,
 } from '../tools/schema-validator.js';
 import { logLine } from '../tools/forge-logger.js';
-import { runClaude } from './claude-runner.js';
+import { runClaude, type ClaudeRunResult, type ClaudeRunnerOptions } from './claude-runner.js';
 
 /** Heuristic characters-per-token for splitting the CLI's coarse token estimate (matches claude-runner.ts). */
 const CLI_CHARS_PER_TOKEN = 4;
@@ -522,6 +522,15 @@ export interface ProviderRouterOptions {
   litellmProxyKey?: string;
   /** Injected HTTP client (tests / SDK swap). Default the global `fetch`. */
   fetchImpl?: FetchLike;
+  /**
+   * Injected Claude Code CLI runner (tests). Default the real {@link runClaude} — a genuine
+   * subprocess spawn. Without this seam, `complex_reasoning`'s `anthropic` leg ALWAYS shells out
+   * to the real, locally-authenticated `claude` CLI regardless of `fetchImpl`, since it never
+   * goes through the HTTP path at all — any environment with `claude` on PATH (including a
+   * developer machine running this router's own "pure, no network" unit tests) would otherwise
+   * make a real, billed/Max-plan-consuming call.
+   */
+  runClaudeCli?: (prompt: string, options?: ClaudeRunnerOptions) => Promise<ClaudeRunResult>;
   /** Shared usage + cost ledger. Default a fresh {@link ProviderUsageTracker}. */
   usage?: ProviderUsageTracker;
   /** Rate-limit cooldown ms after a 429 / 5xx. Default {@link DEFAULT_COOLDOWN_MS}. */
@@ -654,6 +663,7 @@ export class ProviderRouter {
   private readonly proxyUrl: string | null;
   private readonly proxyKey: string | null;
   private readonly fetchImpl: FetchLike;
+  private readonly runClaudeCliImpl: (prompt: string, options?: ClaudeRunnerOptions) => Promise<ClaudeRunResult>;
   private readonly usage: ProviderUsageTracker;
   private readonly cooldownMs: number;
   private readonly timeoutMs: number;
@@ -692,6 +702,7 @@ export class ProviderRouter {
       getEnv('LITELLM_PROXY_KEY') ??
       null;
     this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+    this.runClaudeCliImpl = options.runClaudeCli ?? runClaude;
     this.usage = options.usage ?? new ProviderUsageTracker();
     this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -894,7 +905,7 @@ export class ProviderRouter {
     request: ModelRequest
   ): Promise<ProviderCallResult> {
     const prompt = request.system.trim() !== '' ? `${request.system}\n\n${request.user}` : request.user;
-    const result = await runClaude(prompt, {
+    const result = await this.runClaudeCliImpl(prompt, {
       cwd: this.claudeCliCwd,
       ...(this.claudeCliTimeoutMs !== undefined ? { timeoutMs: this.claudeCliTimeoutMs } : {}),
       log: (message) => this.log(`[claude-cli] ${message}`),

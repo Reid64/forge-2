@@ -224,10 +224,18 @@ function firstHeading(markdown: string): string | null {
 
 /** First non-empty paragraph under a `## Section` heading (best-effort). */
 function sectionParagraph(markdown: string, heading: string): string | null {
-  const re = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?:^##\\s|$)`, 'im');
-  const m = re.exec(markdown);
-  if (!m || m[1] === undefined) return null;
-  for (const para of m[1].split(/\n\s*\n/)) {
+  // Locate the heading, then independently search only the remainder for the next `## ` heading
+  // (or end of string). A single combined regex with a non-greedy `[\s\S]*?` terminated by `$`
+  // in multiline mode is ambiguous: `$` also matches the boundary at the END of the heading's
+  // own line (immediately before its trailing newline), so the capture group could terminate
+  // with zero characters before ever reaching the section body — this always returned null.
+  const headingRe = new RegExp(`^##\\s+${heading}\\s*$`, 'im');
+  const headingMatch = headingRe.exec(markdown);
+  if (!headingMatch) return null;
+  const afterHeading = markdown.slice(headingMatch.index + headingMatch[0].length);
+  const nextHeadingMatch = /^##\s/m.exec(afterHeading);
+  const body = nextHeadingMatch ? afterHeading.slice(0, nextHeadingMatch.index) : afterHeading;
+  for (const para of body.split(/\n\s*\n/)) {
     const text = collapse(para);
     if (text !== '' && !text.startsWith('#')) return text;
   }

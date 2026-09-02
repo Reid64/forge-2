@@ -15,19 +15,38 @@
  *     node --import tsx --test tests/executor.test.ts
  */
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { analyzeSchedule } from '../src/engine/parallel-scheduler.js';
-import { runPhase3Executor, parseQueueYaml, type Phase3Options } from '../src/phases/phase3-executor.js';
-import { serializeQueue, type QueueEntry, type QueueStats } from '../src/engine/queue-generator.js';
-import { GitManager, type ExecSyncFn } from '../src/engine/git-manager.js';
+import type { Phase3Options } from '../src/phases/phase3-executor.js';
+import type { QueueEntry, QueueStats } from '../src/engine/queue-generator.js';
+import type { ExecSyncFn } from '../src/engine/git-manager.js';
 import type { FailurePrediction } from '../src/engine/failure-predictor.js';
 import type { ClaudeRunResult } from '../src/engine/claude-runner.js';
 import type { SentinelResult, AutoRecoveryResult } from '../src/phases/phase4-sentinel.js';
+
+// Must happen BEFORE any FORGE module import: `src/learning/database.ts` resolves
+// `~/.forge/forge_memory.db` from `os.homedir()` at module-load time. Without this, the executor's
+// (non-injectable) `detectDeadLoop` call reads the operator's REAL Build Memory — this test suite
+// hit exactly that: a dead-loop verdict computed from whatever real error_patterns/resolutions
+// happened to exist on the machine running the tests, rather than the injected fixtures below.
+const tmpHome = mkdtempSync(join(tmpdir(), 'forge-executor-test-'));
+process.env.USERPROFILE = tmpHome;
+process.env.HOME = tmpHome;
+
+const { analyzeSchedule } = await import('../src/engine/parallel-scheduler.js');
+const { runPhase3Executor, parseQueueYaml } = await import('../src/phases/phase3-executor.js');
+const { serializeQueue } = await import('../src/engine/queue-generator.js');
+const { GitManager } = await import('../src/engine/git-manager.js');
+
+after(async () => {
+  const { closeConnection } = await import('../src/learning/database.js');
+  closeConnection();
+  rmSync(tmpHome, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures

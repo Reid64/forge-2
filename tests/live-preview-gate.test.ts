@@ -144,7 +144,10 @@ test('all routes render → PASS, screenshots written, server + browser closed',
   assert.equal(result.pages.every((p) => p.status === 'pass'), true);
   assert.equal(fs.store.size, 2); // one screenshot per route
   assert.equal(stop.stopped, true); // dev server killed
-  assert.equal(driver.closed, true);
+  // A caller-injected driver is never closed by this function — only a driver it creates
+  // internally (ownsDriver) is, so a shared/reused driver survives across multiple gates by
+  // design (src/tools/live-preview-gate.ts:804,813,852).
+  assert.equal(driver.closed, false);
 });
 
 test('blank page, console error, and non-200 each FAIL the gate', async () => {
@@ -262,14 +265,14 @@ test('discovers routes via injected discoverRoutes when none supplied', async ()
 /** A command runner that passes tsc + build (so the gate reaches the optional checks). */
 const passingRun = async (): Promise<CommandResult> => ({ ok: true, exitCode: 0, stdout: '', stderr: '', timedOut: false });
 
-test('Sentinel: no livePreview config → exactly the five Contract-13 checks', async () => {
+test('Sentinel: no livePreview config → exactly the nine Contract-13 checks', async () => {
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     log: silent,
   });
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   assert.equal(result.checks.some((c) => c.name === 'live_preview'), false);
 });
 
@@ -277,6 +280,10 @@ test('Sentinel: livePreview runs after a .tsx change and a failing preview fails
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
+    // Present but baseline-free, so the mandatory Dependency check SKIPs cleanly instead of
+    // hard-failing on an absent manifest (Session 5.2 absent-target law) — this test is about
+    // the live_preview check specifically being the one that fails the gate.
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'M', path: 'src/app/dashboard/page.tsx' }],
     livePreview: { routes: [{ path: '/dashboard' }] },
     uiPromptJustRan: true,

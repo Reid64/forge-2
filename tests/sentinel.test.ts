@@ -130,6 +130,12 @@ function passingOptions(over: Partial<SentinelOptions> = {}): SentinelOptions {
   return {
     projectPath: 'C:/demo',
     schemaPromptsHaveRun: true,
+    // C:/demo is a fixture path that doesn't exist on disk — without these overrides, the
+    // TypeScript/ESLint/Build checks' real fs.existsSync preconditions would always evaluate
+    // false and the checks below could never exercise the injected runCommand.
+    hasPackageJson: true,
+    hasLocalTsc: true,
+    hasLocalEslint: false,
     runCommand: async () => okCommand,
     getFileChanges: async () => [{ status: 'A', path: 'src/new.ts' }],
     extractActualSchema: async () => matchingSnapshot(),
@@ -207,11 +213,11 @@ function passingResult(): SentinelResult {
 // runSentinel — happy path
 // ---------------------------------------------------------------------------
 
-test('runSentinel: all five checks pass with injected collaborators', async () => {
+test('runSentinel: all nine mandatory checks pass or skip with injected collaborators', async () => {
   const result = await runSentinel(passingOptions());
   assert.equal(result.passed, true);
   assert.equal(result.failedCheck, null);
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   for (const c of result.checks) {
     assert.equal(c.passed || c.skipped, true, `${c.name} should pass or skip, got fail`);
   }

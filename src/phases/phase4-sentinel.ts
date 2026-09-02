@@ -3,17 +3,22 @@
  *
  * Sentinel runs after EVERY Phase 3 prompt execution (BEHAVIORAL_CONTRACTS.md Contract 1 —
  * "Phase 4 runs after EVERY Phase 3 prompt") and is the gate that decides whether the
- * prompt's work is healthy enough to merge to main. It performs five health checks IN ORDER
- * (Contract 13), and ALL non-skipped checks must pass:
+ * prompt's work is healthy enough to merge to main. It performs nine mandatory health checks IN
+ * ORDER (Contract 13), and ALL non-skipped checks must pass:
  *
  *   1. TypeScript  — `pnpm tsc --noEmit`            (Gate 1; zero errors required)
- *   2. Build       — `pnpm run build`               (Gate 2; must complete; warnings ok)
- *   3. File Integrity — `git diff --name-status`    (immutable governance docs unchanged,
+ *   2. ESLint      — `npx eslint . --format json`   (0 error-level findings required)
+ *   3. Build       — `pnpm run build`               (Gate 2; must complete; warnings ok)
+ *   4. File Integrity — `git diff --name-status`    (immutable governance docs unchanged,
  *                       no unexpected deletions — Contract 3 / Iron Law 1)
- *   4. Schema Drift — extractSchema() vs SCHEMA_REGISTRY.md, ONLY when schema prompts have
+ *   5. File Delta  — `git diff --name-status main...HEAD` vs on-disk expected output (the
+ *                       authoritative "produced a real work product" signal)
+ *   6. Schema Drift — extractSchema() vs SCHEMA_REGISTRY.md, ONLY when schema prompts have
  *                       run. Additions are OK; modifications / deletions FAIL.
- *   5. Dependency Check — current package.json deps vs the locked TOOLCHAIN.md manifest /
+ *   7. Dependency Check — current package.json deps vs the locked TOOLCHAIN.md manifest /
  *                       baseline. Any NEW dependency not in the manifest FAILS.
+ *   8. Lint Gate   — auto-detects `.eslintrc.*`/`eslint.config.*`, else SKIPs
+ *   9. Format Gate — auto-detects `.prettierrc.*`/`prettier.config.*`, else SKIPs
  *
  * Returns a {@link SentinelResult} `{ passed, checks, failedCheck, diagnosticReport }`. When any
  * check fails, the diagnostic report is a full-context markdown summary the executor (s5-p05)
@@ -132,10 +137,10 @@ const execAsync = promisify(exec);
 // ---------------------------------------------------------------------------
 
 /**
- * The Sentinel health checks. The first five are the fixed Contract-13 suite (always evaluated, in
+ * The Sentinel health checks. The first nine are the fixed Contract-13 suite (always evaluated, in
  * order). `visual_regression` and `live_preview` are OPTIONAL checks, appended only when configured
- * AND the prompt that just ran touched UI — they are NOT part of the mandatory five, so a build that
- * does not opt in keeps exactly the five Contract-13 checks.
+ * AND the prompt that just ran touched UI — they are NOT part of the mandatory nine, so a build that
+ * does not opt in keeps exactly the nine Contract-13 checks.
  */
 export type SentinelCheckName =
   | 'migration_safety'
@@ -293,10 +298,22 @@ export interface SentinelOptions {
   /** Override package.json content (tests). Default: read from `projectPath`. */
   packageJsonContent?: string;
   /**
+   * Override whether `package.json` is considered present for the TypeScript/ESLint/Build
+   * preconditions (tests). Default: real `fs.existsSync(join(projectPath, 'package.json'))` —
+   * which, for a fixture `projectPath` that doesn't exist on disk, always evaluates false. Without
+   * this override, those three checks can never be exercised against an injected `runCommand` in a
+   * hermetic (no real filesystem) test.
+   */
+  hasPackageJson?: boolean;
+  /** Override whether a local `tsc` binary is considered present (tests). Default: real `fs.existsSync`. */
+  hasLocalTsc?: boolean;
+  /** Override whether a local `eslint` binary is considered present (tests). Default: real `fs.existsSync`. */
+  hasLocalEslint?: boolean;
+  /**
    * Visual-regression configuration (the OPTIONAL sixth check). When supplied, Sentinel screenshots
    * every route and pixel-diffs each capture against its `.forge/baselines/` baseline AFTER a UI
    * prompt (see `uiPromptJustRan`). `projectPath`/`baseUrl` default from this run's options when
-   * absent. When omitted, the visual-regression check is not added (the five Contract-13 checks stand
+   * absent. When omitted, the visual-regression check is not added (the nine Contract-13 checks stand
    * alone). A regression (>threshold% pixel diff on any route) FAILS the gate; a first run that only
    * captures baselines PASSES; an un-capturable app/browser SKIPS (never a false failure).
    */
@@ -320,7 +337,7 @@ export interface SentinelOptions {
    * (HTTP 200, no console errors, non-blank body, screenshot) AFTER a UI prompt — that is, when the
    * prompt that just ran changed a `.tsx`/`.css` file (detected from this run's git diff via
    * {@link hasUiFileChanges}) OR `uiPromptJustRan !== false`. `projectPath` defaults from this run's
-   * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
+   * options when absent. When omitted, the check is not added (the nine Contract-13 checks stand
    * alone). A route that loads but is blank / errors / non-200 FAILS the gate; an app that won't boot
    * or a browser that won't launch SKIPS (never a false failure).
    */
@@ -339,7 +356,7 @@ export interface SentinelOptions {
    * EVERY prompt — it is NOT gated on UI changes. `projectPath` defaults from this run's options; when
    * `files` is omitted Sentinel passes the prompt's changed files (from the File-Integrity diff) so
    * only the new/edited code is scanned (a full walk when the diff is unavailable). When omitted, the
-   * check is not added (the five Contract-13 checks stand alone). A CRITICAL finding (a live key, an
+   * check is not added (the nine Contract-13 checks stand alone). A CRITICAL finding (a live key, an
    * injectable query, a client-leaked secret, a critical CVE) FAILS the gate and blocks the build;
    * high/medium/low findings are surfaced but pass; an un-scannable project SKIPS (never a false fail).
    */
@@ -358,7 +375,7 @@ export interface SentinelOptions {
    * traps, skip links, heading hierarchy, `lang` attribute) AFTER a UI prompt — that is, when the
    * prompt that just ran changed a `.tsx`/`.css` file (detected from this run's git diff via
    * {@link hasUiFileChanges}) OR `uiPromptJustRan !== false`. `projectPath` defaults from this run's
-   * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
+   * options when absent. When omitted, the check is not added (the nine Contract-13 checks stand
    * alone). A CRITICAL accessibility violation FAILS the gate and blocks the build; serious/moderate/
    * minor are surfaced but pass; an un-bootable app / unavailable browser / missing axe-core SKIPS
    * (never a false failure). Results are stored in Build Memory by the auditor (guarded).
@@ -379,7 +396,7 @@ export interface SentinelOptions {
    * `accessibility` check above, catching structural issues (missing aria-label/alt/htmlFor, onClick
    * without a role/keyboard handler, hardcoded colors, unlabeled dialogs) directly from the generated
    * component source. `projectPath` defaults from this run's options when absent. When omitted, the
-   * check is not added (the five Contract-13 checks stand alone). Any error-severity issue on any
+   * check is not added (the nine Contract-13 checks stand alone). Any error-severity issue on any
    * scanned component FAILS the gate; a project with no `src/components/` directory, or a non-
    * feature/ui prompt type, SKIPS (never a false failure).
    */
@@ -395,7 +412,7 @@ export interface SentinelOptions {
    * tags, valid JSON-LD structured data, page-appropriate robots meta, `sitemap.xml` validity, the
    * internal-link graph (no orphan pages / broken links), heading hierarchy (single H1, logical H2–H6),
    * and image optimization (WebP / lazy / width+height), producing per-page SEO scores. `projectPath`
-   * defaults from this run's options when absent. When omitted, the check is not added (the five
+   * defaults from this run's options when absent. When omitted, the check is not added (the nine
    * Contract-13 checks stand alone). A CRITICAL SEO issue FAILS the gate and blocks the build; serious/
    * moderate/minor are surfaced but pass; an un-bootable app / unavailable browser / no routes SKIPS
    * (never a false failure). Results are stored in Build Memory by the validator (guarded).
@@ -414,7 +431,7 @@ export interface SentinelOptions {
    * violations (`as any`/`@ts-ignore`/…). It is NOT gated on UI changes (the whole graph matters every
    * prompt) and — unlike the security scan — is NOT pinned to the changed files (cycle/dead-code
    * detection needs the full project). `projectPath` defaults from this run's options when absent. When
-   * omitted, the check is not added (the five Contract-13 checks stand alone). A HIGH-severity violation
+   * omitted, the check is not added (the nine Contract-13 checks stand alone). A HIGH-severity violation
    * (a dependency cycle / an N+1 query by default; configurable via `severityOverrides`) FAILS the gate
    * and blocks the build; medium/low are surfaced but pass; an empty/unanalyzable project SKIPS (never a
    * false fail). Results are stored in Build Memory (`production_telemetry`, guarded).
@@ -435,7 +452,7 @@ export interface SentinelOptions {
    * DELETE), requires each to be explicitly confirmed, auto-generates a rollback migration and a
    * data-backup script, diffs the migration against the live production schema (via `schemaSql`/
    * `supabase`), and flags any RLS-policy / foreign-key breakage. `projectPath`/`projectName` default
-   * from this run's options when absent. When omitted, the check is not added (the five Contract-13
+   * from this run's options when absent. When omitted, the check is not added (the nine Contract-13
    * checks stand alone). An UNCONFIRMED destructive operation or an un-acknowledged breakage FAILS the
    * gate and blocks the build (so the migration is never applied); a fully-confirmed, non-breaking
    * migration PASSES; an empty/parse-free migration with nothing destructive PASSES. Because it is the
@@ -463,7 +480,7 @@ export interface SentinelOptions {
    * security scan it is NOT gated on UI changes — every generation is cross-checked. For research
    * results it independently verifies each supplied claim (opportunity existence; eligibility /
    * deadline / dollar-amount accuracy). `projectName` defaults to the basename of this run's
-   * `projectPath`. When omitted, the check is not added (the five Contract-13 checks stand alone). A
+   * `projectPath`. When omitted, the check is not added (the nine Contract-13 checks stand alone). A
    * generation whose approvals fall below the prompt_type requirement FAILS the gate and blocks the
    * build; an unreachable validator panel (<2 usable judgments) SKIPS (never a false failure).
    * Results — including the per-validator real-issue scoreboard — are stored in Build Memory (guarded).
@@ -548,7 +565,7 @@ export interface SentinelOptions {
    * skip-list (Session 2: the `ui` shell entry and every page-building `feature` entry are the
    * UI-producing prompt types) — every other prompt type SKIPS. Auto-skips when no
    * `next.config.*` is found (not a Next.js project). `projectPath` defaults from this run's
-   * options when absent. When omitted, the check is not added (the five Contract-13 checks stand
+   * options when absent. When omitted, the check is not added (the nine Contract-13 checks stand
    * alone). An un-parseable manifest or a `pnpm run build` failure SKIPS/FAILS respectively —
    * never a false pass.
    */
@@ -1772,7 +1789,7 @@ function evaluateConsensusProposal(result: ConsensusProposalResult, durationMs: 
 }
 
 // ---------------------------------------------------------------------------
-// Check 0 (optional): Migration Safety (PRE-MIGRATION gate — runs before the five)
+// Check 0 (optional): Migration Safety (PRE-MIGRATION gate — runs before the nine)
 // ---------------------------------------------------------------------------
 
 /** Map a {@link MigrationSafetyReport} into the Sentinel's {@link CheckResult} contract. */
@@ -3025,17 +3042,17 @@ async function runRing1TypescriptCheck(
   projectPath: string,
   timeoutMs: number,
   run: CommandRunner,
-  log: (m: string) => void
+  log: (m: string) => void,
+  hasPackageJson: boolean = fs.existsSync(path.join(projectPath, 'package.json')),
+  hasLocalTsc: boolean = fs.existsSync(path.join(projectPath, 'node_modules', '.bin', 'tsc'))
 ): Promise<CheckResult> {
-  const pkgJson = path.join(projectPath, 'package.json');
-  if (!fs.existsSync(pkgJson)) {
+  if (!hasPackageJson) {
     log('sentinel: no package.json in project root — TypeScript check skipped (not a Node project yet)');
-    return pass('typescript', 'Skipped — no package.json present; project has no TypeScript to check', '', 0);
+    return skip('typescript', 'Skipped — no package.json present; project has no TypeScript to check');
   }
-  const localTsc = path.join(projectPath, 'node_modules', '.bin', 'tsc');
-  if (!fs.existsSync(localTsc)) {
+  if (!hasLocalTsc) {
     log('sentinel: no local tsc binary found — TypeScript check skipped (typescript not installed)');
-    return pass('typescript', 'Skipped — typescript not installed locally; run `npm install typescript` first', '', 0);
+    return skip('typescript', 'Skipped — typescript not installed locally; run `npm install typescript` first');
   }
   const startedAt = nowMs();
   const res = await run('npx tsc --noEmit --pretty false', projectPath, timeoutMs);
@@ -3104,17 +3121,17 @@ async function runRing1EslintCheck(
   projectPath: string,
   timeoutMs: number,
   run: CommandRunner,
-  log: (m: string) => void
+  log: (m: string) => void,
+  hasPackageJson: boolean = fs.existsSync(path.join(projectPath, 'package.json')),
+  hasLocalEslint: boolean = fs.existsSync(path.join(projectPath, 'node_modules', '.bin', 'eslint'))
 ): Promise<CheckResult> {
-  const pkgJson = path.join(projectPath, 'package.json');
-  if (!fs.existsSync(pkgJson)) {
+  if (!hasPackageJson) {
     log('sentinel: no package.json in project root — ESLint check skipped (not a Node project yet)');
-    return pass('eslint', 'Skipped — no package.json present; project has no ESLint to check', '', 0);
+    return skip('eslint', 'Skipped — no package.json present; project has no ESLint to check');
   }
-  const localEslint = path.join(projectPath, 'node_modules', '.bin', 'eslint');
-  if (!fs.existsSync(localEslint)) {
+  if (!hasLocalEslint) {
     log('sentinel: no local eslint binary found — ESLint check skipped (eslint not installed)');
-    return pass('eslint', 'Skipped — eslint not installed locally', '', 0);
+    return skip('eslint', 'Skipped — eslint not installed locally');
   }
   const startedAt = nowMs();
   const res = await run('npx eslint . --format json --ext .ts,.tsx', projectPath, timeoutMs);
@@ -3873,7 +3890,7 @@ function nowMs(): number {
 /**
  * Run the full Phase 4 Sentinel suite against `projectPath` and return a {@link SentinelResult}.
  *
- * Executes the five Contract-13 checks in order. With `stopOnFirstFailure` (the default), once a
+ * Executes the nine Contract-13 checks in order. With `stopOnFirstFailure` (the default), once a
  * check fails the remaining checks are recorded as SKIPPED. `passed` is true only when no check
  * failed (skipped checks do not fail the gate). Always resolves — never throws (Iron Law 3).
  */
@@ -3910,12 +3927,12 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
 
   log(`running Sentinel on ${projectPath} (stopOnFirstFailure=${stopOnFirstFailure})`);
 
-  // --- 0. Migration Safety (OPTIONAL PRE-MIGRATION gate — runs BEFORE the five) ----------------
-  // Not part of the mandatory Contract-13 five: prepended only when `migrationSafety` is supplied
+  // --- 0. Migration Safety (OPTIONAL PRE-MIGRATION gate — runs BEFORE the nine) ----------------
+  // Not part of the mandatory Contract-13 nine: prepended only when `migrationSafety` is supplied
   // (the executor passes it solely on a prompt about to APPLY a migration). It analyzes the migration
   // SQL for destructive operations / RLS+FK breakage, auto-generates a rollback + data-backup script,
   // and BLOCKS the gate when the migration is unsafe — so it runs first and short-circuits the costly
-  // tsc/build checks on a blocked migration. A build that does not opt in keeps exactly the five.
+  // tsc/build checks on a blocked migration. A build that does not opt in keeps exactly the nine.
   if (options.migrationSafety) {
     log('check 0: Migration Safety (destructive-op gate / rollback / backup / production diff)');
     const startedAt = nowMs();
@@ -3946,7 +3963,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     record(skipRest('typescript'));
   } else {
     log('check 1/7: TypeScript Ring 1a (npx tsc --noEmit --pretty false) — error-parsing + DB');
-    record(await runRing1TypescriptCheck(projectPath, tscTimeoutMs, run, log));
+    record(await runRing1TypescriptCheck(projectPath, tscTimeoutMs, run, log, options.hasPackageJson, options.hasLocalTsc));
   }
 
   // --- 1b. ESLint (Ring 1b) — new mandatory gate: severity-2 errors → fail -----------------
@@ -3955,15 +3972,15 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     record(skipRest('eslint'));
   } else {
     log('check 2/7: ESLint Ring 1b (npx eslint . --format json --ext .ts,.tsx) — 0 errors threshold');
-    record(await runRing1EslintCheck(projectPath, eslintTimeoutMs, run, log));
+    record(await runRing1EslintCheck(projectPath, eslintTimeoutMs, run, log, options.hasPackageJson, options.hasLocalEslint));
   }
 
   // --- 2. Build ------------------------------------------------------------
   if (shouldSkipRest()) {
     record(skipRest('build'));
-  } else if (!fs.existsSync(join(projectPath, 'package.json'))) {
+  } else if (!(options.hasPackageJson ?? fs.existsSync(join(projectPath, 'package.json')))) {
     log('sentinel: no package.json in project root — Build check skipped (not a Node project yet)');
-    record(pass('build', 'Skipped — no package.json present; project has no build script to run', '', 0));
+    record(skip('build', 'Skipped — no package.json present; project has no build script to run'));
   } else {
     log('check 3/7: Build (pnpm run build)');
     record(await runCommandCheck('build', 'pnpm run build', projectPath, buildTimeoutMs, run, log));
@@ -4033,7 +4050,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
     const startedAt = nowMs();
     const pkgJson = options.packageJsonContent ?? (await readTextSafe(join(projectPath, 'package.json')));
     if (pkgJson === null && options.promptType === 'schema') {
-      record(pass('dependencies', 'Skipped — schema prompt type has no package.json dependency requirements', '', nowMs() - startedAt));
+      record(skip('dependencies', 'Skipped — schema prompt type has no package.json dependency requirements'));
     } else if (pkgJson === null) {
       // Session 5.2 absent-target law (Task 2b): a MISSING target must FAIL loudly, never skip
       // to a pass. The observed defect was exactly this — a project with no package.json at all
@@ -4100,7 +4117,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 6. Security Scan (OPTIONAL — only when configured; runs after EVERY prompt) -------------
-  // Not part of the mandatory Contract-13 five: appended only when `securityScan` is supplied. Unlike
+  // Not part of the mandatory Contract-13 nine: appended only when `securityScan` is supplied. Unlike
   // visual regression / live preview it is NOT gated on UI changes — every prompt's generated code is
   // scanned. When `files` is not pinned, the prompt's changed files (from the File-Integrity diff) are
   // scanned so only the new/edited code is inspected; a null diff falls back to a full project walk.
@@ -4136,8 +4153,8 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 7. Visual Regression (OPTIONAL — only when configured AND after a UI prompt) ------------
-  // Not part of the mandatory Contract-13 five: the check is appended only when `visualRegression`
-  // is supplied. A build that does not opt in keeps exactly five checks (backward-compatible).
+  // Not part of the mandatory Contract-13 nine: the check is appended only when `visualRegression`
+  // is supplied. A build that does not opt in keeps exactly nine checks (backward-compatible).
   if (options.visualRegression && options.uiPromptJustRan !== false) {
     if (shouldSkipRest()) {
       record(skipRest('visual_regression'));
@@ -4165,7 +4182,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 8. Live Preview (OPTIONAL — only when configured AND after a UI change) -----------------
-  // Not part of the mandatory Contract-13 five: appended only when `livePreview` is supplied AND the
+  // Not part of the mandatory Contract-13 nine: appended only when `livePreview` is supplied AND the
   // prompt that just ran touched UI. "Touched UI" = a changed `.tsx`/`.css` file in this run's git
   // diff (when known), OR `uiPromptJustRan !== false` (config presence + UI signal implies intent).
   const uiFilesChanged = changedFilePaths !== null && hasUiFileChanges(changedFilePaths);
@@ -4199,7 +4216,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 9. Accessibility (OPTIONAL — only when configured AND after a UI change) ----------------
-  // Not part of the mandatory Contract-13 five: appended only when `accessibility` is supplied AND the
+  // Not part of the mandatory Contract-13 nine: appended only when `accessibility` is supplied AND the
   // prompt that just ran touched UI (same trigger as live preview — a `.tsx`/`.css` change in this
   // run's diff, or `uiPromptJustRan !== false` when the diff is unavailable). Runs axe-core over every
   // route for WCAG 2.1 AA; a critical violation FAILS the gate, lesser ones are surfaced but pass; an
@@ -4233,7 +4250,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 10. SEO (OPTIONAL — only when configured AND after a UI change) -------------------------
-  // Not part of the mandatory Contract-13 five: appended only when `seo` is supplied AND the prompt
+  // Not part of the mandatory Contract-13 nine: appended only when `seo` is supplied AND the prompt
   // that just ran touched UI (same trigger as live-preview / accessibility — a `.tsx`/`.css` change in
   // this run's diff, or `uiPromptJustRan !== false` when the diff is unavailable). Validates every route
   // for search-engine readiness with per-page scores; a critical issue FAILS the gate, lesser ones are
@@ -4267,7 +4284,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 11. Architecture Guard (OPTIONAL — only when configured; runs after EVERY prompt) ------
-  // Not part of the mandatory Contract-13 five: appended only when `architectureGuard` is supplied. Like
+  // Not part of the mandatory Contract-13 nine: appended only when `architectureGuard` is supplied. Like
   // the security scan it is NOT gated on UI changes — the WHOLE codebase is analyzed every prompt. Unlike
   // the security scan it is NOT pinned to the changed files: cycle/dead-code detection needs the full
   // module graph, so the guard always walks the project (the prompt's changed files are passed only as
@@ -4304,7 +4321,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 12. Consensus Validation (OPTIONAL post-generation check — runs after EVERY prompt) -----
-  // Not part of the mandatory Contract-13 five: appended only when `consensusValidation` is supplied
+  // Not part of the mandatory Contract-13 nine: appended only when `consensusValidation` is supplied
   // (the executor passes it after a prompt that produced an artifact). Like the security scan it is
   // NOT gated on UI changes — every generation is cross-checked by an independent multi-model panel.
   // The generation BLOCKS the gate when its approvals fall below the prompt_type consensus requirement
@@ -4339,7 +4356,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 13. AgentShield Security Scan (OPTIONAL — grade B+ required; runs after every prompt) ----
-  // Not part of the mandatory Contract-13 five: appended only when `agentShield` is supplied. Like
+  // Not part of the mandatory Contract-13 nine: appended only when `agentShield` is supplied. Like
   // the security scan it is NOT gated on UI changes — every prompt's output is scanned. A grade
   // below B (i.e. C/D/F) FAILS the gate; A or B passes; an un-scannable project SKIPS.
   if (options.agentShield) {
@@ -4404,7 +4421,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 15. Dead Code Scan (OPTIONAL — report only, never blocks; runs after every prompt) -------
-  // Not part of the mandatory Contract-13 five: appended only when `deadCodeScan` is supplied. It
+  // Not part of the mandatory Contract-13 nine: appended only when `deadCodeScan` is supplied. It
   // scans for unused imports, variables, and exports across the project. Results are ALWAYS surfaced
   // but NEVER block the build (report-only by design, matching the task spec "report, don't block").
   if (options.deadCodeScan) {
@@ -4431,7 +4448,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 16. Six Laws Verification (OPTIONAL — via governance-gate; runs after every prompt) ------
-  // Not part of the mandatory Contract-13 five: appended only when `sixLaws` is supplied. Runs the
+  // Not part of the mandatory Contract-13 nine: appended only when `sixLaws` is supplied. Runs the
   // full Six Laws check via `runSixLawsCheck` (governance-gate). A failing law FAILS the gate; a
   // law that cannot be evaluated SKIPS; an un-reachable app / browser SKIPS (never a false failure).
   if (options.sixLaws) {
@@ -4458,7 +4475,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 16b. Bundle Size Gate (OPTIONAL, Next.js only — feature/ui prompts; runs after Six Laws) --
-  // Not part of the mandatory Contract-13 five: appended only when `bundleSize` is supplied. Auto-
+  // Not part of the mandatory Contract-13 nine: appended only when `bundleSize` is supplied. Auto-
   // skips for any prompt type other than feature/ui and for a non-Next.js project (no
   // next.config.*). Rebuilds `.next/` when stale, compares per-page + total bundle size against
   // the Build Memory baseline (`build_runs.bundle_sizes`), and ratchets the baseline forward on
@@ -4490,7 +4507,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 16c. Component Accessibility Gate (OPTIONAL, static WCAG scan — feature/ui prompts) -------
-  // Not part of the mandatory Contract-13 five: appended only when `componentAccessibility` is
+  // Not part of the mandatory Contract-13 nine: appended only when `componentAccessibility` is
   // supplied. Auto-skips for any prompt type other than feature/ui and when no `src/components/`
   // directory exists. Runs `checkProjectAccessibility` (src/ui-engine/accessibility-checker.ts) —
   // a lighter, no-browser-required sibling to the axe-core `accessibility` check above.
@@ -4513,7 +4530,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 17. Full Playwright Test Suite (OPTIONAL — not incremental; runs after every prompt) -----
-  // Not part of the mandatory Contract-13 five: appended only when `playwright` is supplied. Unlike
+  // Not part of the mandatory Contract-13 nine: appended only when `playwright` is supplied. Unlike
   // the incremental-tester, this runs the COMPLETE Playwright suite (`pnpm playwright test`) every
   // time — no file-change filtering. Any test failure FAILS the gate; a timeout also FAILS. There
   // is no SKIP path (a missing Playwright install will produce a non-zero exit, which fails).
@@ -4532,7 +4549,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   }
 
   // --- 18. Consensus Proposal (OPTIONAL — independent proposals + peer critique round) ---------
-  // Not part of the mandatory Contract-13 five: appended only when `consensusProposal` is supplied
+  // Not part of the mandatory Contract-13 nine: appended only when `consensusProposal` is supplied
   // (the executor passes it before a prompt that is about to produce an artifact, in place of — or
   // alongside — the post-hoc `consensusValidation` check). Several providers draft BLIND to each
   // other, every usable draft is critiqued by its peers through the same panel `consensusValidation`

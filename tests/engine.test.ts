@@ -187,8 +187,10 @@ test('assemblePrompt composes all four sources + mandatory footer, returns a sta
   assert.equal(result.hash, hashPrompt(result.prompt));
   assert.match(result.hash, /^[0-9a-f]{64}$/);
 
-  // 6. Automatic model selection: a 'schema' prompt is architecture work → Opus, with a cost estimate.
-  assert.equal(result.model, 'claude-opus-4-6');
+  // 6. Automatic model selection: a 'schema' prompt is architecture work → the architecture
+  //    tier, which now routes to Sonnet (cost optimization — src/engine/model-router.ts:132,
+  //    "was opus"), with a cost estimate.
+  assert.equal(result.model, 'claude-sonnet-4-6');
   assert.equal(result.modelSelection.tier, 'architecture');
   assert.equal(result.modelSelection.isRecovery, false);
   assert.ok(result.estimatedCostUsd > 0, 'a non-empty prompt should have a positive cost estimate');
@@ -234,11 +236,11 @@ test('assemblePrompt notes missing governance, renders a failed Sentinel, and de
 // ---------------------------------------------------------------------------
 
 test('selectModel routes each prompt type to the correct tier/model', () => {
-  // Architecture/design → Opus.
+  // Architecture/design → the architecture tier, which routes to Sonnet (cost optimization).
   for (const t of ['schema', 'feature', 'agent'] as const) {
     const s = selectModel({ promptType: t });
     assert.equal(s.tier, 'architecture');
-    assert.equal(s.model, 'claude-opus-4-6');
+    assert.equal(s.model, 'claude-sonnet-4-6');
   }
   // Standard CRUD/boilerplate → Sonnet.
   for (const t of ['api', 'ui', 'auth', 'test'] as const) {
@@ -261,7 +263,7 @@ test('selectModel: a recovery attempt forces the simple (Haiku) tier regardless 
 });
 
 test('selectModelForEntry reads prompt_type; overrides are honored', () => {
-  assert.equal(selectModelForEntry(makeEntry()).model, 'claude-opus-4-6');
+  assert.equal(selectModelForEntry(makeEntry()).model, 'claude-sonnet-4-6');
   // Override the schema → tier mapping to standard.
   const overridden = selectModelForEntry(makeEntry(), { typeTier: { schema: 'standard' } });
   assert.equal(overridden.model, 'claude-sonnet-4-6');
@@ -292,10 +294,11 @@ test('ModelCostTracker accumulates per model and across the build', () => {
   assert.equal(summary.totalInputTokens, 1600);
   assert.equal(summary.totalOutputTokens, 2600);
   assert.ok(summary.totalCostUsd > 0);
-  // Three distinct models were used (opus, sonnet, haiku-via-recovery).
-  assert.equal(summary.byModel.length, 3);
-  const opus = summary.byModel.find((m) => m.model === 'claude-opus-4-6');
-  assert.equal(opus?.prompts, 1);
+  // Two distinct models were used: sonnet (architecture tier 'schema' + standard tier 'api'
+  // both route here — see src/engine/model-router.ts:132, "was opus") and haiku (recovery).
+  assert.equal(summary.byModel.length, 2);
+  const sonnet = summary.byModel.find((m) => m.model === 'claude-sonnet-4-6');
+  assert.equal(sonnet?.prompts, 2);
 
   tracker.reset();
   assert.equal(tracker.summary().totalPrompts, 0);
@@ -309,7 +312,7 @@ test('assemblePrompt records the prompt cost into a supplied tracker', async () 
   );
   const summary = tracker.summary();
   assert.equal(summary.totalPrompts, 1);
-  assert.equal(summary.byModel[0]?.model, 'claude-opus-4-6');
+  assert.equal(summary.byModel[0]?.model, 'claude-sonnet-4-6');
   assert.ok(summary.totalCostUsd > 0);
 });
 

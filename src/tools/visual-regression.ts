@@ -39,11 +39,26 @@
  */
 
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
-import { isAbsolute, join, dirname } from 'node:path';
+import { isAbsolute, dirname } from 'node:path';
 import zlib from 'node:zlib';
 
 import { nowIso } from '../memory/index.js';
 import { logLine } from './forge-logger.js';
+
+/**
+ * Joins path segments with `/`, regardless of platform. `node:path`'s `join` uses the platform
+ * separator, which on Windows turns a POSIX-style `projectPath` (e.g. one normalized elsewhere in
+ * the codebase, or supplied from a WSL/git-bash context) into a backslash path — silently
+ * mismatching every other consumer of these baseline/diff paths that expects `/`. Real Windows
+ * filesystem APIs (and Node's `fs`) accept `/` interchangeably with `\`, so this is safe for
+ * `defaultFs`'s real reads/writes too.
+ */
+function posixJoin(...parts: string[]): string {
+  return parts
+    .map((p, i) => (i === 0 ? p.replace(/\/+$/, '') : p.replace(/^\/+|\/+$/g, '')))
+    .filter((p) => p !== '')
+    .join('/');
+}
 
 // ---------------------------------------------------------------------------
 // Public contract — what to verify
@@ -246,8 +261,8 @@ export function routeSlug(path: string): string {
 
 /** Resolve a directory option (absolute kept; relative joined onto projectPath; default fallback). */
 function resolveDir(dir: string | undefined, projectPath: string, fallback: string[]): string {
-  if (dir && dir.trim() !== '') return isAbsolute(dir) ? dir : join(projectPath, dir);
-  return join(projectPath, ...fallback);
+  if (dir && dir.trim() !== '') return isAbsolute(dir) ? dir : posixJoin(projectPath, dir);
+  return posixJoin(projectPath, ...fallback);
 }
 
 /** Default filesystem seam — guarded, never throws. */
@@ -824,7 +839,7 @@ export async function runVisualRegression(
       status: 'skipped',
       passed: false,
       diffPercentage: -1,
-      baselinePath: join(baselineDir, `${routeSlug(p.path)}.png`),
+      baselinePath: posixJoin(baselineDir, `${routeSlug(p.path)}.png`),
       currentPath: null,
       diffImagePath: null,
       width: null,
@@ -911,9 +926,9 @@ interface ProcessPageDeps {
 /** Screenshot + diff a single route, capturing the baseline on first run. Never throws. */
 async function processPage(page: VisualRouteSpec, deps: ProcessPageDeps): Promise<PageVisualResult> {
   const slug = routeSlug(page.path);
-  const baselinePath = join(deps.baselineDir, `${slug}.png`);
-  const currentPath = join(deps.diffDir, `${slug}.current.png`);
-  const diffImagePath = join(deps.diffDir, `${slug}.diff.png`);
+  const baselinePath = posixJoin(deps.baselineDir, `${slug}.png`);
+  const currentPath = posixJoin(deps.diffDir, `${slug}.current.png`);
+  const diffImagePath = posixJoin(deps.diffDir, `${slug}.diff.png`);
   const url = joinUrl(deps.baseUrl, page.path);
   const fullPage = page.fullPage ?? deps.defaultFullPage;
 

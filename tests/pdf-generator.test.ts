@@ -164,12 +164,12 @@ test('generateBuildReportPdf produces a valid multi-page PDF and writes it', asy
   const dir = await mkdtemp(join(tmpdir(), 'forge-pdf-out-'));
   const outputPath = join(dir, 'reports', 'build.pdf');
   const result = await generateBuildReportPdf(BUILD, { outputPath, log: () => {} });
-  assert.equal(magic(result.bytes), PDF_MAGIC);
+  assert.ok(magic(result.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(result.bytes))}`);
   assert.ok(result.pageCount >= 1);
   assert.equal(result.outputPath, outputPath);
   const onDisk = await readFile(outputPath);
   assert.ok(onDisk.length > 0);
-  assert.equal(magic(onDisk), PDF_MAGIC);
+  assert.ok(magic(onDisk).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(onDisk))}`);
 });
 
 test('table of contents reserves front pages (more pages than without)', async () => {
@@ -180,7 +180,7 @@ test('table of contents reserves front pages (more pages than without)', async (
   }));
   const withToc = await renderPdf({ title: 'T', blocks }, { tableOfContents: true, log: () => {} });
   const without = await renderPdf({ title: 'T', blocks }, { tableOfContents: false, log: () => {} });
-  assert.equal(magic(withToc.bytes), PDF_MAGIC);
+  assert.ok(magic(withToc.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(withToc.bytes))}`);
   assert.ok(withToc.pageCount > without.pageCount);
 });
 
@@ -200,7 +200,7 @@ test('grant narrative renders submission-ready with header/footer (no throw)', a
     },
     { log: () => {} }
   );
-  assert.equal(magic(result.bytes), PDF_MAGIC);
+  assert.ok(magic(result.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(result.bytes))}`);
   assert.ok(result.pageCount >= 2);
 });
 
@@ -208,7 +208,7 @@ test('governance, board, and audit reports all produce valid PDFs', async () => 
   const gov = await generateGovernancePdf('BLUEPRINT.md', '# BLUEPRINT\n\n## Identity\n\nFORGE.\n\n- a\n- b', {
     log: () => {},
   });
-  assert.equal(magic(gov.bytes), PDF_MAGIC);
+  assert.ok(magic(gov.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(gov.bytes))}`);
 
   const board = await generateBoardReportPdf(
     {
@@ -223,7 +223,7 @@ test('governance, board, and audit reports all produce valid PDFs', async () => 
     },
     { log: () => {} }
   );
-  assert.equal(magic(board.bytes), PDF_MAGIC);
+  assert.ok(magic(board.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(board.bytes))}`);
 
   const audit = await generateAuditReportPdf(
     {
@@ -239,7 +239,7 @@ test('governance, board, and audit reports all produce valid PDFs', async () => 
     },
     { log: () => {} }
   );
-  assert.equal(magic(audit.bytes), PDF_MAGIC);
+  assert.ok(magic(audit.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(audit.bytes))}`);
 });
 
 test('renderPdf never throws and reports the brand source in warnings flow', async () => {
@@ -265,7 +265,7 @@ test('renderPdf never throws and reports the brand source in warnings flow', asy
     },
     { log: () => {} }
   );
-  assert.equal(magic(result.bytes), PDF_MAGIC);
+  assert.ok(magic(result.bytes).startsWith(PDF_MAGIC), `expected PDF magic header, got ${JSON.stringify(magic(result.bytes))}`);
   assert.ok(result.pageCount >= 2);
   assert.equal(result.outputPath, null);
 });

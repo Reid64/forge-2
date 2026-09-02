@@ -24,6 +24,7 @@ import {
   type ProviderName,
 } from '../src/engine/provider-router.js';
 import type { ModelRequest } from '../src/phases/phase1a-prd.js';
+import type { ClaudeRunResult } from '../src/engine/claude-runner.js';
 
 // ---------------------------------------------------------------------------
 // Fake fetch (scripted per host) + helpers
@@ -69,6 +70,39 @@ const anthropicOk = (text: string, tin = 5, tout = 9): ScriptedReply => ({
   body: { content: [{ type: 'text', text }], usage: { input_tokens: tin, output_tokens: tout } },
 });
 
+/**
+ * `complex_reasoning`'s `anthropic` leg never goes through `fetchImpl` — it shells out to the
+ * real Claude Code CLI via `runClaudeCli` (see src/engine/provider-router.ts's `callViaClaudeCode`).
+ * Without this injected stand-in, these "pure, no network, no real keys" tests would invoke the
+ * real, locally-authenticated `claude` CLI whenever one is on PATH.
+ */
+function fakeClaudeCli(stdout: string, tokensEstimated = 20): () => Promise<ClaudeRunResult> {
+  return async () => ({
+    stdout,
+    stderr: '',
+    exitCode: 0,
+    durationMs: 1,
+    tokensEstimated,
+    timedOut: false,
+    signal: null,
+    success: true,
+  });
+}
+
+/** A CLI run that failed (non-zero exit / no output) — drives the failover path. */
+function failingClaudeCli(stderr = 'claude: not authenticated'): () => Promise<ClaudeRunResult> {
+  return async () => ({
+    stdout: '',
+    stderr,
+    exitCode: 1,
+    durationMs: 1,
+    tokensEstimated: 0,
+    timedOut: false,
+    signal: null,
+    success: false,
+  });
+}
+
 const REQUEST: ModelRequest = {
   model: 'claude-sonnet-4-6',
   maxTokens: 1024,
@@ -109,7 +143,7 @@ test('routes complex_reasoning to anthropic and validation to openai', async () 
     { match: 'api.anthropic.com', reply: anthropicOk('claude') },
     { match: 'api.openai.com', reply: openAiOk('gpt') },
   ]);
-  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys() });
+  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys(), runClaudeCli: fakeClaudeCli('claude') });
 
   const reasoning = await router.route('complex_reasoning', REQUEST);
   assert.equal(reasoning.provider, 'anthropic');
@@ -141,16 +175,22 @@ test('code_review prefers deepseek, documentation prefers gemini', async () => {
 
 test('fails over to the next provider on a 429 and records a cooldown', async () => {
   let clock = 1_000;
-  const { fetchImpl } = makeFetch([
-    { match: 'api.anthropic.com', reply: { status: 429, body: { error: 'rate limited' } } },
-    { match: 'api.openai.com', reply: openAiOk('fallback') },
-  ]);
-  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys(), now: () => clock, cooldownMs: 60_000 });
+  const { fetchImpl } = makeFetch([{ match: 'api.openai.com', reply: openAiOk('fallback') }]);
+  // complex_reasoning's default chain is anthropic-only (CLI-authenticated, no failover needed
+  // in production); override it here to restore a failover chain for this test.
+  const router = new ProviderRouter({
+    fetchImpl,
+    getEnv: allKeys(),
+    now: () => clock,
+    cooldownMs: 60_000,
+    routes: { complex_reasoning: ['anthropic', 'openai'] },
+    runClaudeCli: failingClaudeCli(),
+  });
 
   const first = await router.route('complex_reasoning', REQUEST);
-  assert.equal(first.provider, 'openai', 'failed over off the rate-limited anthropic');
+  assert.equal(first.provider, 'openai', 'failed over off the failing anthropic CLI leg');
   assert.equal(first.attempts[0]?.provider, 'anthropic');
-  assert.equal(first.attempts[0]?.status, 429);
+  assert.equal(first.attempts[0]?.status, 500, 'a failed CLI run reports as a 500 (non-timeout failure)');
 
   // Within the cooldown window anthropic is skipped without even being called.
   clock = 2_000;
@@ -168,16 +208,24 @@ test('skips providers with no key', async () => {
     fetchImpl,
     getEnv: (n) => (n === 'OPENAI_API_KEY' ? 'sk-oai' : undefined), // only OpenAI keyed
   });
-  const res = await router.route('complex_reasoning', REQUEST); // chain starts at anthropic
+  // code_review's chain is ['deepseek', 'anthropic', 'openai', 'gemini'] — none of these legs go
+  // through the Claude CLI (that's `complex_reasoning`-only), so both deepseek and anthropic are
+  // skipped for lacking a key before landing on the keyed openai.
+  const res = await router.route('code_review', REQUEST);
+  assert.equal(res.attempts[0]?.provider, 'deepseek');
   assert.equal(res.attempts[0]?.outcome, 'no_key');
+  assert.equal(res.attempts[1]?.provider, 'anthropic');
+  assert.equal(res.attempts[1]?.outcome, 'no_key');
   assert.equal(res.provider, 'openai');
 });
 
 test('throws AllProvidersExhaustedError when the whole chain is unavailable', async () => {
   const { fetchImpl } = makeFetch([]); // nothing keyed, nothing answers
   const router = new ProviderRouter({ fetchImpl, getEnv: () => undefined });
+  // code_review's chain has 4 providers, none of which go through the Claude CLI (that's
+  // complex_reasoning-only) — with no keys configured anywhere, all 4 are skipped for no_key.
   await assert.rejects(
-    () => router.route('complex_reasoning', REQUEST),
+    () => router.route('code_review', REQUEST),
     (err: unknown) => err instanceof AllProvidersExhaustedError && err.attempts.length === 4
   );
 });
@@ -218,9 +266,17 @@ test('tracks cost + tokens per provider across calls', async () => {
   const { fetchImpl } = makeFetch([
     { match: 'api.anthropic.com', reply: anthropicOk('a', 1_000_000, 1_000_000) },
   ]);
-  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys(), usage, today: () => '2026-06-11' });
+  // code_review's chain leads with deepseek; only keying anthropic forces deepseek to skip
+  // (no_key) and land on anthropic via the normal fetch path (complex_reasoning's anthropic leg
+  // is CLI-only and has no per-call token/cost accounting to test against a fetch reply).
+  const router = new ProviderRouter({
+    fetchImpl,
+    getEnv: (n) => (n === 'ANTHROPIC_API_KEY' ? 'sk-ant' : undefined),
+    usage,
+    today: () => '2026-06-11',
+  });
 
-  const res = await router.route('complex_reasoning', REQUEST);
+  const res = await router.route('code_review', REQUEST);
   // 1M in @ $3 + 1M out @ $15 = $18.
   assert.equal(res.costUsd, 18);
 
@@ -275,8 +331,13 @@ test('routes every call through the LiteLLM proxy when configured, with a prefix
 
 test('callModelFor returns a CallModel adapting RoutedResponse to ModelResponse', async () => {
   const { fetchImpl } = makeFetch([{ match: 'api.anthropic.com', reply: anthropicOk('claude', 4, 6) }]);
-  const router = new ProviderRouter({ fetchImpl, getEnv: allKeys() });
-  const callModel = router.callModelFor('complex_reasoning');
+  // code_review (not complex_reasoning) so anthropic is reached via the normal fetch path —
+  // complex_reasoning's anthropic leg is CLI-only and has no exact token counts to assert here.
+  const router = new ProviderRouter({
+    fetchImpl,
+    getEnv: (n) => (n === 'ANTHROPIC_API_KEY' ? 'sk-ant' : undefined),
+  });
+  const callModel = router.callModelFor('code_review');
   const out = await callModel(REQUEST);
   assert.deepEqual(out, { text: 'claude', tokensInput: 4, tokensOutput: 6 });
 });

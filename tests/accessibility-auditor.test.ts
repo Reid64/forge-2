@@ -190,7 +190,10 @@ test('all routes clean → PASS, server stopped, browser closed, result stored',
   assert.equal(result.auditedPages, 2);
   assert.equal(result.pages.every((p) => p.status === 'pass'), true);
   assert.equal(stop.stopped, true);
-  assert.equal(driver.closed, true);
+  // A caller-injected driver is never closed by this function — only a driver it creates
+  // internally (ownsDriver) is, so a shared/reused driver survives across multiple gates by
+  // design (src/tools/accessibility-auditor.ts:936,945,964).
+  assert.equal(driver.closed, false);
   assert.equal(store.calls.length, 1); // stored once
   assert.equal(store.calls[0]?.blocked, false);
 });
@@ -368,14 +371,14 @@ function reportStub(overrides: Partial<AccessibilityReport>): AccessibilityRepor
   };
 }
 
-test('Sentinel: no accessibility config → exactly the five Contract-13 checks', async () => {
+test('Sentinel: no accessibility config → exactly the nine Contract-13 checks', async () => {
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     log: silent,
   });
-  assert.equal(result.checks.length, 5);
+  assert.equal(result.checks.length, 9);
   assert.equal(result.checks.some((c) => c.name === 'accessibility'), false);
 });
 
@@ -383,6 +386,10 @@ test('Sentinel: accessibility runs after a .tsx change and a CRITICAL violation 
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
+    // Present but baseline-free, so the mandatory Dependency check SKIPs cleanly instead of
+    // hard-failing on an absent manifest (Session 5.2 absent-target law) — this test is about
+    // the accessibility check specifically being the one that fails the gate.
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'M', path: 'src/app/dashboard/page.tsx' }],
     accessibility: { routes: [{ path: '/dashboard' }] },
     uiPromptJustRan: true,
@@ -421,6 +428,7 @@ test('Sentinel: accessibility passes (non-critical surfaced) without failing the
   const result = await runSentinel({
     projectPath: '/proj',
     runCommand: passingRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'M', path: 'src/app/page.tsx' }],
     accessibility: { routes: [{ path: '/' }] },
     uiPromptJustRan: true,

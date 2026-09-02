@@ -246,8 +246,8 @@ test('detectProjectStack: detects every requested combination at once (stripe/pl
 
 const library = loadSkillsLibrary(defaultSkillsLibraryDir());
 
-test('the real skills library loads all 39 shipped templates', () => {
-  assert.strictEqual(library.skills.length, 39);
+test('the real skills library loads all 40 shipped templates', () => {
+  assert.strictEqual(library.skills.length, 40);
 });
 
 test('getForPrompt never returns the entire library for any single prompt type', () => {

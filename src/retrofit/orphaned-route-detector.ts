@@ -1,8 +1,9 @@
 // FORGE 2.0 — RETROFIT: Orphaned Route Detector
 //
-// Regex-based (not AST-based) scan of a target project's src/app/api/**/route.ts tree to
-// enumerate every Next.js API route and its exported HTTP methods, then cross-references every
-// non-route .ts(x) file in src/** for fetch()/axios()/supabase-client string literals that
+// Regex-based (not AST-based) scan of a target project's app/api/**/route.ts tree (src/app or
+// root-level app/, whichever the project uses) to enumerate every Next.js API route and its
+// exported HTTP methods, then cross-references every non-route .ts(x) frontend file for
+// fetch()/axios()/supabase-client string literals that
 // reference an API path. A route with zero frontend callers anywhere in the codebase is flagged
 // orphaned, except for a small allowlist of routes that are legitimately called from outside the
 // frontend (health checks, webhook receivers, auth-library internals). Read-only against the
@@ -10,7 +11,7 @@
 // persistence step (`orphaned_routes`), which never throws (Contract 4 — a Build Memory failure
 // degrades to stateless mode, it does not halt the caller).
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { getClient, logMemoryWarning, newId, nowIso } from '../memory/client.js';
@@ -31,7 +32,29 @@ const SOURCE_FILE_RE = /\.(ts|tsx)$/;
 const TEST_OR_STORY_RE = /\.(test|spec)\.tsx?$|\.stories\.tsx$/;
 const ROUTE_FILE_BASENAMES = new Set(['route.ts', 'route.tsx']);
 
-/** Recursively collects every `src/app/api/**\/route.ts(x)` file, fs.readdirSync-based. */
+/**
+ * Resolves the project's App Router root: `src/app` when the project uses the `--src-dir`
+ * layout, else `app` at the project root — create-next-app's actual default. Without this
+ * fallback, any non-`src`-dir Next.js project (the common case) is scanned at the wrong path
+ * and every downstream check silently sees zero routes / zero frontend files.
+ */
+function resolveAppDir(projectPath: string): string {
+  const srcApp = join(projectPath, 'src', 'app');
+  if (existsSync(srcApp)) return srcApp;
+  return join(projectPath, 'app');
+}
+
+/**
+ * Resolves the root to scan for frontend caller files: `src` when it exists, else the project
+ * root itself (relying on {@link EXCLUDE_DIRS} to keep `node_modules`/`.next`/etc. out).
+ */
+function resolveFrontendRoot(projectPath: string): string {
+  const src = join(projectPath, 'src');
+  if (existsSync(src)) return src;
+  return projectPath;
+}
+
+/** Recursively collects every `<appDir>/api/**\/route.ts(x)` file, fs.readdirSync-based. */
 function walkRouteFiles(projectPath: string): string[] {
   const acc: string[] = [];
 
@@ -62,11 +85,11 @@ function walkRouteFiles(projectPath: string): string[] {
     }
   }
 
-  walk(join(projectPath, 'src', 'app', 'api'));
+  walk(join(resolveAppDir(projectPath), 'api'));
   return acc;
 }
 
-/** Recursively collects every `src/**\/*.ts(x)` file EXCLUDING route.ts(x)/test/story files. */
+/** Recursively collects every frontend `**\/*.ts(x)` file EXCLUDING route.ts(x)/test/story files. */
 function walkFrontendFiles(projectPath: string): string[] {
   const acc: string[] = [];
 
@@ -101,7 +124,7 @@ function walkFrontendFiles(projectPath: string): string[] {
     }
   }
 
-  walk(join(projectPath, 'src'));
+  walk(resolveFrontendRoot(projectPath));
   return acc;
 }
 
@@ -119,7 +142,7 @@ function toProjectRelative(projectPath: string, absPath: string): string {
  * Next.js and never appear in the resolved URL, so they are stripped.
  */
 function computeRoutePath(projectPath: string, absPath: string): string {
-  const appDir = join(projectPath, 'src', 'app');
+  const appDir = resolveAppDir(projectPath);
   let rel = relative(appDir, absPath).replace(/\\/g, '/');
   rel = rel.replace(/\/route\.tsx?$/, '').replace(/^route\.tsx?$/, '');
 
@@ -303,8 +326,9 @@ function persistFindings(runId: string, projectPath: string, findings: OrphanedR
 
 export class OrphanedRouteDetector {
   /**
-   * Enumerates every `src/app/api/**\/route.ts(x)` file, extracts its route path + exported HTTP
-   * methods, then scans every non-route `.ts(x)` file under `src/**` for fetch/axios/supabase
+   * Enumerates every `app/api/**\/route.ts(x)` file (under `src/app` or root-level `app/`,
+   * whichever the project uses), extracts its route path + exported HTTP methods, then scans
+   * every non-route `.ts(x)` frontend file for fetch/axios/supabase
    * string literals referencing an API path. Routes with zero matching frontend callers are
    * flagged orphaned, excluding `/api/health`, `/api/webhooks/*`, and `/api/auth/*` (called from
    * outside the frontend by design). Read-only against the project. Findings are persisted to

@@ -483,11 +483,19 @@ export class SchemaDriftDetector {
    * not the other, and obvious SQL/TS type-category mismatches. Read-only against the project.
    * Findings are persisted to `schema_drift_findings` (best-effort) and returned sorted by
    * severity (critical first) then table name.
+   *
+   * Short-circuits to `[]` when the project has zero `supabase/migrations/*.sql` files — a
+   * project that hasn't reached its schema-authoring stage yet has no DB layer to drift from,
+   * so every exported TS interface/type would otherwise be flagged `type_missing_table` (a
+   * false flood, not a real finding). A migrations directory that exists but happens to define
+   * zero tables is a different, still-meaningful case and is NOT short-circuited here.
    */
   async detect(projectPath: string): Promise<SchemaDriftFinding[]> {
     const runId = newId();
 
     const migrationFiles = listMigrationFiles(projectPath);
+    if (migrationFiles.length === 0) return [];
+
     const sqlSchema = buildResolvedSchema(migrationFiles);
     const tsTypes = buildTsTypeMap(projectPath);
 

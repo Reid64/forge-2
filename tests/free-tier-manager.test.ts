@@ -276,8 +276,18 @@ test('freeTierRouterOptions makes the router try a free provider before a paid o
   const router = new ProviderRouter({
     ...freeTierRouterOptions(m),
     fetchImpl,
-    getEnv: () => 'key', // every provider has a key
-    // complex_reasoning default chain leads with anthropic; the reorderer must put gemini first.
+    // Every provider has a key, but NOT a LiteLLM proxy — a blanket `() => 'key'` would also
+    // satisfy the router's `FORGE_LITELLM_PROXY_URL`/`LITELLM_PROXY_KEY` lookups, routing every
+    // call through a (nonexistent) proxy instead of hitting each provider's own endpoint.
+    getEnv: (n) => (n.includes('PROXY') ? undefined : 'key'),
+    // complex_reasoning's default chain is anthropic-only; override it so gemini is a chain
+    // member the reorderer can actually promote ahead of anthropic.
+    routes: { complex_reasoning: ['anthropic', 'gemini'] },
+    // Defensive only: if gemini is correctly promoted first and succeeds, anthropic's CLI leg is
+    // never reached at all — but this test must never fall through to the real `claude` CLI.
+    runClaudeCli: async () => {
+      throw new Error('test bug: should never reach the Claude CLI — gemini should have been tried first');
+    },
   });
   const res = await router.route('complex_reasoning', req);
   assert.equal(res.provider, 'gemini');

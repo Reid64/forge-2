@@ -825,24 +825,30 @@ export class FreeTierManager {
   /**
    * Reorder a task's provider chain so providers with free capacity remaining today (and not
    * rate-limited) lead — ordered by configured priority, ties broken by the original chain
-   * order — and the paid / exhausted / rate-limited providers follow as the fall-back tail in
-   * their original order. The chain's MEMBERSHIP is preserved (nothing is dropped) so the
+   * order. The rest of the chain forms the fall-back tail, in their original relative order,
+   * with one distinction: a provider that's free-tier-capable but temporarily RATE-LIMITED
+   * sorts BEHIND a permanently paid-only/exhausted provider, not alongside it — trying it right
+   * now would just fail immediately, so a provider that's actually available (even if paid)
+   * is the better next attempt. The chain's MEMBERSHIP is preserved (nothing is dropped) so the
    * router's own failover still works when every free option is gone.
    */
   prioritize(chain: ProviderName[], day: string = this.today()): ProviderName[] {
     const freeUsable: Array<{ name: ProviderName; idx: number; priority: number }> = [];
-    const fallback: ProviderName[] = [];
+    const otherFallback: ProviderName[] = [];
+    const rateLimitedFallback: ProviderName[] = [];
     chain.forEach((name, idx) => {
       if (!isProviderName(name)) return;
       const avail = this.availability(name, day);
       if (avail.freeTierAvailable && !avail.rateLimited) {
         freeUsable.push({ name, idx, priority: this._settings[name].priority });
+      } else if (avail.freeTierAvailable && avail.rateLimited) {
+        rateLimitedFallback.push(name);
       } else {
-        fallback.push(name);
+        otherFallback.push(name);
       }
     });
     freeUsable.sort((a, b) => a.priority - b.priority || a.idx - b.idx);
-    return [...freeUsable.map((x) => x.name), ...fallback];
+    return [...freeUsable.map((x) => x.name), ...otherFallback, ...rateLimitedFallback];
   }
 
   /** The `prioritizeChain` closure to spread into {@link ProviderRouterOptions}. */

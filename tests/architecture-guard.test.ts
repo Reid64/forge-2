@@ -8,7 +8,7 @@
  * duplicate logic; N+1 in an API route; missing error boundary; hardcoded URL; dead code; `as any`),
  * the non-fatal/empty-project SKIP, severity overrides, and the Phase 4 Sentinel integration (the
  * optional eleventh check: opt-in, a high-severity violation fails the gate, non-high passes, the
- * default five-check path is untouched).
+ * default nine-check path is untouched).
  */
 
 import test from 'node:test';
@@ -367,14 +367,14 @@ function archReport(over: Partial<ArchitectureReport>): ArchitectureReport {
   };
 }
 
-test('Sentinel: no architecture config → exactly the five Contract-13 checks', async () => {
+test('Sentinel: no architecture config → exactly the nine Contract-13 checks', async () => {
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
     getFileChanges: async () => [],
     log: () => {},
   });
-  assert.equal(res.checks.length, 5);
+  assert.equal(res.checks.length, 9);
   assert.ok(!res.checks.some((c) => c.name === 'architecture'));
 });
 
@@ -382,6 +382,7 @@ test('Sentinel: a HIGH-severity architectural violation FAILS the gate', async (
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'A', path: 'src/a.ts' }],
     architectureGuard: {},
     runArchitectureCheck: async () =>
@@ -405,6 +406,7 @@ test('Sentinel: a clean architecture check passes (eleventh check present)', asy
   const res = await runSentinel({
     projectPath: '/proj',
     runCommand: greenRun,
+    packageJsonContent: '{}',
     getFileChanges: async () => [{ status: 'A', path: 'src/a.ts' }],
     architectureGuard: {},
     runArchitectureCheck: async () => archReport({ counts: { high: 0, medium: 2, low: 1 } }),
