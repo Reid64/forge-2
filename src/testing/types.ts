@@ -73,6 +73,28 @@ export enum RunnerType {
    *  symptoms (5xx under concurrent load, duplicate identifiers in the responses). Same
    *  ENTERPRISE_RELEASE ONLY gate as IDEMPOTENCY above. */
   CONCURRENCY = 'CONCURRENCY',
+  /** Load testing (k6, `k6/load.js`) — sustained traffic at expected steady-state request rate.
+   *  Same optional-external-binary degrade pattern as PERFORMANCE (load-runner.ts). Gated to
+   *  ENTERPRISE_GRADE (PRE-DEPLOYMENT) and above (`src/governance/readiness-levels.ts`). */
+  LOAD = 'LOAD',
+  /** Stress testing (k6, `k6/stress.js`) — traffic ramped beyond expected capacity to find the
+   *  breaking point. Same optional-external-binary degrade pattern (stress-runner.ts). Gated to
+   *  MISSION_CRITICAL/HYPERSCALE only, via `ALL_TEST_SUITES`. */
+  STRESS = 'STRESS',
+  /** Soak (endurance) testing (k6, `k6/soak.js`) — moderate load held for an extended duration to
+   *  surface time-dependent degradation (memory leaks, connection-pool exhaustion). Same
+   *  optional-external-binary degrade pattern (soak-runner.ts). Gated to MISSION_CRITICAL/
+   *  HYPERSCALE only, via `ALL_TEST_SUITES`. */
+  SOAK = 'SOAK',
+  /** Cross-browser compatibility (Chromium/Firefox/WebKit) — cross-browser-runner.ts's own
+   *  throwaway dev server (port 3102), probing '/' in all three Playwright engines for a clean
+   *  load with no uncaught page error. Gated to ENTERPRISE_GRADE and above. */
+  CROSS_BROWSER = 'CROSS_BROWSER',
+  /** Cross-device compatibility (phone/tablet/small-laptop viewports via Playwright's own device
+   *  descriptors) — cross-device-runner.ts's own throwaway dev server (port 3103), probing '/' on
+   *  each profile for a clean load with no horizontal overflow. Gated to ENTERPRISE_GRADE and
+   *  above. */
+  CROSS_DEVICE = 'CROSS_DEVICE',
 }
 
 export interface TestRunResult {

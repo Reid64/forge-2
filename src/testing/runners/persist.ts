@@ -59,7 +59,16 @@ const MAX_FAILURE_SUMMARY = 20;
  *
  *  IDEMPOTENCY/CONCURRENCY (idempotency-runner.ts/concurrency-runner.ts — schema 3.7.0) are two
  *  more dedicated, new TestSuiteDb values, same one-to-one reasoning as CHAOS/DISASTER_RECOVERY/
- *  BACKUP_RESTORE immediately above — both are gated ENTERPRISE_RELEASE ONLY. */
+ *  BACKUP_RESTORE immediately above — both are gated ENTERPRISE_RELEASE ONLY.
+ *
+ *  LOAD/STRESS/SOAK (load-runner.ts/stress-runner.ts/soak-runner.ts) and CROSS_BROWSER/
+ *  CROSS_DEVICE (cross-browser-runner.ts/cross-device-runner.ts) are five more dedicated,
+ *  already-existing TestSuiteDb values (present in the CHECK constraint since before any of these
+ *  runners existed — `src/memory/test-results.ts`'s `TestSuiteDb` union carried them as
+ *  schema-only placeholders; see Finding I-3 in AUDIT-REPORT.md) — one-to-one, same reasoning as
+ *  CHAOS/DISASTER_RECOVERY/BACKUP_RESTORE/IDEMPOTENCY/CONCURRENCY above: each is gated no lower
+ *  than ENTERPRISE_GRADE in `readiness-levels.ts`, and a dedicated value keeps that withholding
+ *  expressible. */
 export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.UNIT]: 'UNIT',
   [RunnerType.INTEGRATION]: 'INTEGRATION',
@@ -89,6 +98,11 @@ export const TEST_SUITE_DB: Record<RunnerType, TestSuiteDb> = {
   [RunnerType.BACKUP_RESTORE]: 'BACKUP_RESTORE',
   [RunnerType.IDEMPOTENCY]: 'IDEMPOTENCY',
   [RunnerType.CONCURRENCY]: 'CONCURRENCY',
+  [RunnerType.LOAD]: 'LOAD',
+  [RunnerType.STRESS]: 'STRESS',
+  [RunnerType.SOAK]: 'SOAK',
+  [RunnerType.CROSS_BROWSER]: 'CROSS_BROWSER',
+  [RunnerType.CROSS_DEVICE]: 'CROSS_DEVICE',
 };
 
 const ANSI_RESET = '\x1b[0m';

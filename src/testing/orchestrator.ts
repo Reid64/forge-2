@@ -44,6 +44,11 @@ import { run as runMigrationSafety } from './runners/migration-safety-runner.js'
 import { run as runSemgrep } from './runners/semgrep-runner.js';
 import { run as runZap } from './runners/zap-runner.js';
 import { run as runSchemathesis } from './runners/schemathesis-runner.js';
+import { run as runLoad } from './runners/load-runner.js';
+import { run as runStress } from './runners/stress-runner.js';
+import { run as runSoak } from './runners/soak-runner.js';
+import { run as runCrossBrowser } from './runners/cross-browser-runner.js';
+import { run as runCrossDevice } from './runners/cross-device-runner.js';
 
 type RunnerFn = (input: RunnerInput) => Promise<RunnerOutcome>;
 
@@ -76,6 +81,11 @@ const RUNNERS: Record<RunnerType, RunnerFn> = {
   [RunnerType.BACKUP_RESTORE]: runBackupRestore,
   [RunnerType.IDEMPOTENCY]: runIdempotency,
   [RunnerType.CONCURRENCY]: runConcurrency,
+  [RunnerType.LOAD]: runLoad,
+  [RunnerType.STRESS]: runStress,
+  [RunnerType.SOAK]: runSoak,
+  [RunnerType.CROSS_BROWSER]: runCrossBrowser,
+  [RunnerType.CROSS_DEVICE]: runCrossDevice,
 };
 
 /** TriggerType -> test_run_results.trigger. The schema has no POST_DEPLOY value (F9/DeployVerifier
