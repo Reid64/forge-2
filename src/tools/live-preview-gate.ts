@@ -274,11 +274,21 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Resolve a value after `ms` (used by the readiness poll; unref'd so it never holds the loop). */
+/**
+ * Resolve after `ms` (used by the readiness poll). Deliberately NOT `unref()`'d: this timer is
+ * the only thing driving `startDevServer`'s poll loop forward, and once the spawned dev-server
+ * child exits (e.g. no package.json — an immediate, common failure), its process handle stops
+ * holding the event loop open. An unref'd timer at that point leaves Node with zero ref'd handles
+ * mid-poll, so it exits the whole process right there instead of running this callback — the
+ * `await delay(...)` (and everything awaiting `startDevServer`) never settles, and the caller
+ * never sees the intended "dev server exited"/"timed out" warning. The loop is bounded (at most
+ * `startupTimeoutMs`, default 30s) and always returns, so there is no runaway-timer risk in
+ * keeping this ref'd. (Same bug, same fix, as `design-pipeline/screenshotter.ts`'s `delay()` —
+ * commit 38d8a9b.)
+ */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t.unref === 'function') t.unref();
+    setTimeout(resolve, ms);
   });
 }
 
