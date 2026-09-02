@@ -1,9 +1,9 @@
 // FORGE 2.0 — RETROFIT: Coverage Baseline
 //
-// Regex-based (not AST-based) scan of a target project's src/lib/**/*.ts and
-// src/components/**/*.tsx — the testable units, excluding Next.js framework entry
-// points (page.tsx, route.ts, layout.tsx) which are exercised through routing and
-// integration tests rather than unit tests. For every testable file, checks whether
+// Regex-based (not AST-based) scan of a target project's whole source tree (src/**/*.ts(x), or
+// the project root when there's no src/ dir) for testable units, excluding test/spec files and
+// Next.js framework entry points (page.tsx, route.ts, layout.tsx) which are exercised through
+// routing and integration tests rather than unit tests. For every testable file, checks whether
 // a co-located test file exists ({file}.test.ts, {file}.test.tsx, {file}.spec.ts, or
 // __tests__/{filename}.test.ts), counts the file's exported functions/classes/
 // constants, and — when a test file exists — counts its it()/test() calls as a rough
@@ -38,12 +38,25 @@ const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', 'out', 'coverage',
   '.forge', '.claude', '.vercel', '__tests__',
 ]);
-const LIB_FILE_RE = /\.ts$/;
-const COMPONENT_FILE_RE = /\.tsx$/;
+const SOURCE_FILE_RE = /\.tsx?$/;
 const TEST_OR_SPEC_RE = /\.(test|spec)\.tsx?$/;
 
 // Next.js framework entry points — exercised via routing/integration tests, not unit tests.
 const EXCLUDED_BASENAMES = new Set(['page.tsx', 'route.ts', 'layout.tsx']);
+
+/**
+ * Resolve the project's source root: `src` when it exists, else the project root itself (relying
+ * on {@link EXCLUDE_DIRS} to keep `node_modules`/`.next`/etc. out) — mirrors
+ * `orphaned-route-detector.ts`'s `resolveFrontendRoot`. Without this, a project whose testable
+ * units live anywhere other than exactly `src/lib/**` or `src/components/**` (e.g. `src/hooks/`,
+ * `src/server/`, `src/services/`, a non-`src`-dir layout) was invisible to this module entirely —
+ * not "0% coverage", it never scanned a single file (Finding B-1).
+ */
+function resolveSourceRoot(projectPath: string): string {
+  const src = join(projectPath, 'src');
+  if (existsSync(src)) return src;
+  return projectPath;
+}
 
 /** Recursively collects every file matching `fileRe` under `rootDir`, fs.readdirSync-based. */
 function walkFiles(rootDir: string, fileRe: RegExp): string[] {
@@ -178,13 +191,13 @@ function computeCoveragePercent(exportedSymbols: number, coveredSymbols: number,
 
 const LIB_CORE_OR_UTILS_RE = /^src\/lib\/(core|utils)(\/|$)/;
 const LIB_RE = /^src\/lib\//;
-const COMPONENTS_RE = /^src\/components\//;
 const LOW_COVERAGE_THRESHOLD = 50;
 
 /**
  * critical: src/lib/core or src/lib/utils with no test file.
  * high: any other src/lib/* file with no test file.
- * medium: src/components/* with no test file.
+ * medium: src/components/*, or any other testable source file outside those two trees
+ *   (src/hooks/, src/server/, a non-src-dir layout, ...) with no test file.
  * low: a test file exists but estimated coverage is below the 50% threshold.
  * A file that has a test file AND coverage at/above 50% is adequately covered and
  * returns `null` — none of the four priority tiers describe "no action needed", so
@@ -199,8 +212,7 @@ function classifyPriority(
   if (!hasTestFile) {
     if (LIB_CORE_OR_UTILS_RE.test(relPath)) return 'critical';
     if (LIB_RE.test(relPath)) return 'high';
-    if (COMPONENTS_RE.test(relPath)) return 'medium';
-    return 'medium'; // unreachable given the two scan roots below — kept as a safe default
+    return 'medium'; // src/components/*, or any other testable file — same default tier
   }
   return coveragePercent < LOW_COVERAGE_THRESHOLD ? 'low' : null;
 }
@@ -269,9 +281,7 @@ export class CoverageBaseline {
    * by priority (critical first), then by file path.
    */
   async analyze(projectPath: string): Promise<CoverageBaselineFinding[]> {
-    const libFiles = walkFiles(join(projectPath, 'src', 'lib'), LIB_FILE_RE);
-    const componentFiles = walkFiles(join(projectPath, 'src', 'components'), COMPONENT_FILE_RE);
-    const allFiles = [...libFiles, ...componentFiles];
+    const allFiles = walkFiles(resolveSourceRoot(projectPath), SOURCE_FILE_RE);
 
     const allEntries: ScannedFile[] = [];
 
