@@ -63,7 +63,7 @@
  * `tsx`/`ts-node` loader at runtime, only this one child invocation does.
  */
 
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -270,7 +270,15 @@ async function runScenario(
       allowHeadless: true,
       gitManager: fakeGit(projectPath),
       log: scenarioLog,
-      loadGovernanceDocs: async () => ({}),
+      // Non-empty stub content for the pre_build hook's built-in governance_check (Finding I-1 —
+      // now actually fires, reading ctx.governanceDocs instead of the real filesystem): an empty
+      // map would make every benchmark scenario halt immediately at pre_build.
+      loadGovernanceDocs: async () => ({
+        'BLUEPRINT.md': '# Blueprint\n',
+        'SCHEMA_REGISTRY.md': '# Schema Registry\n',
+        'BEHAVIORAL_CONTRACTS.md': '# Behavioral Contracts\n',
+        'CLAUDE.md': '# Claude\n',
+      }),
       updateStateProgress: async () => {},
       writeHaltReport: async () => {},
       createBuild: mem.createBuild,
@@ -355,6 +363,21 @@ async function runScenario(
     };
   } finally {
     if (tmpRoot) {
+      // Preserve each scenario's real internal log before wiping the disposable fixture copy
+      // (Finding H-2): phase3-executor.ts writes a genuine, timestamped, tee'd log to
+      // `<projectPath>/.forge/logs/build_<ts>.log` (fed by installQuietConsole + every log()
+      // call), but it lives entirely inside `tmpRoot` and was previously deleted unconditionally
+      // here regardless of pass/fail/error — the one command whose internals DO real file
+      // logging still ended up with zero recoverable diagnostic trail at the CLI level.
+      try {
+        const scenarioLogsDir = join(tmpRoot, 'project', '.forge', 'logs');
+        if (existsSync(scenarioLogsDir)) {
+          const preservedDir = join(BENCHMARKS_DIR, '..', '.forge', 'benchmark-logs', `${scenario.id}-${startedAt}`);
+          cpSync(scenarioLogsDir, preservedDir, { recursive: true });
+        }
+      } catch {
+        /* best-effort — never let log preservation itself fail the benchmark */
+      }
       try {
         rmSync(tmpRoot, { recursive: true, force: true });
       } catch {

@@ -9,6 +9,8 @@ import type { GovernanceReconciliationReport, EnterprisePatternsGapReport } from
 import { runScan } from './scan.js';
 import { generateArchitectureHealthReport, buildGovernanceReconciliationReport, buildEnterprisePatternsGapReport } from './diagnose.js';
 import { runDeepAnalysis, renderDeepAnalysisContextBlock, writeDeepAnalysisReport } from './deep-analysis.js';
+import { beginTeeLogging } from '../tools/forge-logger.js';
+import { nowIso } from '../memory/index.js';
 
 // ── RECONCILE ──────────────────────────────────────────────────────────────────
 export interface ReconcileInput { criticalFindings: DiagnoseFinding[]; warnFindings: DiagnoseFinding[]; governanceReport: GovernanceReconciliationReport; enterpriseReport: EnterprisePatternsGapReport; dbPath?: string; }
@@ -125,10 +127,15 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
   const { projectPath, scope = 'C', skipDynamic = false, resume = false, nonInteractive = false, acceptBlockers = false, queueOutputPath, apiKey } = options;
   const projectName = projectPath.split(/[/\\]/).pop() ?? 'unknown';
   const C = { reset:'\x1b[0m', red:'\x1b[31m', yellow:'\x1b[33m', green:'\x1b[32m', cyan:'\x1b[36m', bold:'\x1b[1m' };
+  // Crash-recoverable trail (Finding H-2): retrofit previously logged exclusively via
+  // console.log/console.error with no durable sink — a crash mid-run (multi-stage: scan, deep
+  // analysis, health report, reconcile) left only terminal scrollback.
+  const releaseTeeLogging = beginTeeLogging(join(projectPath, '.forge', 'logs', `retrofit_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
   console.log(`\n${C.bold}${C.cyan}  FORGE 2.0 RETROFIT | ${projectName} | Scope ${scope}${C.reset}\n`);
 
   const { report, preFlightHalted } = await runScan({ projectPath, scope, skipDynamic, resume, onProgress: (step, i, total) => { const pct = Math.round((i/total)*100); process.stdout.write(`\r  [${C.cyan}${'='.repeat(Math.floor(pct/5))}${' '.repeat(20-Math.floor(pct/5))}${C.reset}] ${pct}% ${step}          `); if (i===total) process.stdout.write('\n'); } });
-  if (preFlightHalted) { console.error('Pre-flight FAILED. Aborted.'); process.exit(1); }
+  if (preFlightHalted) { console.error('Pre-flight FAILED. Aborted.'); releaseTeeLogging(); process.exit(1); }
 
   console.log(`\n  ${C.green}SCAN complete.${C.reset} Files: ${report.fileTree.totalFiles} | Broken imports: ${C.red}${report.brokenImports.length}${C.reset} | TS errors: ${C.red}${report.compilationErrors.length}${C.reset}`);
 
@@ -157,4 +164,7 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
 
   console.log(`\n${C.bold}${C.green}  QUEUE GENERATED: ${queue.totalPrompts} prompts → ${outPath}/queue.yaml${C.reset}`);
   console.log(`  Tier 1 CRITICAL: ${queue.tiers.critical_fixes} | Tier 2 WARN/FEAT: ${queue.tiers.warn_fixes_and_features} | Tier 3 ENTERPRISE: ${queue.tiers.enterprise_patterns}`);
+  } finally {
+    releaseTeeLogging();
+  }
 }

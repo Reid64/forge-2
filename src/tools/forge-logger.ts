@@ -103,6 +103,56 @@ export function beginQuietLogging(logFilePath: string): () => void {
   };
 }
 
+/**
+ * Tee every `console.log`/`console.warn`/`console.error` call to BOTH the terminal (unchanged —
+ * unlike {@link beginQuietLogging}'s redirect, this never removes live output) AND `logFilePath`,
+ * until the returned function is called. For commands a human runs interactively and watches
+ * (`repair`, `retrofit`, `sequence`, the `forge design` family, `benchmark`) that log exclusively
+ * via raw `console.*`/`process.stdout.write` rather than `getLogger`/`logLine` — those commands
+ * had NO crash-recoverable trail at all (Finding H-2): a crash mid-run left only terminal
+ * scrollback. This does not intercept `process.stdout.write` directly (several of these commands
+ * use it for single-line progress bars / spinners that redraw in place — teeing that verbatim to
+ * a file would produce a garbled, carriage-return-laden log); callers that want a specific
+ * progress line durably logged should also route it through `console.log`.
+ */
+export function beginTeeLogging(logFilePath: string): () => void {
+  let stream: WriteStream | null = null;
+  try {
+    mkdirSync(dirname(logFilePath), { recursive: true });
+    stream = createWriteStream(logFilePath, { flags: 'a' });
+  } catch {
+    return () => {}; // best-effort — the command must never fail because its log file couldn't open
+  }
+  const openedStream = stream;
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  const append = (...args: unknown[]): void => {
+    try {
+      const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      openedStream.write(`[${new Date().toISOString()}] ${line}\n`);
+    } catch {
+      /* best-effort */
+    }
+  };
+  console.log = (...args: unknown[]) => {
+    append(...args);
+    original.log(...args);
+  };
+  console.warn = (...args: unknown[]) => {
+    append(...args);
+    original.warn(...args);
+  };
+  console.error = (...args: unknown[]) => {
+    append(...args);
+    original.error(...args);
+  };
+  return () => {
+    console.log = original.log;
+    console.warn = original.warn;
+    console.error = original.error;
+    openedStream.end();
+  };
+}
+
 /** A Pino logger bound to `{ module }`. Leveled API: `.info/.warn/.error/.fatal`, `(msg)` or `(obj, msg)`. */
 export type ForgeLogger = pino.Logger;
 

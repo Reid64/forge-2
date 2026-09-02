@@ -131,7 +131,7 @@ import { createDesignSiteTournamentEngine, type SiteTournamentResult } from '../
 import { BuildMemory, nowIso } from '../memory/index.js';
 import { registerLearningCommands } from './commands/learning.js';
 import { registerAgentCommands } from './commands/agent.js';
-import { getLogger, beginQuietLogging } from '../tools/forge-logger.js';
+import { getLogger, beginQuietLogging, beginTeeLogging } from '../tools/forge-logger.js';
 import { getForgeDbPath, getSchemaVersion, initializeForgeMemory } from '../learning/database.js';
 import { deriveBrandFromBaseline, type DesignTokenSet } from '../tools/brand-inheritance.js';
 import {
@@ -2193,6 +2193,11 @@ function benchmarkStatusChip(status: string): string {
  */
 async function cmdBenchmark(opts: { scenario?: string[] }): Promise<void> {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  // Crash-recoverable trail (Finding H-2): the CLI's own summary output previously had no
+  // durable sink (separate from benchmark-runner.ts's per-scenario internal logs, now preserved
+  // to .forge/benchmark-logs/ instead of being deleted with the disposable fixture copy).
+  const releaseTeeLogging = beginTeeLogging(join(repoRoot, '.forge', 'logs', `benchmark_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
   const runnerPath = join(repoRoot, 'benchmarks', 'benchmark-runner.ts');
   if (!existsSync(runnerPath)) {
     fail(`benchmark runner not found at ${runnerPath} — is benchmarks/ present in this checkout?`);
@@ -2263,6 +2268,9 @@ async function cmdBenchmark(opts: { scenario?: string[] }): Promise<void> {
       `, total cost ${chalk.cyan('$' + suite.totals.totalCostUsd.toFixed(4))}` +
       `, total latency ${chalk.cyan(suite.totals.totalLatencyMs + 'ms')}\n`
   );
+  } finally {
+    releaseTeeLogging();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2527,69 +2535,76 @@ async function cmdRepair(
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
   const projectName = basename(projectPath) || 'project';
-  console.log(chalk.bold(`\nRepairing ${projectName} at ${projectPath}`));
-  if (opts.generateOnly) console.log(chalk.cyan('  GENERATE ONLY — repair queue will be written but not executed.'));
+  // Crash-recoverable trail (Finding H-2): repair previously logged exclusively via console.log
+  // with no durable sink at all — a crash mid-repair left only terminal scrollback.
+  const releaseTeeLogging = beginTeeLogging(join(projectPath, '.forge', 'logs', `repair_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
+    console.log(chalk.bold(`\nRepairing ${projectName} at ${projectPath}`));
+    if (opts.generateOnly) console.log(chalk.cyan('  GENERATE ONLY — repair queue will be written but not executed.'));
 
-  // Phase 0 — environment pre-flight (advisory for repair; skip the AgentShield security
-  // gate — a broken repo's leftover config must not block its own repair). Blockers are
-  // surfaced but never halt: repair's whole purpose is fixing an unhealthy project.
-  const scout = await runScout(projectPath, { skipSecurityGate: true });
-  if (!scout.passed) {
-    console.log(chalk.yellow(`  Phase 0 found ${scout.blockers.length} blocker(s) — continuing with repair anyway:`));
-    for (const b of scout.blockers) console.log(chalk.dim(`    • ${b}`));
-  }
+    // Phase 0 — environment pre-flight (advisory for repair; skip the AgentShield security
+    // gate — a broken repo's leftover config must not block its own repair). Blockers are
+    // surfaced but never halt: repair's whole purpose is fixing an unhealthy project.
+    const scout = await runScout(projectPath, { skipSecurityGate: true });
+    if (!scout.passed) {
+      console.log(chalk.yellow(`  Phase 0 found ${scout.blockers.length} blocker(s) — continuing with repair anyway:`));
+      for (const b of scout.blockers) console.log(chalk.dim(`    • ${b}`));
+    }
 
-  const maxClusters = opts.maxClusters ? Number.parseInt(opts.maxClusters, 10) : undefined;
-  if (opts.maxClusters !== undefined && (Number.isNaN(maxClusters) || (maxClusters ?? 0) < 1)) {
-    fail('--max-clusters must be a positive integer.');
-    return;
-  }
+    const maxClusters = opts.maxClusters ? Number.parseInt(opts.maxClusters, 10) : undefined;
+    if (opts.maxClusters !== undefined && (Number.isNaN(maxClusters) || (maxClusters ?? 0) < 1)) {
+      fail('--max-clusters must be a positive integer.');
+      return;
+    }
 
-  const repairConfig: RepairConfig = {
-    repairQueuePath: opts.queuePath,
-    executeRepairs: !opts.generateOnly,
-    autonomousRecovery: opts.autonomousRecovery ?? false,
-    maxClusters,
-  };
+    const repairConfig: RepairConfig = {
+      repairQueuePath: opts.queuePath,
+      executeRepairs: !opts.generateOnly,
+      autonomousRecovery: opts.autonomousRecovery ?? false,
+      maxClusters,
+    };
 
-  const result = await withSpinner('FORGE Repair Mode', (log) =>
-    runRepairMode(projectPath, { ...repairConfig, log })
-  );
-
-  // Summary
-  console.log(`\n  errors found:  ${chalk.yellow(String(result.errorsFound))}`);
-  console.log(`  errors remain: ${result.errorsAfterRepair === 0 ? chalk.green('0') : chalk.red(String(result.errorsAfterRepair))}`);
-  console.log(`  clusters:      ${result.clusters.length}`);
-  if (result.repairQueuePath) {
-    console.log(chalk.dim(`  queue:         ${result.repairQueuePath}`));
-  }
-
-  if (result.executionResult) {
-    const er = result.executionResult;
-    console.log(
-      `  execution:     ${statusChip(er.status)} — ` +
-        `${chalk.green(String(er.completedPrompts) + ' done')}, ` +
-        `${chalk.red(String(er.failedPrompts) + ' failed')}, ` +
-        `${chalk.dim(String(er.skippedPrompts) + ' skipped')}`
+    const result = await withSpinner('FORGE Repair Mode', (log) =>
+      runRepairMode(projectPath, { ...repairConfig, log })
     );
-  }
 
-  for (const gate of result.gateResults) {
-    const label = gate.passed ? chalk.green('PASS') : chalk.red('FAIL');
-    console.log(`  gate [${gate.gate.padEnd(7, ' ')}]: ${label}${gate.passed ? '' : ` (${gate.errorCount} error(s))`}`);
-  }
+    // Summary
+    console.log(`\n  errors found:  ${chalk.yellow(String(result.errorsFound))}`);
+    console.log(`  errors remain: ${result.errorsAfterRepair === 0 ? chalk.green('0') : chalk.red(String(result.errorsAfterRepair))}`);
+    console.log(`  clusters:      ${result.clusters.length}`);
+    if (result.repairQueuePath) {
+      console.log(chalk.dim(`  queue:         ${result.repairQueuePath}`));
+    }
 
-  printWarnings(result.warnings);
+    if (result.executionResult) {
+      const er = result.executionResult;
+      console.log(
+        `  execution:     ${statusChip(er.status)} — ` +
+          `${chalk.green(String(er.completedPrompts) + ' done')}, ` +
+          `${chalk.red(String(er.failedPrompts) + ' failed')}, ` +
+          `${chalk.dim(String(er.skippedPrompts) + ' skipped')}`
+      );
+    }
 
-  if (result.status === 'no_errors') {
-    console.log(chalk.green('\n✔ No TypeScript errors found — repository is already healthy.'));
-  } else if (result.status === 'success') {
-    console.log(chalk.green('\n✔ Repair complete — all gates PASS.'));
-  } else if (result.status === 'partial') {
-    console.log(chalk.yellow(`\n⚠ Partial repair — ${result.errorsAfterRepair} error(s) remain. Re-run to continue.`));
-    process.exitCode = 1;
-  } else {
-    fail(`Repair ${result.status} — ${result.errorsAfterRepair} error(s) remain.`);
+    for (const gate of result.gateResults) {
+      const label = gate.passed ? chalk.green('PASS') : chalk.red('FAIL');
+      console.log(`  gate [${gate.gate.padEnd(7, ' ')}]: ${label}${gate.passed ? '' : ` (${gate.errorCount} error(s))`}`);
+    }
+
+    printWarnings(result.warnings);
+
+    if (result.status === 'no_errors') {
+      console.log(chalk.green('\n✔ No TypeScript errors found — repository is already healthy.'));
+    } else if (result.status === 'success') {
+      console.log(chalk.green('\n✔ Repair complete — all gates PASS.'));
+    } else if (result.status === 'partial') {
+      console.log(chalk.yellow(`\n⚠ Partial repair — ${result.errorsAfterRepair} error(s) remain. Re-run to continue.`));
+      process.exitCode = 1;
+    } else {
+      fail(`Repair ${result.status} — ${result.errorsAfterRepair} error(s) remain.`);
+    }
+  } finally {
+    releaseTeeLogging();
   }
 }
 
@@ -3167,7 +3182,11 @@ async function cmdSkillsAdd(skillFile: string): Promise<void> {
 
 /** `[yyyy-MM-dd HH:mm:ss] [LEVEL]`-prefixed line for the `forge design` command family (matches {@link skillsLog}). */
 function designLog(level: 'INFO' | 'WARN' | 'PASS' | 'FAIL', message: string): void {
-  process.stdout.write(`${tsPrefix(level)} ${message}\n`);
+  // console.log (not a raw process.stdout.write) so this flows through the same
+  // beginTeeLogging() durable-file mechanism every other H-2 fix uses (Finding H-2 — the
+  // `forge design` family previously had zero crash-recoverable trail: designLog wrote directly
+  // to stdout, bypassing even the pino-based getLogger sink beginQuietLogging can divert).
+  console.log(`${tsPrefix(level)} ${message}`);
 }
 
 /** Mark `forge design` as failed: one `[FAIL]`-prefixed line, structured-logged, non-zero exit. */
@@ -3679,6 +3698,10 @@ async function cmdDesignTournament(
   opts: { brief?: string; name?: string; variants?: string; useExisting?: boolean; nonInteractive?: boolean }
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
+  // Crash-recoverable trail (Finding H-2): the `forge design` family previously logged
+  // exclusively via designLog (stdout only, not even through the pino sink) — zero durable trail.
+  const releaseTeeLogging = beginTeeLogging(join(projectPath, '.forge', 'logs', `design-tournament_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
   if (!opts.brief) {
     designFail('forge design tournament requires --brief "<text>" or --brief <path-to-file>.');
     return;
@@ -3782,6 +3805,9 @@ async function cmdDesignTournament(
   } else {
     designLog('FAIL', `tournament REJECTED${choice.feedback ? ` — ${choice.feedback}` : ''}`);
     process.exitCode = 1;
+  }
+  } finally {
+    releaseTeeLogging();
   }
 }
 
@@ -3903,6 +3929,8 @@ async function cmdDesignSiteTournament(
   opts: { brief?: string; name?: string; variants?: string; only?: string; nonInteractive?: boolean }
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
+  const releaseTeeLogging = beginTeeLogging(join(projectPath, '.forge', 'logs', `design-site-tournament_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
   if (!opts.brief) {
     designFail('forge design site-tournament requires --brief "<text>" or --brief <path-to-file>.');
     return;
@@ -3967,6 +3995,9 @@ async function cmdDesignSiteTournament(
     'INFO',
     'site tournament left AWAITING HUMAN DESIGN APPROVAL (no automatic winner for a multi-way, multi-page choice; interactive approval not yet built for the site case).'
   );
+  } finally {
+    releaseTeeLogging();
+  }
 }
 
 /** Parse `--selections` (a JSON array of {@link CompositeSectionSelection}) from literal text or a file path. */
@@ -4022,6 +4053,8 @@ async function cmdDesignCompose(
   opts: { selections?: string; name?: string; nonInteractive?: boolean }
 ): Promise<void> {
   const projectPath = resolveProjectPath(pathArg);
+  const releaseTeeLogging = beginTeeLogging(join(projectPath, '.forge', 'logs', `design-compose_${nowIso().replace(/[:.]/g, '-')}.log`));
+  try {
   if (!opts.selections) {
     designFail('forge design compose requires --selections "<json>" or --selections <path-to-json-file>.');
     return;
@@ -4089,6 +4122,9 @@ async function cmdDesignCompose(
   } else {
     designLog('FAIL', `composite review NOT approved${reviewResult.feedback ? ` — ${reviewResult.feedback}` : ''}`);
     process.exitCode = 1;
+  }
+  } finally {
+    releaseTeeLogging();
   }
 }
 
@@ -5437,6 +5473,11 @@ async function main(): Promise<void> {
     .option('--output <path>', 'Output directory for queue files')
     .action(async (projectPath: string, opts: { mode?: string; apiKey?: string; nonInteractive?: boolean; promptsPerRun?: string; output?: string }) => {
       const spinner = ora('Composing FORGE queue...').start();
+      // Crash-recoverable trail (Finding H-2): compose previously logged exclusively via
+      // console.log with no durable sink.
+      const releaseTeeLogging = beginTeeLogging(
+        join(resolve(projectPath), '.forge', 'logs', `compose_${nowIso().replace(/[:.]/g, '-')}.log`)
+      );
       try {
         const { runComposer } = await import('../composer/index.js');
         spinner.stop();
@@ -5452,6 +5493,7 @@ async function main(): Promise<void> {
           process.exitCode = 1;
         }
       } catch (err: unknown) { spinner.fail('COMPOSE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
+      finally { releaseTeeLogging(); }
     });
 
   program
@@ -5464,6 +5506,12 @@ async function main(): Promise<void> {
     .option('--dry-run', 'Show sequence plan without generating queues', false)
     .action(async (specsDir: string, projectPath: string, opts: { apiKey?: string; nonInteractive?: boolean; dryRun?: boolean }) => {
       const spinner = ora('Loading specification documents...').start();
+      // Crash-recoverable trail (Finding H-2): sequence previously logged exclusively via
+      // console.log with no durable sink — a crash partway through 40+ documents left no
+      // indication of which document was mid-flight.
+      const releaseTeeLogging = beginTeeLogging(
+        join(resolve(projectPath), '.forge', 'logs', `sequence_${nowIso().replace(/[:.]/g, '-')}.log`)
+      );
       try {
         const { loadSpecDocuments, createSequencePlan, writeSequencePlanSummary } = await import('../composer/document-sequencer.js');
         const { runComposer } = await import('../composer/index.js');
@@ -5488,6 +5536,7 @@ async function main(): Promise<void> {
         }
         console.log(chalk.green('\nSequencing complete!'));
       } catch (err: unknown) { spinner.fail('SEQUENCE failed'); console.error(chalk.red(err instanceof Error ? err.message : String(err))); process.exitCode = 1; }
+      finally { releaseTeeLogging(); }
     });
 
   const deploy = program
