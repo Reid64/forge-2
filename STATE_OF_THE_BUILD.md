@@ -3189,3 +3189,60 @@ produced a `system` payload of `[{"type":"text","text":"...","cache_control":{"t
 with `cache_creation_input_tokens` correctly tracked. Did not run the full `runPhase3Executor`
 against a real project (would spawn real `claude`/`git` subprocesses against `tests/test-project`,
 out of proportion to what this verification needed).
+
+## 2026-09-02 — Audit resolution (AUDIT-REPORT.md, 8 of 71 findings)
+
+A self-run audit (`AUDIT-REPORT.md`, repo root) found 71 issues; this session fixed the 8 the
+operator scoped in (test-suite integrity, hardcoded-stack detection, Sentinel's disguised-pass
+bug, unvalidated LLM output, agent-approval wiring, retrofit skills injection, `forge estimate`'s
+hidden LLM call, `forge library scaffold`'s crash). The other 63 findings in the report remain
+open — this was a scoped pass, not a full remediation.
+
+**A-1/A-2 (test suite):** `package.json`'s `"test"` script hardcoded 8 of 44 test files; CI ran
+only those 8. Rewired via `scripts/run-tests.mjs` (glob-based, so it can't silently drift again)
+to run all 44. That exposed 65 real failures across 12 root causes — a mix of stale test
+assertions (a "5 mandatory Sentinel checks" doc/test claim that never got updated to 9 when
+`eslint`/`file_delta` were added as mandatory gates), two test files calling APIs that no longer
+exist (`schema-validator.test.ts`, `memory.test.ts` — both rewritten against their real current
+APIs), and several previously-undetected real bugs: `ProviderRouter`'s `complex_reasoning` leg
+shelled out to the real, locally-authenticated `claude` CLI inside "no network" unit tests (now
+injectable via `runClaudeCli`); `filterRetiredPatterns` anti-joined against real `error_patterns`
+rows instead of the retirement log directly, silently dropping any non-persisted candidate (this
+also produced a false dead-loop verdict in `executor.test.ts` before that file's Build Memory was
+isolated from the operator's real `~/.forge/forge_memory.db`); `parseNamedList` leaked type-only
+imports into the architecture-guard dependency graph; `free-tier-manager.prioritize()` didn't
+demote rate-limited providers behind permanently-paid ones; `visual-regression.ts` used platform
+`path.join` on POSIX-style project paths (broke only on Windows, invisible on CI's
+`ubuntu-latest`); `doc-generator.ts`'s `sectionParagraph` regex could never match the first
+paragraph after a heading (a multiline-`$` ambiguity — it always returned `null`).
+
+**B-2/B-3:** `orphaned-route-detector.ts`/`schema-drift-detector.ts` hardcoded a `src/`-prefixed
+Next.js layout and produced a false "all clear" or a false-flood of 830 findings on any project
+without it. Both now handle the non-`src`-dir layout and short-circuit on zero migrations.
+
+**I-2:** `typescript`/`eslint`/`build`/`dependencies` now `skip()` instead of a disguised `pass()`
+when their precondition is absent.
+
+**H-3:** `regeneration-engine.ts` and `phase1a-prd.ts` both accepted any non-empty LLM response
+verbatim; both now apply a structural plausibility check before writing to a governance doc/PRD.md.
+
+**J-3:** `forge agent approve/reject` now falls back to `self_created_agents` (via the new
+`rejectAgent()`) when an id isn't a `pending_evolutions` row. Full agent dispatch remains
+unimplemented (no consumer of `status='active'` exists anywhere) — out of scope for this fix.
+
+**J-2:** retrofit's generated `queue.yaml` never set `prompt_type`, which
+`phase3-executor.ts`'s `coerceQueueEntry` treats as required — every retrofit-generated prompt was
+silently skipped by a subsequent `forge build --use-existing-queue`, not just weakly
+skills-injected. Fixed by inferring `prompt_type` per generated prompt.
+
+**K-1/K-2:** `forge estimate` no longer calls a real model (heuristic-only via the new
+`deriveHeuristicPrdMetadata()`); `LibraryManager.getLibraryPath` normalizes an absolute `project`
+argument to its basename instead of crashing `scaffold`/`add` or garbling `list`/`validate`.
+
+**Verified:** `pnpm run build` → 0 errors. Full test suite (all 44 files, previously only 8 ran) →
+654/654 passing. Manually confirmed live: `forge estimate --idea` no longer spawns a `claude`
+subprocess; `forge library scaffold` with an absolute path scaffolds correctly instead of
+crashing. Not manually verified live (relying on the passing unit tests instead): `forge sentinel
+ring` against a project without `package.json` (would require a real multi-minute build+lint
+run to demonstrate against forge-2's own codebase, which has one); `forge agent approve` against a
+live `self_created_agents` proposal (would require seeding one in a real database).

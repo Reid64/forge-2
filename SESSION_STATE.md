@@ -1923,6 +1923,23 @@ served `GET /api/data` (200 with the real state snapshot), and stopped cleanly o
 /api/stop`; a mocked `ProviderRouter.route()` call produced a real `cache_control:
 {"type":"ephemeral"}`-marked content block and correctly tracked `cache_creation_input_tokens`.
 
+## 2026-09-02 — Audit resolution session complete
+
+Fixed 8 of the 71 findings in `AUDIT-REPORT.md` (operator-scoped subset — see
+STATE_OF_THE_BUILD.md for the full breakdown): A-1/A-2 (test suite — all 44 files now run, was 8;
+65 real failures fixed), B-2/B-3 (retrofit hardcoded-path detectors), I-2 (Sentinel disguised-pass
+→ skip), H-3 (unvalidated LLM output in regeneration-engine.ts/phase1a-prd.ts), J-3 (agent-approval
+wiring), J-2 (retrofit queue.yaml missing prompt_type — was silently skipping every generated
+prompt), K-1 (`forge estimate`'s hidden LLM call), K-2 (`forge library scaffold` crash on an
+absolute path). MCP integrations (sections 9-12 of the original task prompt) were explicitly out
+of scope — not audit findings, net-new functionality requiring API keys and design decisions.
+
+**Verified:** `pnpm run build` 0 errors; full test suite 654/654 passing (previously 8/8 curated,
+65/589 real failures once the other 36 files were wired in). Three local commits, not pushed —
+left for operator review.
+
+**Not done:** the remaining 63 audit findings; MCP integrations; pushing to `origin/main`.
+
 ## IDE STATUS
 
 - **VS Code path:** not re-checked this session.
