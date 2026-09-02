@@ -28,6 +28,7 @@
  */
 
 import { existsSync, mkdirSync, statfsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { logLine } from '../tools/forge-logger.js';
@@ -42,8 +43,12 @@ const STORAGE_ENV_VAR = 'FORGE_DESIGN_STORAGE';
 /** A drive must report MORE than this many free bytes to qualify as the design-storage target. */
 const MIN_FREE_BYTES_FOR_EXTERNAL_DRIVE = 100 * 1024 * 1024 * 1024; // 100GB
 
-/** Sanctioned fallback when no env var is set and no drive D:-Z: qualifies. */
-const FALLBACK_STORAGE_PATH = 'C:\\Users\\manag\\Documents\\forge-design-artifacts\\';
+/**
+ * Sanctioned fallback when no env var is set and no drive D:-Z: qualifies. Derived from
+ * `os.homedir()` (resolves `USERPROFILE`/`HOME`) rather than a literal path, so this works on any
+ * machine/user, not just the one it was originally written on (Finding E-1).
+ */
+const FALLBACK_STORAGE_PATH = withTrailingBackslash(join(homedir(), 'Documents', 'forge-design-artifacts'));
 
 /** Drive letters scanned, in order, when no env override is present — D: through Z: (never C:). */
 const CANDIDATE_DRIVE_LETTERS: readonly string[] = 'DEFGHIJKLMNOPQRSTUVWXYZ'.split('');

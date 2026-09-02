@@ -26,6 +26,7 @@ import { getBuildsByProject } from '../memory/builds.js';
 import { getPromptsByBuild } from '../memory/prompts.js';
 import { getLatestGapAuditRunForProject } from '../memory/gap-audits.js';
 import { SENTINEL_CHECK_ORDER } from '../phases/phase4-sentinel.js';
+import { detectDefaultBranch } from '../engine/git-manager.js';
 import type { ArtifactName } from '../resurrection/types.js';
 import type { BuildRun } from '../types/index.js';
 
@@ -305,16 +306,23 @@ async function checkNoDirectCommitsToMainDuringBuild(ctx: InvariantContext): Pro
     return makeResult(id, def.contract, def.description, 'skipped', `${ctx.projectPath} is not a git repository.`);
   }
 
+  // Detect the repo's real default branch instead of hardcoding 'main' (Finding E-2) — mirrors
+  // phase3-executor.ts's own `detectDefaultBranch(projectPath)` call for this exact problem. A
+  // repo whose default branch has any other name (a non-'main' `init.defaultBranch`, or an
+  // initial commit made outside FORGE) would otherwise fail `git log main ...` outright and this
+  // whole invariant would silently degrade to 'skipped' — Contract 10 unenforced, not "checked".
+  const mainBranch = detectDefaultBranch(ctx.projectPath);
+
   let stdout: string;
   try {
-    stdout = execFileSync('git', ['log', 'main', `--since=${build.started_at}`, '--no-merges', '--format=%H %s'], {
+    stdout = execFileSync('git', ['log', mainBranch, `--since=${build.started_at}`, '--no-merges', '--format=%H %s'], {
       cwd: ctx.projectPath,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 30_000,
     });
   } catch (error) {
-    return makeResult(id, def.contract, def.description, 'skipped', `git log failed (${describe(error)}) — main branch may not exist yet.`);
+    return makeResult(id, def.contract, def.description, 'skipped', `git log failed (${describe(error)}) — ${mainBranch} branch may not exist yet.`);
   }
 
   const directCommits = stdout
@@ -329,10 +337,10 @@ async function checkNoDirectCommitsToMainDuringBuild(ctx: InvariantContext): Pro
       def.contract,
       def.description,
       'fail',
-      `${directCommits.length} non-merge commit(s) landed directly on main since build ${build.id} started (${build.started_at}): ${directCommits.slice(0, 3).join(' | ')}${directCommits.length > 3 ? ', …' : ''}.${mechanism}`
+      `${directCommits.length} non-merge commit(s) landed directly on ${mainBranch} since build ${build.id} started (${build.started_at}): ${directCommits.slice(0, 3).join(' | ')}${directCommits.length > 3 ? ', …' : ''}.${mechanism}`
     );
   }
-  return makeResult(id, def.contract, def.description, 'pass', `No direct (non-merge) commit on main since build ${build.id} started (${build.started_at}).`);
+  return makeResult(id, def.contract, def.description, 'pass', `No direct (non-merge) commit on ${mainBranch} since build ${build.id} started (${build.started_at}).`);
 }
 
 /**
