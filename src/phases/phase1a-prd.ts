@@ -648,10 +648,27 @@ const PrdGenerationResponseSchema = z.object({
   agentEstimate: z.union([z.number(), z.string()]).optional(),
 });
 
+/** Minimum length for a raw-text PRD fallback to be considered plausible content, not a stub. */
+const MIN_PLAUSIBLE_PRD_LENGTH = 200;
+
+/**
+ * Structural sanity check for the raw-text PRD fallback (non-JSON model output): plausible PRD
+ * markdown has real length and at least one `## ` section heading. Mirrors the already-correct
+ * guarded pattern in `phase1b-architect.ts`'s `generateArtifact` (extractJson → null → an
+ * explicit fallback skeleton, never raw prose treated as ground truth) — a bare confirmation
+ * sentence like "I've written the PRD for you" would otherwise be accepted verbatim and written
+ * to PRD.md, the root artifact the rest of the build treats as authoritative.
+ */
+function isPlausiblePrdText(text: string): boolean {
+  return text.length >= MIN_PLAUSIBLE_PRD_LENGTH && /^##\s+/m.test(text);
+}
+
 /**
  * Parse a model response into a {@link ParsedGeneration}. Tries the structured JSON
  * contract first; if that fails, treats the whole response as the PRD markdown and
- * leaves the counts `null` (the caller fills them heuristically).
+ * leaves the counts `null` (the caller fills them heuristically) — but only when that raw text
+ * passes a structural plausibility check; otherwise throws so the caller's existing fallback-PRD
+ * path (`buildFallbackPrd`) runs instead of writing unvalidated raw text as PRD.md.
  */
 function parseGeneration(text: string): ParsedGeneration {
   const json = extractJsonObject(text);
@@ -677,7 +694,15 @@ function parseGeneration(text: string): ParsedGeneration {
       // fall through to treating the raw text as the PRD
     }
   }
-  return { prd: text.trim(), featureCount: null, tableEstimate: null, agentEstimate: null };
+  const raw = text.trim();
+  if (!isPlausiblePrdText(raw)) {
+    throw new Error(
+      'Model output was neither the structured JSON contract nor a plausible PRD body ' +
+        `(non-JSON, ${raw.length} chars, no "## " section heading found) — refusing to write it ` +
+        'as PRD.md verbatim.'
+    );
+  }
+  return { prd: raw, featureCount: null, tableEstimate: null, agentEstimate: null };
 }
 
 /** Count `## Feature Specifications` → `### …` subheadings as a feature-count heuristic. */
@@ -747,6 +772,22 @@ function extractFeaturesFromIdea(idea: string): string[] {
     if (features.length >= 8) break;
   }
   return features.length > 0 ? features : ['Core capability (from idea)'];
+}
+
+/**
+ * Derive the same {@link PrdMetadata} `buildFallbackPrd` computes, with zero model call — for
+ * callers that only need the feature/table/agent scope (e.g. `forge estimate`), not a real
+ * PRD.md. Extracted so a pure heuristic estimate no longer requires going through
+ * `runPhase1aPrd`'s real `callModel` (Finding K-1 — `forge estimate` documented itself as
+ * "without building" but unconditionally performed a real, billed LLM generation pass).
+ */
+export function deriveHeuristicPrdMetadata(idea: string, target: StackFingerprint): PrdMetadata {
+  const features = extractFeaturesFromIdea(idea);
+  return {
+    featureCount: features.length,
+    tableEstimate: Math.max(features.length, 3),
+    agentEstimate: target.services.includes('anthropic') ? 1 : 0,
+  };
 }
 
 /**

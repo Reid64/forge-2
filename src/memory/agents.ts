@@ -131,6 +131,24 @@ export function approveAgent(id: string): Promise<SelfCreatedAgent | null> {
   });
 }
 
+/**
+ * Reject an agent proposal: set status to 'deprecated'. There is no `'rejected'` value in the
+ * `self_created_agents.status` CHECK constraint (`'proposed' | 'approved' | 'active' |
+ * 'deprecated'`) — `'deprecated'` is the closest existing semantic fit for "will not be used."
+ * Returns the updated row, or null on failure.
+ */
+export function rejectAgent(id: string): Promise<SelfCreatedAgent | null> {
+  return runQuery<SelfCreatedAgent>(TABLE + '.rejectAgent', (db) => {
+    const ts = nowIso();
+    const result = db
+      .prepare("UPDATE self_created_agents SET status = 'deprecated', updated_at = ? WHERE id = ?")
+      .run(ts, id);
+    if (result.changes === 0) return null;
+    const row = db.prepare('SELECT * FROM self_created_agents WHERE id = ?').get(id) as SelfCreatedAgentRow;
+    return rowToAgent(row);
+  });
+}
+
 /** List all agents, newest first. Returns null on failure. */
 export function listAgents(): Promise<SelfCreatedAgent[] | null> {
   return runQuery<SelfCreatedAgent[]>(TABLE + '.listAgents', (db) => {

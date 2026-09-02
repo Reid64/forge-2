@@ -27,6 +27,26 @@ export async function isBuildInFlight(projectName: string): Promise<boolean> {
   return builds.some((b) => NON_TERMINAL_BUILD_STATUSES.has(b.status));
 }
 
+/** Minimum plausible length for a real governance-doc section body (not a bare acknowledgement). */
+const MIN_SECTION_CONTENT_LENGTH = 40;
+
+/** A conversational reply instead of the requested Markdown body — the exact failure this project
+ * hit once already (four empty-prose site-tournament pages) when a `runClaude` response was
+ * accepted verbatim without a structural check (see `ui-engine/component-generator.ts`'s
+ * `validateGeneratedCode` for the equivalent, already-correct guard on the code-generation path). */
+const CONVERSATIONAL_PREAMBLE_RE = /^(sure|here'?s|here is|i'?ll|i will|certainly|okay|ok|got it|understood)\b/i;
+
+/**
+ * Structural sanity check for a drafted section body — NOT a content-quality check, just enough
+ * to reject the "model returned a natural-language confirmation instead of the requested content"
+ * failure mode before it's spliced into a real governance document as if it were ground truth.
+ */
+function isValidSectionContent(text: string): boolean {
+  if (text.length < MIN_SECTION_CONTENT_LENGTH) return false;
+  if (CONVERSATIONAL_PREAMBLE_RE.test(text)) return false;
+  return true;
+}
+
 /** Section-scoped content is drafted through the Claude Code CLI (BLUEPRINT §RegenerationEngine
  * "Claude for regeneration content" — same runner Phase 2 governance generation uses, never a
  * direct Anthropic API call). */
@@ -43,7 +63,7 @@ async function draftSectionContent(
     'Respond with only the Markdown body, no preamble.';
   const result = await runClaude(prompt, { cwd: projectPath, timeoutMs: 5 * 60 * 1000 });
   const text = result.stdout.trim();
-  if (result.success && text) return text;
+  if (result.success && text && isValidSectionContent(text)) return text;
   return `_Reconstructed by FORGE's RegenerationEngine from live codebase state:_\n\n${gapContext}`;
 }
 

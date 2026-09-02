@@ -5,7 +5,13 @@ import { existsSync } from 'node:fs';
 import { getForgeDbPath, getConnection } from '../../learning/database.js';
 import { getEvolutionsByStatus } from '../../learning/queries.js';
 import { approveEvolution, rejectEvolution } from '../../learning/evolution-promoter.js';
+import { approveAgent, rejectAgent } from '../../memory/agents.js';
 import type { PendingEvolution } from '../../learning/types.js';
+
+/** True when `err` is `approveEvolution`/`rejectEvolution`'s "no such pending_evolutions row" error. */
+function isNoPendingEvolutionRow(err: unknown): boolean {
+  return err instanceof Error && /^No pending_evolutions row found with id/.test(err.message);
+}
 
 const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SUPERSEDED'] as const;
 type Status = (typeof STATUSES)[number];
@@ -71,46 +77,82 @@ export function registerAgentCommands(program: Command): void {
     });
 
   // ── forge agent approve ───────────────────────────────────────────────────
+  // `pending_evolutions` (behavior-evolution proposals) and `self_created_agents` (whole new
+  // agents FORGE proposed via recursive learning) are two different tables sharing this one CLI
+  // verb — try the evolution row first (the common case), and fall back to a self-created-agent
+  // proposal only when the id isn't a pending_evolutions row at all (never both, so a real
+  // evolution failure — e.g. "already APPROVED" — still reports as itself, not a misleading
+  // "not found" from the fallback).
   agent
     .command('approve')
-    .description('Approve a pending agent proposal and apply its activation (HUMAN_APPROVED)')
-    .argument('<id>', 'pending_evolutions.id')
-    .option('--note <text>', 'optional review note recorded on the decision')
-    .action((id: string, opts: { note?: string }) => {
+    .description('Approve a pending agent proposal (an evolution proposal or a self-created-agent proposal)')
+    .argument('<id>', 'pending_evolutions.id or self_created_agents.id')
+    .option('--note <text>', 'optional review note recorded on the decision (evolution proposals only)')
+    .action(async (id: string, opts: { note?: string }) => {
       const dbPath = requireDb();
       if (!dbPath) return;
       try {
         const db = getConnection(dbPath);
         const result = approveEvolution(db, id, opts.note);
-        console.log(chalk.bold('\n✔ Agent proposal approved\n'));
+        console.log(chalk.bold('\n✔ Evolution proposal approved (pending_evolutions)\n'));
         console.log(`  [${chalk.cyan(result.evolutionType)}] ${result.pendingEvolutionId}`);
         console.log(`    ${result.effectApplied}`);
         console.log('');
       } catch (err) {
-        console.error(chalk.red('✖ Approve failed:'), err instanceof Error ? err.message : err);
-        process.exitCode = 1;
+        if (!isNoPendingEvolutionRow(err)) {
+          console.error(chalk.red('✖ Approve failed:'), err instanceof Error ? err.message : err);
+          process.exitCode = 1;
+          return;
+        }
+        const agentRow = await approveAgent(id);
+        if (!agentRow) {
+          console.error(
+            chalk.red(`✖ Approve failed: "${id}" is neither a pending_evolutions row nor a self_created_agents row.`)
+          );
+          process.exitCode = 1;
+          return;
+        }
+        console.log(chalk.bold('\n✔ Self-created agent proposal approved (self_created_agents)\n'));
+        console.log(`  [${chalk.cyan(agentRow.name)}] ${agentRow.id}`);
+        console.log(`    status: ${agentRow.status} (approved_at: ${agentRow.approved_at})`);
+        console.log('');
       }
     });
 
   // ── forge agent reject ────────────────────────────────────────────────────
   agent
     .command('reject')
-    .description('Reject a pending agent proposal (HUMAN_OVERRIDE_REJECTED)')
-    .argument('<id>', 'pending_evolutions.id')
+    .description('Reject a pending agent proposal (an evolution proposal or a self-created-agent proposal)')
+    .argument('<id>', 'pending_evolutions.id or self_created_agents.id')
     .requiredOption('--reason <text>', 'why this proposal is being rejected (required for the audit trail)')
-    .action((id: string, opts: { reason: string }) => {
+    .action(async (id: string, opts: { reason: string }) => {
       const dbPath = requireDb();
       if (!dbPath) return;
       try {
         const db = getConnection(dbPath);
         const result = rejectEvolution(db, id, opts.reason);
-        console.log(chalk.bold('\n✖ Agent proposal rejected\n'));
+        console.log(chalk.bold('\n✖ Evolution proposal rejected (pending_evolutions)\n'));
         console.log(`  [${chalk.cyan(result.evolutionType)}] ${result.pendingEvolutionId}`);
         console.log(`    reason: ${opts.reason}`);
         console.log('');
       } catch (err) {
-        console.error(chalk.red('✖ Reject failed:'), err instanceof Error ? err.message : err);
-        process.exitCode = 1;
+        if (!isNoPendingEvolutionRow(err)) {
+          console.error(chalk.red('✖ Reject failed:'), err instanceof Error ? err.message : err);
+          process.exitCode = 1;
+          return;
+        }
+        const agentRow = await rejectAgent(id);
+        if (!agentRow) {
+          console.error(
+            chalk.red(`✖ Reject failed: "${id}" is neither a pending_evolutions row nor a self_created_agents row.`)
+          );
+          process.exitCode = 1;
+          return;
+        }
+        console.log(chalk.bold('\n✖ Self-created agent proposal rejected (self_created_agents)\n'));
+        console.log(`  [${chalk.cyan(agentRow.name)}] ${agentRow.id}`);
+        console.log(`    status: ${agentRow.status}  reason: ${opts.reason}`);
+        console.log('');
       }
     });
 }
