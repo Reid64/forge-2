@@ -128,7 +128,16 @@ function baseOptions(cwd: string, entries: QueueEntry[], over: Partial<Phase3Opt
     }),
     runClaudeImpl: async () => claudeOk(),
     runSentinelImpl: async () => passSentinel(),
-    loadGovernanceDocs: async () => ({}),
+    // Non-empty stub content for the pre_build hook's built-in governance_check (Finding I-1 —
+    // now actually fires, reading ctx.governanceDocs instead of the real filesystem): a real
+    // build always has these files, so an empty map here would make every test hit a governance
+    // denial unrelated to what each test actually exercises.
+    loadGovernanceDocs: async () => ({
+      'BLUEPRINT.md': '# Blueprint\n',
+      'SCHEMA_REGISTRY.md': '# Schema Registry\n',
+      'BEHAVIORAL_CONTRACTS.md': '# Behavioral Contracts\n',
+      'CLAUDE.md': '# Claude\n',
+    }),
     updateStateProgress: async () => {},
     writeHaltReport: async () => {},
     createBuild: mem.createBuild,

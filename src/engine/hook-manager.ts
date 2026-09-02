@@ -106,6 +106,14 @@ async function runBuiltinHook(
 
     case 'builtin:post_file_write:tsc_check': {
       const projectPath = String(context['projectPath'] ?? process.cwd());
+      // Absent-target law (same principle as phase4-sentinel.ts's typescript/eslint/build checks,
+      // Finding I-2): no package.json means there is no real TypeScript project here to check —
+      // skip cleanly rather than letting `pnpm tsc` fail on an environmental problem (no
+      // package.json, no node_modules) that has nothing to do with this write's own correctness.
+      if (!existsSync(join(projectPath, 'package.json'))) {
+        log('[post_file_write] no package.json — tsc_check SKIPPED (not a Node project yet)');
+        return { action: 'allow' };
+      }
       log(`[post_file_write] Running tsc --noEmit in ${projectPath}`);
       try {
         execSync('pnpm tsc --noEmit', {
@@ -131,8 +139,19 @@ async function runBuiltinHook(
 
     case 'builtin:pre_build:governance_check': {
       const projectPath = String(context['projectPath'] ?? process.cwd());
+      // When the caller already loaded governance docs (phase3-executor.ts's `ctx.governanceDocs`
+      // — the same injectable, basename-keyed map every other governance-aware check in the
+      // executor reads from), use that instead of a second, redundant, untestable disk read.
+      // Falls back to reading disk directly only when no such map is supplied.
+      const injectedDocs = context['governanceDocs'] as Record<string, string> | undefined;
       const missing: string[] = [];
       for (const doc of REQUIRED_GOVERNANCE_DOCS) {
+        if (injectedDocs) {
+          const base = doc.includes('/') ? doc.slice(doc.lastIndexOf('/') + 1) : doc;
+          const content = injectedDocs[base];
+          if (content === undefined || content.trim() === '') missing.push(doc);
+          continue;
+        }
         const fullPath = join(projectPath, doc);
         if (!existsSync(fullPath)) {
           missing.push(doc);

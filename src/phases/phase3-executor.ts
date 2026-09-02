@@ -989,6 +989,74 @@ async function applyPromoteScratchGate(
 }
 
 /**
+ * Fire the `pre_file_write`/`post_file_write` hook events for real (Finding I-1): the built-in
+ * `middleware_guard`/`governance_gate`/`tsc_check` handlers (hook-manager.ts) were fully
+ * implemented but structurally unreachable — nothing in this codebase ever called
+ * `hookManager.fireEvent('pre_file_write', ...)` or `'post_file_write'`.
+ *
+ * ARCHITECTURAL CONSTRAINT this fix works within, not around: FORGE spawns the `claude` CLI as a
+ * subprocess (`runClaudeImpl`) and that subprocess writes files directly to disk — FORGE has no
+ * interception point for an individual write call, only the AGGREGATE git diff once the whole
+ * subprocess run has already exited (`changed`, computed above via `filesChanged(ctx)`). A literal
+ * "block this specific write before the OS write syscall happens" gate is not achievable without
+ * a different execution architecture (FORGE performing writes itself, or hooking into Claude
+ * Code's own PreToolUse mechanism instead of this HookManager). What IS real and achievable: gate
+ * whether this prompt's already-written changes are ACCEPTED — merged to main and checkpointed —
+ * which is exactly what `applyPromoteScratchGate`'s `proceed` return already gates for a different
+ * check. `pre_file_write` here means "before this write is accepted into the build", not "before
+ * the write syscall" — a deny still has real teeth (blocks the merge, fails the prompt) even
+ * though it fires after the content already landed on disk.
+ */
+async function applyFileWriteGovernanceHooks(
+  ctx: LoopContext,
+  entry: QueueEntry,
+  index: number,
+  changed: { created: string[]; modified: string[] },
+  log: (message: string) => void
+): Promise<{ proceed: boolean; noteSuffix: string }> {
+  const touchedFiles = [...changed.created, ...changed.modified];
+  if (touchedFiles.length === 0) return { proceed: true, noteSuffix: '' };
+
+  const denials: string[] = [];
+  for (const filePath of touchedFiles) {
+    let content: string;
+    try {
+      content = await readFile(join(ctx.projectPath, filePath), 'utf8');
+    } catch {
+      continue; // file no longer readable (e.g. deleted again since the diff) — nothing to check
+    }
+    const results = await ctx.hookManager
+      .fireEvent('pre_file_write', { projectPath: ctx.projectPath, filePath, content })
+      .catch(() => [{ action: 'allow' as const }]);
+    if (results[0]?.action === 'deny') {
+      denials.push(`${filePath}: ${results[0]?.reason ?? 'no reason given'}`);
+    }
+  }
+
+  if (denials.length > 0) {
+    const detail = `pre_file_write hook denied ${denials.length} file(s): ${denials.join(' | ')}`;
+    log(`prompt ${index} '${entry.id}': ${detail}`);
+    return { proceed: false, noteSuffix: ` ${detail}` };
+  }
+
+  // post_file_write (tsc_check) — fired once per prompt, not once per file: it re-checks the
+  // whole project's compile state, not a specific file, so per-file firing would just re-run the
+  // same `pnpm tsc --noEmit` redundantly. Sentinel's own typescript check already ran and passed
+  // by the time execution reaches this gate, so this is expected to be a rare/redundant
+  // confirmation in practice — it still fires for real, rather than staying dead code.
+  const postResults = await ctx.hookManager
+    .fireEvent('post_file_write', { projectPath: ctx.projectPath })
+    .catch(() => [{ action: 'allow' as const }]);
+  if (postResults[0]?.action === 'deny') {
+    const detail = `post_file_write hook denied: ${postResults[0]?.reason ?? 'no reason given'}`;
+    log(`prompt ${index} '${entry.id}': ${detail}`);
+    return { proceed: false, noteSuffix: ` ${detail}` };
+  }
+
+  return { proceed: true, noteSuffix: '' };
+}
+
+/**
  * Best-effort project-boundary scan (Session 5.2 Task 3): claude's print-mode stdout is prose, not
  * a structured tool-call log, so this is a heuristic net over the ONE signal the runner exposes
  * today â€” it is NOT a guarantee every out-of-bounds write is caught. Flags absolute-looking paths
@@ -2256,7 +2324,28 @@ export async function runPhase3Executor(options: Phase3Options): Promise<Phase3R
     }
   }
 
-  if (maxConcurrency <= 1) {
+  // pre_build hook (Finding I-1): verifies required governance docs exist/readable before any
+  // prompt is dispatched. Unlike pre_file_write/post_file_write below (FORGE only ever learns
+  // what an agent wrote AFTER its subprocess exits, via git diff — there is no per-write
+  // interception point), pre_build has an unambiguous "before" moment: nothing has run yet. A
+  // 'deny' halts the whole build before the first prompt, reusing the same halted/haltReason
+  // machinery a mid-build Sentinel failure uses, so it's reported through the normal path (not a
+  // bespoke early return).
+  if (!dryRun) {
+    const preBuildResults = await hookManager
+      .fireEvent('pre_build', { projectPath, governanceDocs: ctx.governanceDocs })
+      .catch(() => [{ action: 'allow' as const }]);
+    if (preBuildResults[0]?.action === 'deny') {
+      halted = true;
+      haltReason = `pre_build hook denied the build: ${preBuildResults[0]?.reason ?? 'no reason given'}`;
+      log(`WARNING: ${haltReason}`);
+    }
+  }
+
+  if (halted) {
+    // pre_build denied — skip both execution paths below entirely; the post-loop result-building
+    // logic further down already handles `halted`/`haltReason` with zero outcomes correctly.
+  } else if (maxConcurrency <= 1) {
   for (let i = 0; i < schedule.order.length; i++) {
     const entry = schedule.order[i];
     if (entry === undefined) continue;
@@ -3627,9 +3716,15 @@ async function executePrompt(
       // this prompt from merging at all rather than merging first and un-merging after.
       const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
       sentinel = promotion.sentinel;
+      const governanceHooks = promotion.proceed
+        ? await applyFileWriteGovernanceHooks(ctx, entry, index, changed, log)
+        : { proceed: true, noteSuffix: '' }; // promote_scratch already failing â€” don't also run hooks
       if (!promotion.proceed) {
         disposition = 'failed';
         note = promotion.noteSuffix.trim();
+      } else if (!governanceHooks.proceed) {
+        disposition = 'failed';
+        note = governanceHooks.noteSuffix.trim();
       } else {
         // i. Merge to main + lightweight checkpoint tag (Contracts 10/11).
         await mergeAndTag(ctx, entry, index, promptExecutionId);
@@ -3678,9 +3773,17 @@ async function executePrompt(
         if (designRecovered) {
           const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
           sentinel = promotion.sentinel;
+          // Recompute changed files fresh: the feedback re-run just spawned a new claude
+          // subprocess, so the outer `changed` (captured before this recovery branch) is stale.
+          const governanceHooks = promotion.proceed
+            ? await applyFileWriteGovernanceHooks(ctx, entry, index, filesChanged(ctx), log)
+            : { proceed: true, noteSuffix: '' };
           if (!promotion.proceed) {
             disposition = 'failed';
             note = promotion.noteSuffix.trim();
+          } else if (!governanceHooks.proceed) {
+            disposition = 'failed';
+            note = governanceHooks.noteSuffix.trim();
           } else {
             await mergeAndTag(ctx, entry, index, promptExecutionId);
             disposition = 'completed';
@@ -3740,9 +3843,17 @@ async function executePrompt(
       if (sentinel.passed === true) {
         const promotion = await applyPromoteScratchGate(ctx, entry, index, sentinel, log);
         sentinel = promotion.sentinel;
+        // Recompute changed files fresh: recovery just re-ran the prompt (possibly more than
+        // once), so the outer `changed` (captured before recovery started) is stale.
+        const governanceHooks = promotion.proceed
+          ? await applyFileWriteGovernanceHooks(ctx, entry, index, filesChanged(ctx), log)
+          : { proceed: true, noteSuffix: '' };
         if (!promotion.proceed) {
           disposition = 'failed';
           note = promotion.noteSuffix.trim();
+        } else if (!governanceHooks.proceed) {
+          disposition = 'failed';
+          note = governanceHooks.noteSuffix.trim();
         } else {
           await mergeAndTag(ctx, entry, index, promptExecutionId);
           disposition = 'completed';
