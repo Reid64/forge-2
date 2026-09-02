@@ -24,6 +24,7 @@ import { basename, extname, join } from 'node:path';
 import { logLine } from './forge-logger.js';
 import { nowIso } from '../memory/index.js';
 import type { TestResult, TestFileResult } from '../types/index.js';
+import { defaultStartDevServer, type DevServerStarter, type PreviewServerHandle } from './live-preview-gate.js';
 
 export type { TestResult, TestFileResult };
 
@@ -33,9 +34,15 @@ const log = logLine('incremental-tester');
 // Phase names that always trigger tests regardless of promptIndex.
 const ALWAYS_RUN_PHASES: readonly string[] = ['integration', 'deploy', 'deployment', 'phase4', 'phase-4'];
 
-// Core routes probed by runSmokeTests (relative paths joined onto SMOKE_BASE_URL).
+// Core routes probed by runSmokeTests (relative paths joined onto the smoke base URL).
 const SMOKE_ROUTES: readonly string[] = ['/', '/login', '/dashboard'];
-const SMOKE_BASE_URL = 'http://localhost:3000';
+// Dedicated port (next free one after the testing-runner throwaway-dev-server convention's
+// 3095-3103 — idempotency/chaos/recovery/cross-browser/cross-device runners), so a per-prompt
+// smoke probe never collides with an operator's own `pnpm dev` that happens to be on 3000.
+const SMOKE_DEV_PORT = 3104;
+const SMOKE_BASE_URL = `http://localhost:${SMOKE_DEV_PORT}`;
+const SMOKE_STARTUP_TIMEOUT_MS = 90_000;
+const SMOKE_POLL_INTERVAL_MS = 1_000;
 const SMOKE_FETCH_TIMEOUT_MS = 5_000;
 
 // ---------------------------------------------------------------------------
@@ -162,8 +169,8 @@ async function buildCheck(projectPath: string): Promise<TestFileResult> {
 }
 
 /** Probe one URL via fetch and return a named check result. Never throws. */
-async function pageLoadCheck(route: string): Promise<TestFileResult> {
-  const url = `${SMOKE_BASE_URL}${route}`;
+async function pageLoadCheck(route: string, baseUrl: string): Promise<TestFileResult> {
+  const url = `${baseUrl}${route}`;
   const start = performance.now();
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(SMOKE_FETCH_TIMEOUT_MS) });
@@ -265,15 +272,55 @@ export function shouldRunTests(promptIndex: number, frequency: number = 10, phas
   return promptIndex > 0 && promptIndex % frequency === 0;
 }
 
+/** Options for {@link runSmokeTests} — everything overridable/injectable (tests). */
+export interface SmokeTestOptions {
+  /** Running app base URL. Default `http://localhost:${SMOKE_DEV_PORT}`. */
+  baseUrl?: string;
+  /**
+   * Whether to boot a dev server before probing pages. Default true. Set false when the app is
+   * already running at `baseUrl` (mirrors accessibility-auditor.ts's/live-preview-gate.ts's
+   * `startServer` option).
+   */
+  startServer?: boolean;
+  /** Dev-server command. Default `pnpm`. */
+  devCommand?: string;
+  /** Dev-server args. Default `['dev', '--port', String(SMOKE_DEV_PORT)]`. */
+  devArgs?: string[];
+  /** How long to wait for the dev server to answer HTTP before giving up (ms). Default 90000. */
+  startupTimeoutMs?: number;
+  /** Readiness poll interval while waiting for the dev server (ms). Default 1000. */
+  pollIntervalMs?: number;
+  /** Override the dev-server starter (tests). Default `defaultStartDevServer` (live-preview-gate.ts). */
+  startDevServer?: DevServerStarter;
+}
+
 /**
  * Minimal smoke suite: compile check + build check + three core page-load probes.
+ *
  * Designed to be fast — pages are probed via a single `fetch` (not Playwright). Run every
  * {@link shouldRunTests} trigger between prompts per Blueprint 2B spec. Always resolves — never
  * throws, never fabricates a pass.
+ *
+ * Boots its own throwaway dev server (Finding E-3): previously the three page-load probes hit
+ * `http://localhost:3000` with no server-start plumbing at all and no relationship to any dev-
+ * server lifecycle — called every 10th prompt during Phase 3 (a phase with no dev server running
+ * at that point; the sibling gates that DO manage a dev server, live-preview-gate.ts/
+ * accessibility-auditor.ts, only run later in Phase 4), so all three probes failed with a
+ * connection error on almost every real build, feeding false "smoke test failed" signals into the
+ * learning database via `recordSmokeTestFailureObserved`. Now mirrors the same own-dev-server
+ * pattern those Phase 4 gates already use, on a dedicated port so it never collides with an
+ * operator's own `pnpm dev`.
  */
-export async function runSmokeTests(projectPath: string): Promise<TestResult> {
+export async function runSmokeTests(projectPath: string, options: SmokeTestOptions = {}): Promise<TestResult> {
   const startMs = performance.now();
   const generatedAt = nowIso();
+  const baseUrl = options.baseUrl ?? SMOKE_BASE_URL;
+  const startServer = options.startServer ?? true;
+  const devCommand = options.devCommand ?? 'pnpm';
+  const devArgs = options.devArgs ?? ['dev', '--port', String(SMOKE_DEV_PORT)];
+  const startupTimeoutMs = options.startupTimeoutMs ?? SMOKE_STARTUP_TIMEOUT_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? SMOKE_POLL_INTERVAL_MS;
+  const startDevServerFn = options.startDevServer ?? defaultStartDevServer;
 
   log('starting smoke suite: compile + build + 3 core page loads');
 
@@ -285,9 +332,32 @@ export async function runSmokeTests(projectPath: string): Promise<TestResult> {
   log('smoke: build check');
   results.push(await buildCheck(projectPath));
 
-  for (const route of SMOKE_ROUTES) {
-    log(`smoke: page load ${SMOKE_BASE_URL}${route}`);
-    results.push(await pageLoadCheck(route));
+  let serverHandle: PreviewServerHandle | null = null;
+  if (!startServer) {
+    log(`smoke: assuming app already running at ${baseUrl} (startServer:false)`);
+    for (const route of SMOKE_ROUTES) {
+      log(`smoke: page load ${baseUrl}${route}`);
+      results.push(await pageLoadCheck(route, baseUrl));
+    }
+  } else {
+    log(`smoke: starting dev server on port ${SMOKE_DEV_PORT} for page-load probes`);
+    const start = await startDevServerFn({ projectPath, command: devCommand, args: devArgs, baseUrl, startupTimeoutMs, pollIntervalMs, log });
+    serverHandle = start.handle;
+    if (!start.ready) {
+      // House rule (never fabricate a pass): a probe that never got to run is reported as
+      // failed, not silently marked green — but with a clearly distinguishing error message
+      // ("dev server" vs. a real page-content problem) so it's diagnosable in the learning DB.
+      log(`smoke: dev server never became ready (${start.detail}) — page-load probes reported failed`);
+      for (const route of SMOKE_ROUTES) {
+        results.push({ file: `page:${route}`, passed: false, duration: 0, output: '', error: `dev server never became ready: ${start.detail}` });
+      }
+    } else {
+      for (const route of SMOKE_ROUTES) {
+        log(`smoke: page load ${baseUrl}${route}`);
+        results.push(await pageLoadCheck(route, baseUrl));
+      }
+    }
+    if (serverHandle) await serverHandle.stop().catch(() => {});
   }
 
   const result = buildResult(results, startMs, generatedAt);
