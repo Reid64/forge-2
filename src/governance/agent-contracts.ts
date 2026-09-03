@@ -146,13 +146,26 @@ const BUILD_AGENT_HOUSEKEEPING_GLOBS = [
  * MINUS {@link BUILD_AGENT_HOUSEKEEPING_GLOBS}, which every prompt is expected to touch and so are
  * carved back out of that governance-doc denial rather than left blocked.
  */
+/**
+ * FINDING I-1c (2026-09-02 audit): two prior commits (6934cac, 68f814a) added
+ * `vitest.config.*`/`package.json`/`pnpm-lock.yaml`/`TOOLCHAIN.md` to `writablePathPatterns` below,
+ * intending to fix reported permission denials for these files. Verified functional no-ops and
+ * removed: `'**\/*'` already matched all four before those commits (`.some()` in
+ * `permission-enforcer.ts` — any matching glob allows), and none of the four ever appeared in
+ * `DEFAULT_SHARED_CANONICAL_GLOBS` (so `deniedPathPatterns` below never blocked them either).
+ * Whatever caused the originally-reported denials was never actually located in this file — if a
+ * real denial recurs for one of these paths, check `engine/governance-gate.ts`'s
+ * `GOVERNANCE_DOC_NAMES` set and `engine/hook-manager.ts`'s `pre_file_write` wiring (currently
+ * dead, Finding I-1) before assuming it's a `writablePathPatterns` gap; this contract was never
+ * the actual blocker.
+ */
 const BUILD_AGENT: AgentContract = {
   id: 'build-agent',
   name: 'Build Agent',
   description:
     'The claude subprocess that produces a prompt\'s actual code/content changes, run once per ' +
     'Phase 3 prompt in the target project root and committed to a feature branch by GitManager.',
-  writablePathPatterns: ['**/*', ...BUILD_AGENT_HOUSEKEEPING_GLOBS, 'vitest.config.*', 'package.json', 'pnpm-lock.yaml', 'TOOLCHAIN.md'],
+  writablePathPatterns: ['**/*', ...BUILD_AGENT_HOUSEKEEPING_GLOBS],
   deniedPathPatterns: DEFAULT_SHARED_CANONICAL_GLOBS.filter((glob) => !BUILD_AGENT_HOUSEKEEPING_GLOBS.includes(glob)),
   writesOutsideProjectRoot: false,
   canInvokeGit: false,

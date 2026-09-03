@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { initializeForgeMemory, getConnection, getForgeDbPath, getMachineId } from '../../learning/database.js';
-import { getGovernanceRules, getPendingEvolutions, getForgeMemory } from '../../learning/queries.js';
+import { getGovernanceRules, getPendingEvolutions, countPendingEvolutions, getForgeMemory } from '../../learning/queries.js';
 import { syncForgeMemory, loadSyncConfig, getLastSyncTimestamp } from '../../learning/sync.js';
 import { VALID_TABLES, type FixPattern } from '../../learning/types.js';
 import { transferKnowledge } from '../../learning/cross-project-transfer.js';
@@ -185,19 +185,25 @@ export function registerLearningCommands(program: Command): void {
   learn
     .command('evolutions')
     .description('List pending self-modification proposals')
-    .action(() => {
+    .option('--limit <n>', 'max proposals to show (default 50; use 0 for unbounded)', '50')
+    .action((opts: { limit: string }) => {
       try {
         const dbPath = getForgeDbPath();
         if (!existsSync(dbPath)) {
           console.log(chalk.yellow('Learning database not found. Run: forge learn init'));
           return;
         }
-        const evolutions = getPendingEvolutions(dbPath);
+        const limitArg = Math.min(1000, Math.max(0, parseInt(opts.limit, 10) || 0));
+        const total = countPendingEvolutions(dbPath);
+        const evolutions = getPendingEvolutions(dbPath, limitArg > 0 ? limitArg : undefined);
         if (evolutions.length === 0) {
           console.log(chalk.gray('No pending evolutions.'));
           return;
         }
-        console.log(chalk.bold(`\n🔄 ${evolutions.length} Pending Evolution Proposals\n`));
+        const header = evolutions.length < total
+          ? `🔄 Showing ${evolutions.length} of ${total} Pending Evolution Proposals (use --limit to see more)`
+          : `🔄 ${evolutions.length} Pending Evolution Proposals`;
+        console.log(chalk.bold(`\n${header}\n`));
         for (const evo of evolutions) {
           const confidenceColor = evo.confidence >= 0.7 ? chalk.green : evo.confidence >= 0.4 ? chalk.yellow : chalk.red;
           console.log(`  [${chalk.cyan(evo.evolution_type.padEnd(10))}] ${evo.proposed_change}`);

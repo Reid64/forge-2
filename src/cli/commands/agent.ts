@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { existsSync } from 'node:fs';
 import { getForgeDbPath, getConnection } from '../../learning/database.js';
-import { getEvolutionsByStatus } from '../../learning/queries.js';
+import { getEvolutionsByStatus, countEvolutionsByStatus } from '../../learning/queries.js';
 import { approveEvolution, rejectEvolution } from '../../learning/evolution-promoter.js';
 import { approveAgent, rejectAgent } from '../../memory/agents.js';
 import type { PendingEvolution } from '../../learning/types.js';
@@ -53,7 +53,8 @@ export function registerAgentCommands(program: Command): void {
     .command('list')
     .description('List agent proposals (defaults to PENDING — the ones awaiting a decision)')
     .option('--status <status>', 'PENDING | APPROVED | REJECTED | SUPERSEDED', 'PENDING')
-    .action((opts: { status: string }) => {
+    .option('--limit <n>', 'max proposals to show (default 50; use 0 for unbounded)', '50')
+    .action((opts: { status: string; limit: string }) => {
       const dbPath = requireDb();
       if (!dbPath) return;
       const status = opts.status.toUpperCase();
@@ -62,13 +63,18 @@ export function registerAgentCommands(program: Command): void {
         process.exitCode = 1;
         return;
       }
+      const limitArg = Math.min(1000, Math.max(0, parseInt(opts.limit, 10) || 0));
       try {
-        const evolutions = getEvolutionsByStatus(status, dbPath);
+        const total = countEvolutionsByStatus(status, dbPath);
+        const evolutions = getEvolutionsByStatus(status, dbPath, limitArg > 0 ? limitArg : undefined);
         if (evolutions.length === 0) {
           console.log(chalk.gray(`No ${status} agent proposals.`));
           return;
         }
-        console.log(chalk.bold(`\n🔄 ${evolutions.length} ${status} Agent Proposal(s)\n`));
+        const header = evolutions.length < total
+          ? `🔄 Showing ${evolutions.length} of ${total} ${status} Agent Proposal(s) (use --limit to see more)`
+          : `🔄 ${evolutions.length} ${status} Agent Proposal(s)`;
+        console.log(chalk.bold(`\n${header}\n`));
         for (const evo of evolutions) printEvolution(evo);
       } catch (err) {
         console.error(chalk.red('✖ Failed to load agent proposals:'), err instanceof Error ? err.message : err);

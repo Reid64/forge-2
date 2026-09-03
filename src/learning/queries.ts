@@ -365,15 +365,34 @@ export function getRelevantSkills(techStackTags: string[], dbPath?: string): Ski
   }
 }
 
-export function getPendingEvolutions(dbPath?: string): PendingEvolution[] {
+/**
+ * `limit` is optional and defaults to unbounded — internal callers (`learning/loops.ts`'s
+ * evolve loop) need the FULL pending set to reason over, not a display-sized page. Only CLI
+ * display callers (`forge learn evolutions`, Finding K-3) pass an explicit `limit`.
+ */
+export function getPendingEvolutions(dbPath?: string, limit?: number): PendingEvolution[] {
   const db = getConnection(dbPath);
   try {
-    return db
-      .prepare(`SELECT * FROM pending_evolutions WHERE status = 'PENDING' ORDER BY confidence DESC`)
-      .all() as PendingEvolution[];
+    const sql = `SELECT * FROM pending_evolutions WHERE status = 'PENDING' ORDER BY confidence DESC` +
+      (limit !== undefined ? ' LIMIT ?' : '');
+    return (limit !== undefined ? db.prepare(sql).all(limit) : db.prepare(sql).all()) as PendingEvolution[];
   } catch (err) {
     console.error('getPendingEvolutions error:', err);
     return [];
+  }
+}
+
+/** Total PENDING row count, independent of any display `limit` — for a "showing X of TOTAL" message. */
+export function countPendingEvolutions(dbPath?: string): number {
+  const db = getConnection(dbPath);
+  try {
+    const row = db.prepare(`SELECT COUNT(*) as count FROM pending_evolutions WHERE status = 'PENDING'`).get() as
+      | { count: number }
+      | undefined;
+    return row?.count ?? 0;
+  } catch (err) {
+    console.error('countPendingEvolutions error:', err);
+    return 0;
   }
 }
 
@@ -401,17 +420,33 @@ export function getEvolutionById(id: string, dbPath?: string): PendingEvolution 
   }
 }
 
+/** `limit` optional/unbounded — see {@link getPendingEvolutions}'s doc comment (Finding K-3). */
 export function getEvolutionsByStatus(
   status: PendingEvolution['status'],
   dbPath?: string,
+  limit?: number,
 ): PendingEvolution[] {
   const db = getConnection(dbPath);
   try {
-    return db
-      .prepare(`SELECT * FROM pending_evolutions WHERE status = ? ORDER BY confidence DESC`)
-      .all(status) as PendingEvolution[];
+    const sql = `SELECT * FROM pending_evolutions WHERE status = ? ORDER BY confidence DESC` +
+      (limit !== undefined ? ' LIMIT ?' : '');
+    return (limit !== undefined ? db.prepare(sql).all(status, limit) : db.prepare(sql).all(status)) as PendingEvolution[];
   } catch (err) {
     console.error('getEvolutionsByStatus error:', err);
     return [];
+  }
+}
+
+/** Total row count for `status`, independent of any display `limit` — for a "showing X of TOTAL" message. */
+export function countEvolutionsByStatus(status: PendingEvolution['status'], dbPath?: string): number {
+  const db = getConnection(dbPath);
+  try {
+    const row = db.prepare(`SELECT COUNT(*) as count FROM pending_evolutions WHERE status = ?`).get(status) as
+      | { count: number }
+      | undefined;
+    return row?.count ?? 0;
+  } catch (err) {
+    console.error('countEvolutionsByStatus error:', err);
+    return 0;
   }
 }

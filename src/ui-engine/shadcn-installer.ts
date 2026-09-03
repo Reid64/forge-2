@@ -2,7 +2,7 @@
  * FORGE 2.0 — ShadcnInstaller (UI Engine).
  *
  * Auto-installs shadcn/ui components into a TARGET project before a component/page/feature
- * prompt executes, so Claude never has to stop mid-build to run `npx shadcn-ui add <x>` itself
+ * prompt executes, so Claude never has to stop mid-build to run `npx shadcn add <x>` itself
  * (and never silently hand-rolls a component shadcn/ui already ships). Scans the assembled
  * prompt text for UI keywords, maps them to known shadcn/ui component names, checks what is
  * already installed in the target project, and installs anything missing.
@@ -29,9 +29,9 @@ export interface ShadcnComponent {
   dependencies: string[];
 }
 
-/** Build the standard `npx shadcn-ui@latest add <name> --yes` command for a component. */
+/** Build the standard `npx shadcn@latest add <name> --yes` command for a component. */
 function addCommandFor(name: string): string {
-  return `npx shadcn-ui@latest add ${name} --yes`;
+  return `npx shadcn@latest add ${name} --yes`;
 }
 
 /**
@@ -146,7 +146,7 @@ const COMPONENT_KEYWORDS: ReadonlyArray<{ keywords: string[]; component: string 
  * `<projectPath>/src/components/ui/` (the default install directory) to determine which
  * components are already present, by filename (each installed component is one `<name>.tsx`
  * file). Returns `[]` when neither `components.json` nor the ui directory exists — a project
- * that has never run `shadcn-ui init` has nothing installed yet, never an error.
+ * that has never run `shadcn init` has nothing installed yet, never an error.
  */
 export function detectInstalledComponents(projectPath: string): string[] {
   const installed = new Set<string>();
@@ -184,7 +184,7 @@ export function detectInstalledComponents(projectPath: string): string[] {
 }
 
 /**
- * Run `npx shadcn-ui@latest add <componentName> --yes` in `projectPath`. Skips (resolves
+ * Run `npx shadcn@latest add <componentName> --yes` in `projectPath`. Skips (resolves
  * immediately, no process spawned) when {@link detectInstalledComponents} already reports the
  * component present. Never rejects — a spawn failure or non-zero exit is logged as a warning and
  * the promise still resolves, matching the never-throw posture of `runClaude`/`buildSkillsContext`
@@ -202,7 +202,7 @@ export function installComponent(projectPath: string, componentName: string): Pr
 
   return new Promise<void>((resolve) => {
     const useShell = process.platform === 'win32';
-    const args = ['shadcn-ui@latest', 'add', componentName, '--yes'];
+    const args = ['shadcn@latest', 'add', componentName, '--yes'];
     log(`installing '${componentName}': npx ${args.join(' ')} (cwd=${projectPath})`);
 
     let child: ReturnType<typeof spawn>;
@@ -233,7 +233,17 @@ export function installComponent(projectPath: string, componentName: string): Pr
 
     child.on('close', (code: number | null) => {
       if (code === 0) {
-        log(`installed '${componentName}'`);
+        // Finding K-4: a zero exit code alone is not proof of a real install — the deprecated
+        // `shadcn-ui@latest` package name was observed to exit 0 and write nothing. Re-check the
+        // filesystem before reporting success.
+        if (detectInstalledComponents(projectPath).includes(componentName)) {
+          log(`installed '${componentName}'`);
+        } else {
+          log(
+            `WARNING: install for '${componentName}' exited 0 but no matching file was found in ` +
+              `components/ui/ afterward — treating as a failed install, not a success`,
+          );
+        }
       } else {
         const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
         log(`WARNING: install for '${componentName}' exited ${code ?? 'null'}${stderr ? ` — ${stderr}` : ''}`);
