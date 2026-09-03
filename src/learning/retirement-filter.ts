@@ -13,7 +13,6 @@
  * the anti-join below uses the real columns rather than those names.
  */
 
-import type { ErrorPattern } from '../types/index.js';
 import { logMemoryWarning, type MemoryDb } from '../memory/client.js';
 
 /**
@@ -28,8 +27,14 @@ import { logMemoryWarning, type MemoryDb } from '../memory/client.js';
  * EXISTS` join computed "surviving" as signatures both present in `error_patterns` AND not
  * retired — so ANY candidate that wasn't already a literal `error_patterns` row got silently
  * dropped as if it had been retired, even though it was never retired at all.
+ *
+ * Generic over any `{ error_signature }`-shaped input (not just full `ErrorPattern` rows) — the
+ * function only ever reads that one field, so a caller with a synthetic/partial candidate (e.g.
+ * `cross-project-transfer.ts`'s retirement check, which only has an insight's evidence-carried
+ * signature, not a real `error_patterns` row) can pass a minimal object instead of fabricating a
+ * fake full `ErrorPattern` via an unsafe cast (Finding F-4).
  */
-export function filterRetiredPatterns(patterns: ErrorPattern[], db: MemoryDb): ErrorPattern[] {
+export function filterRetiredPatterns<T extends { error_signature: string }>(patterns: T[], db: MemoryDb): T[] {
   if (patterns.length === 0) return patterns;
   try {
     const rows = db

@@ -26,7 +26,7 @@
 
 import { basename } from 'node:path';
 
-import type { CrossProjectInsight, ErrorPattern, JsonObject } from '../types/index.js';
+import type { CrossProjectInsight, JsonObject } from '../types/index.js';
 import type { StackFingerprint } from '../tools/stack-detector.js';
 import { logMemoryWarning, type MemoryDb } from '../memory/client.js';
 import { filterRetiredPatterns } from './retirement-filter.js';
@@ -162,8 +162,7 @@ function insightIsRetired(insight: CrossProjectInsight, db: MemoryDb): boolean {
   const evidence = insight.evidence as Record<string, unknown>;
   const errorSignature = typeof evidence['error_signature'] === 'string' ? (evidence['error_signature'] as string) : null;
   if (errorSignature === null) return false;
-  const stub = [{ id: insight.id, error_signature: errorSignature } as unknown as ErrorPattern];
-  return filterRetiredPatterns(stub, db).length === 0;
+  return filterRetiredPatterns([{ error_signature: errorSignature }], db).length === 0;
 }
 
 /** Render the transferred insights as a Markdown block for prompt injection. `''` when empty. */
