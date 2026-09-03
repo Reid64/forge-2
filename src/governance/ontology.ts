@@ -1,6 +1,14 @@
 /**
  * FORGE 2.0 — Governance Ontology.
  *
+ * NOT WIRED (Finding J-1, 2026-09-02 audit): zero importers anywhere in src/ — even
+ * `traceability.ts`, whose header comment claims this module was "added alongside" it, only
+ * mentions ontology.ts in prose, never imports it. `traceability.ts`'s real accessors (backing
+ * `forge trace`) re-derive their shapes ad hoc instead of going through this module's typed
+ * vocabulary. Kept as-is (not deleted) — the entity vocabulary is real and matches
+ * `traceability.ts`'s own query shapes, so wiring it in later means updating `traceability.ts`'s
+ * accessors to return/consume these types, not writing new logic from scratch.
+ *
  * `upgrades/ENGINEERING_COMPLETENESS.md`'s traceability thread (see `traceability.ts`'s header)
  * needs a shared vocabulary of engineering "nouns" — Requirement, Feature, Test, Risk, Decision,
  * Deployment, and so on — so trace/reporting logic can talk about "the entities" instead of

@@ -164,6 +164,15 @@ export async function runRetrofitPipeline(options: RetrofitPipelineOptions): Pro
 
   console.log(`\n${C.bold}${C.green}  QUEUE GENERATED: ${queue.totalPrompts} prompts → ${outPath}/queue.yaml${C.reset}`);
   console.log(`  Tier 1 CRITICAL: ${queue.tiers.critical_fixes} | Tier 2 WARN/FEAT: ${queue.tiers.warn_fixes_and_features} | Tier 3 ENTERPRISE: ${queue.tiers.enterprise_patterns}`);
+  // Finding J-2: retrofit itself never generates code — it only scans, diagnoses, and writes
+  // queue.yaml. Skills-informed code generation (buildSkillsContext) only happens in the
+  // separate `forge build --use-existing-queue` step below; without this explicit next-step
+  // line, a user could easily stop here believing retrofit already did the code generation.
+  console.log(
+    `\n${C.bold}${C.cyan}  NEXT STEP:${C.reset} this queue has not been built yet — no code has been generated. Run:\n` +
+      `    forge build ${projectPath} --use-existing-queue\n` +
+      `  to execute it (this is the step that actually applies project skills and writes code).`
+  );
   } finally {
     releaseTeeLogging();
   }

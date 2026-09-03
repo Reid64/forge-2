@@ -1,4 +1,17 @@
 // FORGE 2.0 - PreCompact Hook: Context State Preservation
+//
+// NOT WIRED (Finding J-1, 2026-09-02 audit): handlePreCompact is only ever re-exported (via
+// learning/integration.ts), never actually called anywhere in src/ — unlike its sibling
+// session-hooks.ts's handleSessionStart/handleSessionEnd, which phase3-executor.ts calls directly
+// at real build lifecycle points. `.forge/hooks.json` declares a PreCompact hook
+// ("precompact-snapshot") whose action references a PowerShell function
+// (`Invoke-PreCompactSnapshot`) that does not exist anywhere in this repo — that hook entry is
+// disconnected from this TS module by name only, not by any real dispatch path. A real fix needs
+// an actual PreCompact trigger to call this from: either a genuine Claude Code PreCompact hook
+// invoking a small `forge internal precompact` CLI entry point that calls handlePreCompact, or
+// dropping the `.forge/hooks.json` entry if PreCompact snapshotting is no longer wanted. This
+// also explains `compact_snapshots` reading 0 rows in `forge health` (Finding C-1): nothing has
+// ever called the function that would populate it.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
