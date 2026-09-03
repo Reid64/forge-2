@@ -1,6 +1,11 @@
 /**
  * FORGE 2.0 — Pass@K Analysis (statistical prompt quality measurement).
  *
+ * ORPHANED (Finding G-1, 2026-09-02 audit): no CLI command or caller wires this in anywhere in
+ * `src/`. The measurement logic is real and complete; it has simply never been exposed via a
+ * `forge` subcommand. Kept as-is — wiring requires a `forge pass-at-k <prompt>` (or similar)
+ * command, which is a scope decision for whoever wants this signal surfaced, not a bug fix.
+ *
  * Measures prompt reliability by executing it k times in isolated git branches and
  * recording compile-gate outcomes. Two key statistics per prompt:
  *   - pass@1: fraction of individual attempts that pass (passCount / k)

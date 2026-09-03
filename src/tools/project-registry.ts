@@ -1,6 +1,10 @@
 /**
  * FORGE 2.0 — Project Registry (cross-build project index).
  *
+ * ORPHANED (Finding G-1, 2026-09-02 audit): nothing registers to it or reads from it anywhere
+ * in src/. The index-maintenance logic is real and complete; no command currently calls it after
+ * a build or reads `~/.forge/projects.json` back for any decision.
+ *
  * Maintains a small JSON index at `~/.forge/projects.json` mapping each project
  * path FORGE has operated on to:
  *   - the `.env` file FORGE resolved for it (so a later run can reuse it),

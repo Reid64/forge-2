@@ -1,6 +1,11 @@
 /**
  * FORGE 2.0 — Telemetry Receiver.
  *
+ * NOT orphaned despite zero in-repo callers (Finding G-1, 2026-09-02 audit, re-confirmed here):
+ * `governance/queue.yaml` documents this as an intentionally standalone-deployable route handler
+ * — it ships as an endpoint inside a FORGE-built target project (wired to that project's own
+ * server), not as something FORGE's own CLI process calls. No wiring gap to fix.
+ *
  * Receives telemetry POSTs from deployed applications (emitted by the in-browser
  * snippet from deploy-agent.ts), validates them, and writes them to the
  * `production_telemetry` table in Build Memory. Critical-severity errors are also

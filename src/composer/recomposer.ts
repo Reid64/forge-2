@@ -1,5 +1,8 @@
 // FORGE 2.0 - Composer: Queue Recomposer
 // After each run: identifies failed prompts, checks for fixes, re-queues with context
+//
+// ORPHANED (Finding G-1, 2026-09-02 audit): called nowhere in src/. Kept as-is — the re-queue-
+// with-fix-context logic is real and complete; no caller currently invokes it after a build run.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';

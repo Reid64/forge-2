@@ -1,5 +1,10 @@
 // FORGE 2.0 - Phase Chain: End-to-End Build Pipeline
 // Chains: Scout -> PRD -> Architect -> Compose -> Execute -> Deploy
+//
+// ORPHANED (Finding G-1, 2026-09-02 audit): zero references anywhere in src/ — superseded by
+// orchestration logic that now lives directly in src/cli/index.ts. Kept for reference rather than
+// deleted; a future consolidation of cli/index.ts's inline chaining back into a dedicated module
+// could revive this instead of reinventing it, but as shipped it is not on any live call path.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';

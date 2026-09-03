@@ -1,4 +1,8 @@
 // FORGE 2.0 - Composer: Adversary Accuracy Tracker
+//
+// ORPHANED (Finding G-1, 2026-09-02 audit): evaluateAdversaryAccuracy is called nowhere in src/.
+// Kept as-is — the fix-vs-dismiss accuracy tracking is real and complete; it just has no caller
+// wiring it into the consensus/adversary review flow yet.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';

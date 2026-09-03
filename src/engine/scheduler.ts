@@ -1,6 +1,16 @@
 /**
  * FORGE 2.0 — Engine: PatternRetirer weekly sweep wiring.
  *
+ * ORPHANED (Finding G-1, 2026-09-02 audit): nothing in `src/` imports or calls this module —
+ * the weekly PatternRetirer sweep this file exists to arm never actually starts in any running
+ * process. FORGE 2.0's CLI is invocation-based, not a long-running daemon, so there is currently
+ * no natural process lifetime for a `node-cron` timer to live in; wiring this in requires either
+ * a `forge daemon`-style long-running command or an external scheduler (cron/Task Scheduler)
+ * invoking a one-shot `forge <sweep-command>` on a cadence instead of this module's in-process
+ * timer. Kept as-is (not deleted) since the sweep logic itself is real and wanted — only the
+ * "who calls this" question is unresolved. This also explains `pattern_retirement_log` reading
+ * 0 rows in `forge health` (Finding C-1): the sweep this file arms has never run.
+ *
  * Registers the PatternRetirer sweep as a `scheduled_tasks` row (`task_type = 'memory_cleanup'`
  * — the closest existing enum fit; SCHEMA_ADDITIONS.md forbids adding a new one) and arms its own
  * `node-cron` timer directly, per `upgrades/LEARNING_BLUEPRINT.md` § node-cron cadence: "separate

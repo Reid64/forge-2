@@ -1,6 +1,11 @@
 /**
  * FORGE 2.0 — Log search (`log-search`).
  *
+ * ORPHANED (Finding G-1, 2026-09-02 audit): not wired to any `forge` subcommand or
+ * `package.json` script — only discoverable by reading source or invoking the guarded CLI at
+ * the bottom of this file directly (`node dist/tools/log-search.js --level error`). The search
+ * logic is real and complete; it just isn't reachable through `forge` itself.
+ *
  * A small, dependency-light reader over the JSON-lines logs FORGE writes (one record per line under
  * `FORGE_LOG_DIR`, default `./logs`). {@link searchLogs} filters by level, module, prompt/build id,
  * a free-text substring and an ISO/epoch date range, returns the matches newest-first, and can
