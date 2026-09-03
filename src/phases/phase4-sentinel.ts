@@ -4019,6 +4019,7 @@ export async function runSentinel(options: SentinelOptions): Promise<SentinelRes
   if (shouldSkipRest()) {
     record(skipRest('schema_drift'));
   } else if (!options.schemaPromptsHaveRun) {
+    log('check 6/7: Schema Drift skipped (no schema prompts have run yet)');
     record(skip('schema_drift', 'no schema prompts have run yet — drift check not applicable'));
   } else {
     log('check 6/7: Schema Drift (extractSchema vs SCHEMA_REGISTRY.md)');

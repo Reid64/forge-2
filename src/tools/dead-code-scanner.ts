@@ -1,4 +1,11 @@
 // Dead Code Scanner — lightweight unused import/variable/export detector
+//
+// INTENTIONALLY SEPARATE from `src/retrofit/dead-code-detector.ts` (Finding B-6): this module is
+// the live, mid-build Sentinel gate signal (`phase3-executor.ts`/`phase4-sentinel.ts` call it
+// during/after a real build) with an auto-fix path for unused imports; the retrofit module is the
+// standalone `forge analyze`/`forge retrofit` deep-analysis detector, run independently of any
+// build. See the note atop `dead-code-detector.ts` for the full rationale — this is a deliberate
+// scope split, not drift to consolidate.
 
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, relative, extname } from 'node:path';
@@ -39,6 +46,7 @@ export interface FixResult {
   filesModified: number;
   importsRemoved: number;
   modifiedFiles: string[];
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +402,7 @@ export async function autoFixImports(projectPath: string): Promise<FixResult> {
   let filesModified = 0;
   let importsRemoved = 0;
   const modifiedFiles: string[] = [];
+  const warnings: string[] = [];
 
   for (const abs of files) {
     let content: string;
@@ -411,12 +420,14 @@ export async function autoFixImports(projectPath: string): Promise<FixResult> {
       filesModified++;
       importsRemoved += removed;
       modifiedFiles.push(relative(projectPath, abs).replace(/\\/g, '/'));
-    } catch {
-      // skip files we can't write
+    } catch (error) {
+      warnings.push(
+        `Failed to write ${relative(projectPath, abs).replace(/\\/g, '/')}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
-  return { filesModified, importsRemoved, modifiedFiles };
+  return { filesModified, importsRemoved, modifiedFiles, warnings };
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
 // best-effort Build Memory persistence (Contract 4).
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { DeadCodeDetector, type DeadCodeFinding } from './dead-code-detector.js';
@@ -47,21 +48,65 @@ const COVERAGE_WEIGHT: Record<CoverageBaselineFinding['priority'], number> = {
   low: 0,
 };
 
-/** 100 minus every finding's weighted severity, clamped to [0, 100] and rounded to 2 decimals. */
-function computeHealthScore(input: {
-  deadCode: DeadCodeFinding[];
-  orphanedRoutes: OrphanedRouteFinding[];
-  schemaDrift: SchemaDriftFinding[];
-  dependencies: DependencyFinding[];
-  coverage: CoverageBaselineFinding[];
-}): number {
+const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx)$/;
+const WALK_EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '.forge', 'coverage']);
+
+/**
+ * Counts source files under `<projectPath>/src` (or the project root, if there's no `src` dir)
+ * so {@link computeHealthScore} can normalize raw finding counts by codebase size — a codebase
+ * with 10x the files should not be penalized 10x as hard for the same finding *density*.
+ */
+function countSourceFiles(projectPath: string): number {
+  const root = join(projectPath, 'src');
+  let count = 0;
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!WALK_EXCLUDE_DIRS.has(entry.name)) walk(join(dir, entry.name));
+      } else if (SOURCE_FILE_RE.test(entry.name)) {
+        count++;
+      }
+    }
+  };
+  walk(root);
+  return count;
+}
+
+/**
+ * 100 minus every finding's weighted severity, NORMALIZED by codebase size (findings-per-100-
+ * source-files, not a raw count) so the score reflects finding *density* rather than sheer
+ * codebase size — without normalization, any codebase past a few hundred files guarantees a
+ * floor-of-0 score regardless of whether it's actually healthy (Finding B-5). The floor is
+ * extended to -50 (rather than clamping at 0) so a codebase whose normalized deduction still
+ * exceeds 100 can be told apart from one that barely does — "0" stopped being a single
+ * indistinguishable bucket for "bad" and "catastrophic."
+ */
+function computeHealthScore(
+  projectPath: string,
+  input: {
+    deadCode: DeadCodeFinding[];
+    orphanedRoutes: OrphanedRouteFinding[];
+    schemaDrift: SchemaDriftFinding[];
+    dependencies: DependencyFinding[];
+    coverage: CoverageBaselineFinding[];
+  },
+): number {
   let deductions = 0;
   deductions += input.deadCode.length * DEAD_CODE_WEIGHT;
   deductions += input.orphanedRoutes.length * ORPHANED_ROUTE_WEIGHT;
   for (const f of input.schemaDrift) deductions += SCHEMA_DRIFT_WEIGHT[f.severity];
   for (const f of input.dependencies) deductions += DEPENDENCY_WEIGHT[f.findingType];
   for (const f of input.coverage) deductions += COVERAGE_WEIGHT[f.priority];
-  return Math.max(0, Math.round((100 - deductions) * 100) / 100);
+
+  const fileCount = Math.max(1, countSourceFiles(projectPath));
+  const normalizedDeductions = (deductions / fileCount) * 100;
+  return Math.max(-50, Math.min(100, Math.round((100 - normalizedDeductions) * 100) / 100));
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +126,7 @@ export async function runDeepAnalysis(projectPath: string): Promise<DeepAnalysis
   const dependencies = await new DependencyAuditor().audit(projectPath);
   const coverage = await new CoverageBaseline().analyze(projectPath);
 
-  const healthScore = computeHealthScore({ deadCode, orphanedRoutes, schemaDrift, dependencies, coverage });
+  const healthScore = computeHealthScore(projectPath, { deadCode, orphanedRoutes, schemaDrift, dependencies, coverage });
 
   return {
     projectPath,

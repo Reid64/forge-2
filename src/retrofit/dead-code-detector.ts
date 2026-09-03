@@ -6,6 +6,16 @@
 // importing file. Read-only against the target project — the only write this module performs
 // is the best-effort Build Memory persistence step (`dead_code_findings`), which never throws
 // (Contract 4 — a Build Memory failure degrades to stateless mode, it does not halt the caller).
+//
+// INTENTIONALLY SEPARATE from `src/tools/dead-code-scanner.ts` (Finding B-6): that module is a
+// point-in-time, single-run scanner invoked mid-build by `phase3-executor.ts`/`phase4-sentinel.ts`
+// as a live Sentinel gate signal (and offers an auto-fix path for unused imports); this module is
+// the standalone `forge analyze`/`forge retrofit` deep-analysis detector, run independently of any
+// build, with its own persistence and cross-run history. Different heuristics are an accepted
+// consequence of different jobs (one gates a build in progress, one audits a codebase at rest) —
+// not a bug to reconcile into one shared implementation. A finding disagreeing between the two is
+// expected, not a defect; if the two implementations ever need to agree exactly, that's a reason
+// to extract a genuinely shared core, not to delete either caller's specialization.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
