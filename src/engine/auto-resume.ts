@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import { parseQueueYaml, type Phase3Result } from '../phases/phase3-executor.js';
 import { queueShortHash } from '../tools/queue-versioning.js';
-import { BuildMemory, nowIso } from '../memory/index.js';
+import { BuildMemory, logMemoryWarning, nowIso } from '../memory/index.js';
 import type { BuildRun } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,11 @@ async function getMostRecentBuild(projectName: string): Promise<BuildRun | null>
   try {
     const builds = await BuildMemory.builds.getBuildsByProject(projectName);
     return builds && builds.length > 0 ? (builds[0] ?? null) : null;
-  } catch {
+  } catch (err) {
+    // Finding G-3 (LOW): a persistent Build Memory outage during --auto-resume previously left
+    // zero trace of why resume fell back to the state-file parse — degrade-to-fallback is still
+    // correct (Contract 4), but it should be visible, not silent.
+    logMemoryWarning('getMostRecentBuild', err);
     return null;
   }
 }
@@ -86,7 +90,9 @@ async function getDbLastCompleted(buildId: string): Promise<number | null> {
     if (!prompts || prompts.length === 0) return null;
     const completedIndices = prompts.filter((p) => p.status === 'completed').map((p) => p.prompt_index);
     return completedIndices.length > 0 ? Math.max(...completedIndices) : null;
-  } catch {
+  } catch (err) {
+    // Finding G-3 (LOW) — see getMostRecentBuild's identical note above.
+    logMemoryWarning('getDbLastCompleted', err);
     return null;
   }
 }

@@ -49,7 +49,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load as parseYaml } from 'js-yaml';
 
-import { nowIso } from '../memory/index.js';
+import { nowIso, logMemoryWarning } from '../memory/index.js';
 import BuildMemory from '../memory/index.js';
 import {
   DEFAULT_PROVIDERS,
@@ -212,7 +212,10 @@ export function buildMemoryFreeTierStore(getEnv: (n: string) => string | undefin
       let events: Awaited<ReturnType<typeof BuildMemory.telemetry.getEventsByProject>> = null;
       try {
         events = await BuildMemory.telemetry.getEventsByProject(scope);
-      } catch {
+      } catch (err) {
+        // Finding G-3 (LOW): degrade-to-empty is correct (Contract 4), but a persistent Build
+        // Memory outage should leave a trace, not be indistinguishable from "no usage recorded."
+        logMemoryWarning('buildMemoryFreeTierStore.loadDay', err);
         events = null;
       }
       if (!events) return [];

@@ -60,7 +60,7 @@ import {
   type ProviderName,
 } from '../engine/provider-router.js';
 import type { ModelRequest } from '../phases/phase1a-prd.js';
-import { BuildMemory, nowIso } from '../memory/index.js';
+import { BuildMemory, logMemoryWarning, nowIso } from '../memory/index.js';
 import { logLine } from './forge-logger.js';
 import type {
   Json,
@@ -1135,7 +1135,10 @@ const defaultConsensusEventReader: ConsensusEventReader = async (projectName) =>
         (d): d is JsonObject =>
           !!d && typeof d === 'object' && !Array.isArray(d) && (d as JsonObject).kind === 'consensus_validator'
       );
-  } catch {
+  } catch (err) {
+    // Finding G-3 (LOW): degrade-to-empty is correct (Contract 4), but a persistent Build Memory
+    // outage should leave a trace, not be indistinguishable from "no consensus events recorded."
+    logMemoryWarning('defaultConsensusEventReader', err);
     return [];
   }
 };
